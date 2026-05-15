@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable jsdoc/require-jsdoc */
+import { getClientRequestUrl } from '~/utils/client-request-url'
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
@@ -79,7 +80,7 @@ const refresh = async () => {
       return
     }
 
-    const response = await fetch(endpoint.value)
+    const response = await fetch(getClientRequestUrl(endpoint.value))
     if (!response.ok) {
       items.value = []
       return

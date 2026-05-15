@@ -18,6 +18,12 @@
       ],
       "@gcs-ssc/extensions/nuxt": [
         "../../packages/gcs-ssc-extensions/src/nuxt.ts"
+      ],
+      "~/*": [
+        "../../app/*"
+      ],
+      "@/*": [
+        "../../app/*"
       ]
     },
     "allowImportingTsExtensions": true,

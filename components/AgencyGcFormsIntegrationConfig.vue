@@ -1,5 +1,7 @@
 <script setup lang="ts">
 /* eslint-disable jsdoc/require-jsdoc */
+import { throwFetchResponseError } from '~/utils/fetch-error'
+import { getClientRequestUrl } from '~/utils/client-request-url'
 import { onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { GcsExtensionJsonConfig, GcsResolvedExtension } from '@gcs-ssc/extensions'
@@ -97,7 +99,7 @@ const credentialEndpoint = `/api/extensions/gcs-gcforms-integration/agencies/${a
 const refreshCredentials = async () => {
   try {
     isLoadingCredentials.value = true
-    const response = await fetch(credentialEndpoint)
+    const response = await fetch(getClientRequestUrl(credentialEndpoint))
     if (!response.ok) {
       credentials.value = []
       return
@@ -113,7 +115,7 @@ const saveCredential = async () => {
   try {
     isSavingCredential.value = true
     statusMessage.value = ''
-    const response = await fetch(credentialEndpoint, {
+    const response = await fetch(getClientRequestUrl(credentialEndpoint), {
       method: 'POST',
       headers: {
         'content-type': 'application/json'
@@ -121,7 +123,7 @@ const saveCredential = async () => {
       body: JSON.stringify(credentialForm.value)
     })
     if (!response.ok) {
-      throw new Error('failed')
+      await throwFetchResponseError(response)
     }
 
     credentialForm.value.key = ''
@@ -137,11 +139,11 @@ const saveCredential = async () => {
 const deleteCredential = async (credentialId: string) => {
   try {
     statusMessage.value = ''
-    const response = await fetch(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`, {
+    const response = await fetch(getClientRequestUrl(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`), {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error('failed')
+      await throwFetchResponseError(response)
     }
     statusMessage.value = tLocal('deleted')
     await refreshCredentials()

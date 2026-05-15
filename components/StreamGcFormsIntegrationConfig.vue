@@ -1,5 +1,7 @@
 <script setup lang="ts">
 /* eslint-disable jsdoc/require-jsdoc */
+import { throwFetchResponseError } from '~/utils/fetch-error'
+import { getClientRequestUrl } from '~/utils/client-request-url'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { nanoid } from 'nanoid'
@@ -223,7 +225,7 @@ const setMappingValue = <K extends keyof GcsGcFormsFieldMapping>(
 }
 
 const postJson = async (path: string, body?: unknown): Promise<unknown> => {
-  const response = await fetch(`/api/extensions/gcs-gcforms-integration${path}`, {
+  const response = await fetch(getClientRequestUrl(`/api/extensions/gcs-gcforms-integration${path}`), {
     method: 'POST',
     headers: {
       'content-type': 'application/json'
@@ -232,17 +234,17 @@ const postJson = async (path: string, body?: unknown): Promise<unknown> => {
   })
 
   if (!response.ok) {
-    throw new Error(tLocal('failed'))
+    await throwFetchResponseError(response)
   }
 
   return await response.json() as unknown
 }
 
 const getJson = async (path: string): Promise<unknown> => {
-  const response = await fetch(`/api/extensions/gcs-gcforms-integration${path}`)
+  const response = await fetch(getClientRequestUrl(`/api/extensions/gcs-gcforms-integration${path}`))
 
   if (!response.ok) {
-    throw new Error(tLocal('failed'))
+    await throwFetchResponseError(response)
   }
 
   return await response.json() as unknown
@@ -268,7 +270,7 @@ const refreshCredentials = async () => {
     return
   }
 
-  const response = await fetch(`/api/extensions/gcs-gcforms-integration/agencies/${agencyId}/credentials`)
+  const response = await fetch(getClientRequestUrl(`/api/extensions/gcs-gcforms-integration/agencies/${agencyId}/credentials`))
   if (!response.ok) {
     credentials.value = []
     return
