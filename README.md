@@ -6,7 +6,7 @@ This extension connects GC Forms templates and submissions to configured GCS fie
 
 GC Forms private API keys are stored through the agency extension UI. The private key is encrypted in the host-managed `extensions.secret_entry` table and is never returned to the browser after saving. Stream configuration stores only the selected `credentialId`, form ID, identity provider URL, support settings, and mappings.
 
-The server requires `GCS_EXTENSION_SECRETS_KEY` to be configured with a base64-encoded 32-byte encryption key before credentials can be saved or used.
+The server requires `GCS_EXTENSION_SECRETS_KEY` to be configured with a base64-encoded 32-byte encryption key before credentials can be saved or used in production. Local development may use the host seed's fixed dev key so the seeded GC Forms demo credential works after a clean database reset.
 
 ## Template Shape Guard
 

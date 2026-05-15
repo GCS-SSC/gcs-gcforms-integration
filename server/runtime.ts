@@ -88,21 +88,27 @@ const jsonbValue = (value: unknown) =>
     ? null
     : sql`${JSON.stringify(value)}::jsonb`
 
+const DEV_EXTENSION_SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
+
 export const getGcFormsSecretRootKey = (): string => {
   const runtimeConfig = typeof useRuntimeConfig === 'function' ? useRuntimeConfig() : {}
   const key = runtimeConfig.extensionSecretsEncryptionKey ?? process.env.GCS_EXTENSION_SECRETS_KEY
-  if (!key) {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_SECRET_ROOT_KEY_MISSING',
-      message: {
-        en: 'The server encryption key for extension credentials is not configured.',
-        fr: 'La cle de chiffrement serveur pour les justificatifs d extension n est pas configuree.'
-      }
-    })
+  if (key) {
+    return key
   }
 
-  return key
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+    return DEV_EXTENSION_SECRETS_KEY
+  }
+
+  throw createGcsExtensionUserError({
+    statusCode: 400,
+    code: 'GCS_GCFORMS_SECRET_ROOT_KEY_MISSING',
+    message: {
+      en: 'The server encryption key for extension credentials is not configured.',
+      fr: 'La cle de chiffrement serveur pour les justificatifs d extension n est pas configuree.'
+    }
+  })
 }
 
 export const getGcFormsCredential = async (
