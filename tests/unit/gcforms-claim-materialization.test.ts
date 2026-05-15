@@ -235,9 +235,17 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
+    CREATE TABLE "Agency_Fiscal_Year" (
+      id bigserial PRIMARY KEY,
+      egcs_ay_fiscalyeardisplay varchar(20) NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
     CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (
       id bigserial PRIMARY KEY,
       egcs_fc_fundingagreement bigint NOT NULL,
+      egcs_fc_fiscalyear bigint NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -354,15 +362,30 @@ const seedBaseData = async () => {
     ])
     .execute()
   await db
+    .insertInto('Agency_Fiscal_Year')
+    .values([
+      {
+        id: '401',
+        egcs_ay_fiscalyeardisplay: '2025-2026'
+      },
+      {
+        id: '402',
+        egcs_ay_fiscalyeardisplay: '2026-2027'
+      }
+    ])
+    .execute()
+  await db
     .insertInto('Funding_Case_Agreement_Budget_Fiscal_Year')
     .values([
       {
         id: '501',
-        egcs_fc_fundingagreement: '101'
+        egcs_fc_fundingagreement: '101',
+        egcs_fc_fiscalyear: '401'
       },
       {
         id: '502',
-        egcs_fc_fundingagreement: '102'
+        egcs_fc_fundingagreement: '102',
+        egcs_fc_fiscalyear: '402'
       }
     ])
     .execute()
@@ -561,6 +584,35 @@ describe('GC Forms claim materialization', () => {
       .selectAll()
       .executeTakeFirstOrThrow()
     expect(claim.egcs_fc_fundingagreement).toBe(101)
+  })
+
+  it('accepts fiscal year display labels and fiscal-year month labels', async () => {
+    await seedMappings(claimMappings)
+
+    const result = await materialize(claimMappings, claimValues.map(value => {
+      if (value.destinationPath === 'egcs_fc_fiscalyear') {
+        return { ...value, value: '2025-2026' }
+      }
+      if (value.destinationPath === 'egcs_fc_periodstart') {
+        return { ...value, value: 'April' }
+      }
+      if (value.destinationPath === 'egcs_fc_periodend') {
+        return { ...value, value: 'June' }
+      }
+
+      return value
+    }))
+
+    expect(result.status).toBe('created')
+    const claim = await db
+      .selectFrom('Funding_Case_Agreement_Claim')
+      .selectAll()
+      .executeTakeFirstOrThrow()
+    expect(claim).toEqual(expect.objectContaining({
+      egcs_fc_fiscalyear: 501,
+      egcs_fc_periodstart: 0,
+      egcs_fc_periodend: 2
+    }))
   })
 
   it('does not create duplicate claims or links for a rerun of the same submission', async () => {

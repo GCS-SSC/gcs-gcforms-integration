@@ -175,6 +175,7 @@ export const GcsGcFormsStreamConfigSchema = z.object({
   projectIdentifier: OptionalStringSchema,
   contactEmail: OptionalStringSchema,
   preferredLanguage: z.enum(['en', 'fr']).default('en'),
+  confirmSubmissions: z.boolean().default(false),
   mappings: z.array(GcsGcFormsFieldMappingSchema).default([])
 })
 
@@ -336,13 +337,48 @@ export const parseGcFormsStreamConfig = (config: GcsExtensionJsonConfig | unknow
 export const parseGcFormsAgencyConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsAgencyConfig =>
   GcsGcFormsAgencyConfigSchema.parse(config ?? {})
 
-export const normalizeGcFormsAnswers = (answers: string | Record<string, unknown>): Record<string, unknown> => {
-  if (typeof answers === 'string') {
+export const normalizeGcFormsAnswers = (
+  answers: string | Record<string, unknown>,
+  template?: unknown
+): Record<string, unknown> => {
+  const rawAnswers = (() => {
+    if (typeof answers !== 'string') {
+      return answers
+    }
+
     const parsed = JSON.parse(answers) as unknown
     return isRecord(parsed) ? parsed : {}
+  })()
+
+  if (!template) {
+    return rawAnswers
   }
 
-  return answers
+  const parsedTemplate = GcFormsFormTemplateSchema.parse(template)
+  const aliases = new Map<string, string>()
+  const visit = (element: GcFormsTemplateElement) => {
+    const id = String(element.id)
+    const questionId = stringProperty(element.properties, ['questionId', 'apiQuestionId', 'apiId'])
+    if (questionId) {
+      aliases.set(id, questionId)
+    }
+    for (const child of childElements(element)) {
+      visit(child)
+    }
+  }
+
+  for (const element of parsedTemplate.elements) {
+    visit(element)
+  }
+
+  const normalized: Record<string, unknown> = { ...rawAnswers }
+  for (const [id, questionId] of aliases) {
+    if (Object.hasOwn(rawAnswers, id) && !Object.hasOwn(normalized, questionId)) {
+      normalized[questionId] = rawAnswers[id]
+    }
+  }
+
+  return normalized
 }
 
 const coerceMappedValue = (value: unknown, transform: GcsGcFormsTransform): JsonValue => {

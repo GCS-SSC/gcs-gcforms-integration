@@ -22,6 +22,12 @@ export interface GcFormsIntegrationHostDatabase {
   'Funding_Case_Agreement_Budget_Fiscal_Year': {
     id: Generated<string>
     egcs_fc_fundingagreement: string
+    egcs_fc_fiscalyear: string
+    _deleted: Generated<boolean>
+  }
+  'Agency_Fiscal_Year': {
+    id: Generated<string>
+    egcs_ay_fiscalyeardisplay: string
     _deleted: Generated<boolean>
   }
   'Funding_Case_Agreement_Budget_Line_Item': {

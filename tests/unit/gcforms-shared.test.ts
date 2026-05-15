@@ -177,10 +177,47 @@ describe('GC Forms shared mapping utilities', () => {
       identityProviderUrl: '',
       preferredLanguage: 'en',
       mappings: []
-    })).toEqual({
+    })).toMatchObject({
       formId: 'form-1',
+      confirmSubmissions: false,
       preferredLanguage: 'en',
       mappings: []
     })
+  })
+
+  it('normalizes numeric answer keys to template question ids', () => {
+    const answers = normalizeGcFormsAnswers(JSON.stringify({
+      '1': 'AGR-0001',
+      '2': '2025-2026'
+    }), {
+      elements: [
+        {
+          id: 1,
+          type: 'textField',
+          properties: {
+            questionId: 'agreement_number'
+          }
+        },
+        {
+          id: 2,
+          type: 'dropdown',
+          properties: {
+            questionId: 'fiscal_year'
+          }
+        }
+      ]
+    })
+
+    expect(answers).toEqual({
+      '1': 'AGR-0001',
+      '2': '2025-2026',
+      agreement_number: 'AGR-0001',
+      fiscal_year: '2025-2026'
+    })
+  })
+
+  it('parses confirm submissions stream config with a disabled default', () => {
+    expect(parseGcFormsStreamConfig({}).confirmSubmissions).toBe(false)
+    expect(parseGcFormsStreamConfig({ confirmSubmissions: true }).confirmSubmissions).toBe(true)
   })
 })

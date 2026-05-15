@@ -83,6 +83,21 @@ const CLAIM_LINE_ITEM_REQUIRED_PATHS = [
   'egcs_fc_currency'
 ] as const
 
+const FISCAL_YEAR_MONTHS = [
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'january',
+  'february',
+  'march'
+]
+
 export const getGcFormsDestinationOwnerType = (entity: GcsDestinationEntity): DestinationOwnerType => {
   const ownerTypes: Record<GcsDestinationEntity, DestinationOwnerType> = {
     agreement: 'fundingcaseagreement',
@@ -210,6 +225,21 @@ const requiredInteger = (value: JsonValue | undefined): number | null => {
   return parsed
 }
 
+const requiredFiscalYearMonthIndex = (value: JsonValue | undefined): number | null => {
+  const parsed = requiredInteger(value)
+  if (parsed !== null) {
+    return parsed
+  }
+
+  if (!hasPresentValue(value)) {
+    return null
+  }
+
+  const normalized = String(value).trim().toLowerCase()
+  const index = FISCAL_YEAR_MONTHS.indexOf(normalized)
+  return index === -1 ? null : index
+}
+
 const requiredBoolean = (value: JsonValue | undefined): boolean | null => {
   if (!hasPresentValue(value)) {
     return null
@@ -249,6 +279,37 @@ const claimLineItemFieldValue = (
   path: typeof CLAIM_LINE_ITEM_REQUIRED_PATHS[number]
 ): JsonValue | undefined => mappedValueForPath(values, CLAIM_LINE_ITEM_ENTITY, path)?.value
 
+const resolveClaimFiscalYearId = async (
+  rawDb: unknown,
+  agreementId: string,
+  fiscalYearValue: string
+): Promise<string | null> => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  if (/^\d+$/.test(fiscalYearValue)) {
+    const fiscalYear = await db
+      .selectFrom('Funding_Case_Agreement_Budget_Fiscal_Year')
+      .select('id')
+      .where('id', '=', fiscalYearValue)
+      .where('egcs_fc_fundingagreement', '=', agreementId)
+      .where('_deleted', '=', false)
+      .executeTakeFirst()
+
+    return fiscalYear ? String(fiscalYear.id) : null
+  }
+
+  const fiscalYear = await db
+    .selectFrom('Funding_Case_Agreement_Budget_Fiscal_Year')
+    .innerJoin('Agency_Fiscal_Year', 'Agency_Fiscal_Year.id', 'Funding_Case_Agreement_Budget_Fiscal_Year.egcs_fc_fiscalyear')
+    .select('Funding_Case_Agreement_Budget_Fiscal_Year.id as id')
+    .where('Funding_Case_Agreement_Budget_Fiscal_Year.egcs_fc_fundingagreement', '=', agreementId)
+    .where('Agency_Fiscal_Year.egcs_ay_fiscalyeardisplay', '=', fiscalYearValue)
+    .where('Funding_Case_Agreement_Budget_Fiscal_Year._deleted', '=', false)
+    .where('Agency_Fiscal_Year._deleted', '=', false)
+    .executeTakeFirst()
+
+  return fiscalYear ? String(fiscalYear.id) : null
+}
+
 const prepareClaimInput = async (
   rawDb: unknown,
   input: ClaimMaterializationInput,
@@ -274,13 +335,13 @@ const prepareClaimInput = async (
   }
 
   const agreementNumber = requiredString(claimFieldValue(values, CLAIM_AGREEMENT_NUMBER_PATH))
-  const fiscalYearId = requiredString(claimFieldValue(values, 'egcs_fc_fiscalyear'))
+  const fiscalYearValue = requiredString(claimFieldValue(values, 'egcs_fc_fiscalyear'))
   const isFinalForYear = requiredBoolean(claimFieldValue(values, 'egcs_fc_isfinalforyear'))
-  const periodStart = requiredInteger(claimFieldValue(values, 'egcs_fc_periodstart'))
-  const periodEnd = requiredInteger(claimFieldValue(values, 'egcs_fc_periodend'))
+  const periodStart = requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodstart'))
+  const periodEnd = requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodend'))
   const receivedDate = requiredDate(claimFieldValue(values, 'egcs_fc_receiveddate'))
 
-  if (!agreementNumber || !fiscalYearId || isFinalForYear === null || periodStart === null || periodEnd === null || !receivedDate) {
+  if (!agreementNumber || !fiscalYearValue || isFinalForYear === null || periodStart === null || periodEnd === null || !receivedDate) {
     return {
       issues: [createIssue(
         input.mappings,
@@ -344,15 +405,9 @@ const prepareClaimInput = async (
     }
   }
 
-  const fiscalYear = await db
-    .selectFrom('Funding_Case_Agreement_Budget_Fiscal_Year')
-    .select('id')
-    .where('id', '=', fiscalYearId)
-    .where('egcs_fc_fundingagreement', '=', String(agreement.id))
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
+  const fiscalYearId = await resolveClaimFiscalYearId(rawDb, String(agreement.id), fiscalYearValue)
 
-  if (!fiscalYear) {
+  if (!fiscalYearId) {
     return {
       issues: [createIssue(
         input.mappings,

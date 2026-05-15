@@ -1,4 +1,5 @@
 /* eslint-disable jsdoc/require-jsdoc */
+import { sql } from 'kysely'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
@@ -81,6 +82,11 @@ type ExtensionRouteEvent = H3Event & {
 
 const maybeString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const jsonbValue = (value: unknown) =>
+  value === null || value === undefined
+    ? null
+    : sql`${JSON.stringify(value)}::jsonb`
 
 export const getGcFormsSecretRootKey = (): string => {
   const runtimeConfig = typeof useRuntimeConfig === 'function' ? useRuntimeConfig() : {}
@@ -392,7 +398,7 @@ export const ensureIntegration = async (
         destination_path: mapping.destinationPath,
         transform: mapping.transform,
         required: mapping.required,
-        default_value: mapping.defaultValue === undefined ? null : mapping.defaultValue as never,
+        default_value: jsonbValue(mapping.defaultValue) as never,
         on_missing: mapping.onMissing,
         on_invalid: mapping.onInvalid
       })))
@@ -585,7 +591,8 @@ export const syncStream = async (
           throw new Error('GC Forms checksum verification failed')
         }
 
-        const answers = normalizeGcFormsAnswers(decrypted.answers)
+        const answers = normalizeGcFormsAnswers(decrypted.answers, currentTemplate)
+        answers.__gcforms_created_at = new Date(decrypted.createdAt).toISOString()
         const preview = previewGcFormsMapping(answers, config.mappings)
         const materialization = preview.issues.length === 0
           ? await materializeGcFormsClaimSubmission(rawDb, {
@@ -650,6 +657,9 @@ export const syncStream = async (
         if (issues.length > 0) {
           problemCount += 1
         } else {
+          if (config.confirmSubmissions) {
+            await client.confirmSubmission(submission.name, decrypted.confirmationCode)
+          }
           importedCount += 1
         }
       } catch (error: unknown) {

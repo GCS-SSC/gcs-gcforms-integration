@@ -40,6 +40,7 @@ const labels = {
     projectIdentifier: 'Project identifier',
     contactEmail: 'Support contact email',
     preferredLanguage: 'Support language',
+    confirmSubmissions: 'Confirm submissions after successful sync',
     template: 'Form fields',
     refreshTemplate: 'Refresh template',
     sync: 'Sync submissions',
@@ -76,6 +77,7 @@ const labels = {
     projectIdentifier: 'Identifiant du projet',
     contactEmail: 'Courriel de soutien',
     preferredLanguage: 'Langue de soutien',
+    confirmSubmissions: 'Confirmer les soumissions apres une synchronisation reussie',
     template: 'Champs du formulaire',
     refreshTemplate: 'Actualiser le modele',
     sync: 'Synchroniser les soumissions',
@@ -143,6 +145,7 @@ watch(localConfig, value => {
     projectIdentifier: value.projectIdentifier ?? null,
     contactEmail: value.contactEmail ?? null,
     preferredLanguage: value.preferredLanguage,
+    confirmSubmissions: value.confirmSubmissions,
     mappings: value.mappings as unknown as JsonValue
   }
 }, { deep: true })
@@ -401,6 +404,11 @@ onMounted(async () => {
         <UFormField :label="tLocal('contactEmail')" class="md:col-span-2">
           <UInput v-model="localConfig.contactEmail" type="email" />
         </UFormField>
+        <div class="md:col-span-2">
+          <UCheckbox
+            v-model="localConfig.confirmSubmissions"
+            :label="tLocal('confirmSubmissions')" />
+        </div>
       </div>
       <p v-if="statusMessage" class="text-sm text-muted">
         {{ statusMessage }}

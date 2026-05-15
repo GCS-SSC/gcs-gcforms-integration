@@ -14,6 +14,12 @@ The stream configuration flow stores the GC Forms template shape when the templa
 
 To accept a changed GC Forms form, refresh the template from the stream configuration UI, review and update mappings as needed, save the stream configuration, and run sync again.
 
+## Submission Confirmation
+
+Stream configuration includes a `confirmSubmissions` switch. It defaults to `false`, so sync reads new GC Forms submissions without calling the GC Forms confirm endpoint. This keeps local/demo submissions available for repeated testing.
+
+When `confirmSubmissions` is `true`, sync confirms a GC Forms submission only after mapping and materialization complete without issues. Confirmation may remove the submission from the GC Forms "new submissions" queue depending on the GC Forms deployment.
+
 ## Current Materializer
 
 The supported host materializer is claims-first:
@@ -39,10 +45,10 @@ Example: an agreement number field on GC Forms creates a draft claim under that 
 Required claim mappings:
 
 - `claim.egcs_fc_fundingagreement`: agreement number, not agreement id.
-- `claim.egcs_fc_fiscalyear`: agreement budget fiscal year id.
+- `claim.egcs_fc_fiscalyear`: agreement budget fiscal year id or fiscal-year display label such as `2026-2027`.
 - `claim.egcs_fc_isfinalforyear`: boolean.
-- `claim.egcs_fc_periodstart`: month number from `0` to `11`.
-- `claim.egcs_fc_periodend`: month number from `0` to `11`.
+- `claim.egcs_fc_periodstart`: month number from `0` to `11`, or a fiscal-year month label from April through March.
+- `claim.egcs_fc_periodend`: month number from `0` to `11`, or a fiscal-year month label from April through March.
 - `claim.egcs_fc_receiveddate`: received date.
 
 Optional claim line-item mappings become active when at least one line-item value is present. When used, all of these are required:
