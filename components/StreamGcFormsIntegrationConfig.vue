@@ -44,6 +44,13 @@ const labels = {
     refreshTemplate: 'Refresh template',
     sync: 'Sync submissions',
     mappings: 'Mappings',
+    failedMaterializations: 'Failed materializations',
+    noFailedMaterializations: 'No failed claim materializations need review.',
+    refreshFailures: 'Refresh failures',
+    submission: 'Submission',
+    formAgreement: 'Form agreement',
+    gcsAgreement: 'GCS agreement',
+    match: 'Match',
     addMapping: 'Add mapping',
     source: 'GC Forms field',
     destinationEntity: 'GCS destination',
@@ -73,6 +80,13 @@ const labels = {
     refreshTemplate: 'Actualiser le modele',
     sync: 'Synchroniser les soumissions',
     mappings: 'Correspondances',
+    failedMaterializations: 'Materialisations echouees',
+    noFailedMaterializations: 'Aucune materialisation de reclamation echouee ne necessite de verification.',
+    refreshFailures: 'Actualiser les echecs',
+    submission: 'Soumission',
+    formAgreement: 'Entente du formulaire',
+    gcsAgreement: 'Entente GCS',
+    match: 'Associer',
     addMapping: 'Ajouter une correspondance',
     source: 'Champ GC Forms',
     destinationEntity: 'Destination GCS',
@@ -100,7 +114,26 @@ const fieldCatalog: Ref<GcFormsFieldCatalogItem[]> = ref([])
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
 const isRefreshingTemplate: Ref<boolean> = ref(false)
 const isSyncing: Ref<boolean> = ref(false)
+const isLoadingMaterializationFailures: Ref<boolean> = ref(false)
+const resolvingSubmissionId: Ref<string | null> = ref(null)
 const statusMessage: Ref<string> = ref('')
+const failedMaterializations: Ref<GcFormsMaterializationFailureItem[]> = ref([])
+const agreementOptions: Ref<GcFormsAgreementOption[]> = ref([])
+const selectedAgreements: Ref<Record<string, string>> = ref({})
+
+interface GcFormsAgreementOption {
+  id: string
+  agreementNumber: string
+  label: string
+}
+
+interface GcFormsMaterializationFailureItem {
+  submissionId: string
+  submissionName: string
+  agreementNumber: string | null
+  selectedAgreementId: string | null
+  lastError: string | null
+}
 
 watch(localConfig, value => {
   config.value = {
@@ -154,6 +187,11 @@ const sourceOptions = computed(() => fieldCatalog.value.map(field => ({
   value: field.questionId
 })))
 
+const agreementSelectOptions = computed(() => agreementOptions.value.map(agreement => ({
+  label: agreement.label,
+  value: agreement.id
+})))
+
 const mappingRows = computed(() => localConfig.value.mappings)
 
 const addMapping = () => {
@@ -197,6 +235,30 @@ const postJson = async (path: string, body?: unknown): Promise<unknown> => {
   return await response.json() as unknown
 }
 
+const getJson = async (path: string): Promise<unknown> => {
+  const response = await fetch(`/api/extensions/gcs-gcforms-integration${path}`)
+
+  if (!response.ok) {
+    throw new Error(tLocal('failed'))
+  }
+
+  return await response.json() as unknown
+}
+
+const setSelectedAgreement = (submissionId: string, agreementId: unknown) => {
+  if (agreementId === null || agreementId === undefined || String(agreementId).trim().length === 0) {
+    const next = { ...selectedAgreements.value }
+    delete next[submissionId]
+    selectedAgreements.value = next
+    return
+  }
+
+  selectedAgreements.value = {
+    ...selectedAgreements.value,
+    [submissionId]: String(agreementId)
+  }
+}
+
 const refreshCredentials = async () => {
   if (!agencyId) {
     credentials.value = []
@@ -231,6 +293,7 @@ const syncSubmissions = async () => {
     isSyncing.value = true
     statusMessage.value = tLocal('loading')
     await postJson(`/streams/${streamId}/sync`)
+    await refreshMaterializationFailures()
     statusMessage.value = tLocal('success')
   } catch {
     statusMessage.value = tLocal('failed')
@@ -239,8 +302,51 @@ const syncSubmissions = async () => {
   }
 }
 
+const refreshMaterializationFailures = async () => {
+  try {
+    isLoadingMaterializationFailures.value = true
+    const response = await getJson(`/streams/${streamId}/materialization-failures`) as {
+      items?: GcFormsMaterializationFailureItem[]
+      agreements?: GcFormsAgreementOption[]
+    }
+    failedMaterializations.value = response.items ?? []
+    agreementOptions.value = response.agreements ?? []
+    selectedAgreements.value = failedMaterializations.value.reduce<Record<string, string>>((accumulator, item) => {
+      if (item.selectedAgreementId) {
+        accumulator[item.submissionId] = item.selectedAgreementId
+      }
+      return accumulator
+    }, {})
+  } catch {
+    failedMaterializations.value = []
+    agreementOptions.value = []
+  } finally {
+    isLoadingMaterializationFailures.value = false
+  }
+}
+
+const resolveMaterializationFailure = async (submission: GcFormsMaterializationFailureItem) => {
+  const agreementId = selectedAgreements.value[submission.submissionId]
+  if (!agreementId) {
+    return
+  }
+
+  try {
+    resolvingSubmissionId.value = submission.submissionId
+    statusMessage.value = tLocal('loading')
+    await postJson(`/streams/${streamId}/materialization-failures/${submission.submissionId}/agreement`, { agreementId })
+    await refreshMaterializationFailures()
+    statusMessage.value = tLocal('success')
+  } catch {
+    statusMessage.value = tLocal('failed')
+  } finally {
+    resolvingSubmissionId.value = null
+  }
+}
+
 onMounted(async () => {
   await refreshCredentials()
+  await refreshMaterializationFailures()
 })
 </script>
 
@@ -299,6 +405,80 @@ onMounted(async () => {
       <p v-if="statusMessage" class="text-sm text-muted">
         {{ statusMessage }}
       </p>
+    </section>
+
+    <section class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-highlighted">
+          {{ tLocal('failedMaterializations') }}
+        </h3>
+        <UButton
+          icon="i-lucide-refresh-cw"
+          color="neutral"
+          variant="outline"
+          class="cursor-default"
+          :label="tLocal('refreshFailures')"
+          :loading="isLoadingMaterializationFailures"
+          @click="refreshMaterializationFailures" />
+      </div>
+      <div v-if="failedMaterializations.length === 0" class="text-sm text-muted">
+        {{ tLocal('noFailedMaterializations') }}
+      </div>
+      <div v-else class="overflow-hidden border-y border-default">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-muted/40 text-muted">
+            <tr>
+              <th class="px-3 py-2 font-medium">
+                {{ tLocal('submission') }}
+              </th>
+              <th class="px-3 py-2 font-medium">
+                {{ tLocal('formAgreement') }}
+              </th>
+              <th class="px-3 py-2 font-medium">
+                {{ tLocal('gcsAgreement') }}
+              </th>
+              <th class="px-3 py-2 font-medium">
+                {{ tLocal('actions') }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="submission in failedMaterializations"
+              :key="submission.submissionId"
+              class="border-t border-default align-top">
+              <td class="px-3 py-2">
+                <div class="font-medium text-highlighted">
+                  {{ submission.submissionName }}
+                </div>
+                <div v-if="submission.lastError" class="mt-1 text-xs text-muted">
+                  {{ submission.lastError }}
+                </div>
+              </td>
+              <td class="px-3 py-2 font-mono text-xs text-muted">
+                {{ submission.agreementNumber ?? '-' }}
+              </td>
+              <td class="px-3 py-2">
+                <USelect
+                  :model-value="selectedAgreements[submission.submissionId]"
+                  :items="agreementSelectOptions"
+                  @update:model-value="(value: unknown) => setSelectedAgreement(submission.submissionId, value)" />
+              </td>
+              <td class="px-3 py-2">
+                <UButton
+                  icon="i-lucide-link"
+                  color="primary"
+                  variant="solid"
+                  class="cursor-default"
+                  :label="tLocal('match')"
+                  :disabled="!selectedAgreements[submission.submissionId]"
+                  :loading="resolvingSubmissionId === submission.submissionId"
+                  @click="resolveMaterializationFailure(submission)" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section class="space-y-4">

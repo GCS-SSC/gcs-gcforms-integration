@@ -192,7 +192,7 @@ export interface GcsGcFormsMappingIssue {
   mappingId: string
   sourceQuestionId: string
   destinationPath: string
-  code: 'missing_required_value' | 'invalid_value' | 'materialization_failed'
+  code: 'missing_required_value' | 'invalid_value' | 'agreement_not_found' | 'materialization_failed'
   message: string
 }
 

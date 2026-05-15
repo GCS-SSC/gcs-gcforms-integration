@@ -158,6 +158,17 @@ export interface GcFormsIntegrationHostDatabase {
     value: JsonValue | null
     _deleted: Generated<boolean>
   }
+  'extensions.gcs_gcforms_materialization_overrides': {
+    id: Generated<string>
+    submission_id: string
+    destination_entity: string
+    destination_path: string
+    owner_type: string
+    owner_id: string
+    created_at: Generated<Date | string>
+    updated_at: Date | string | null
+    _deleted: Generated<boolean>
+  }
   'extensions.secret_entry': {
     id: Generated<string>
     extension_key: string

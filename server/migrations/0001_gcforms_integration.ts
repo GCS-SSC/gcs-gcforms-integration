@@ -159,5 +159,24 @@ export default defineGcsExtensionMigration({
       .addColumn('value', 'jsonb')
       .addColumn('_deleted', 'boolean', col => col.defaultTo(false).notNull())
       .execute()
+
+    await db.schema
+      .createTable('extensions.gcs_gcforms_materialization_overrides')
+      .addColumn('id', 'bigserial', col => col.primaryKey())
+      .addColumn('submission_id', 'bigint', col => col.notNull().references('extensions.gcs_gcforms_submissions.id').onDelete('restrict'))
+      .addColumn('destination_entity', 'varchar(60)', col => col.notNull())
+      .addColumn('destination_path', 'varchar(240)', col => col.notNull())
+      .addColumn('owner_type', 'varchar(80)', col => col.notNull())
+      .addColumn('owner_id', 'bigint', col => col.notNull())
+      .addColumn('created_at', 'timestamptz', col => col.defaultTo(sql`now()`).notNull())
+      .addColumn('updated_at', 'timestamptz')
+      .addColumn('_deleted', 'boolean', col => col.defaultTo(false).notNull())
+      .execute()
+
+    await sql`
+      CREATE UNIQUE INDEX gcs_gcforms_materialization_override_target
+      ON extensions.gcs_gcforms_materialization_overrides (submission_id, destination_entity, destination_path)
+      WHERE _deleted = false
+    `.execute(db)
   }
 })

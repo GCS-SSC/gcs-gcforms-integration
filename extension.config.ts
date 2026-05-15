@@ -110,6 +110,16 @@ export default defineGcsExtension({
       path: './server/api/submissions.get.ts'
     },
     {
+      route: '/streams/[streamId]/materialization-failures',
+      method: 'get',
+      path: './server/api/materialization-failures.get.ts'
+    },
+    {
+      route: '/streams/[streamId]/materialization-failures/[submissionId]/agreement',
+      method: 'post',
+      path: './server/api/materialization-failure-agreement.post.ts'
+    },
+    {
       route: '/streams/[streamId]/sync',
       method: 'post',
       path: './server/api/sync.post.ts'

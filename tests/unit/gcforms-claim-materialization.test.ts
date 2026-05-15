@@ -322,6 +322,19 @@ const createSchema = async () => {
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_materialization_overrides (
+      id bigserial PRIMARY KEY,
+      submission_id bigint NOT NULL,
+      destination_entity varchar(60) NOT NULL,
+      destination_path varchar(240) NOT NULL,
+      owner_type varchar(80) NOT NULL,
+      owner_id bigint NOT NULL,
+      created_at timestamptz DEFAULT now() NOT NULL,
+      updated_at timestamptz,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
 }
 
 const seedBaseData = async () => {
@@ -518,6 +531,36 @@ describe('GC Forms claim materialization', () => {
       })
     ])
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+  })
+
+  it('uses a manual agreement override when GC Forms agreement number does not match the stream', async () => {
+    await seedMappings(claimMappings)
+    await db
+      .insertInto('extensions.gcs_gcforms_materialization_overrides')
+      .values({
+        submission_id: '901',
+        destination_entity: 'claim',
+        destination_path: 'egcs_fc_fundingagreement',
+        owner_type: 'fundingcaseagreement',
+        owner_id: '101'
+      })
+      .execute()
+
+    const result = await materialize(claimMappings, claimValues.map(value =>
+      value.destinationPath === 'egcs_fc_fundingagreement'
+        ? { ...value, value: 'AGR-MISSING' }
+        : value
+    ))
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'created',
+      claimId: '1'
+    }))
+    const claim = await db
+      .selectFrom('Funding_Case_Agreement_Claim')
+      .selectAll()
+      .executeTakeFirstOrThrow()
+    expect(claim.egcs_fc_fundingagreement).toBe(101)
   })
 
   it('does not create duplicate claims or links for a rerun of the same submission', async () => {

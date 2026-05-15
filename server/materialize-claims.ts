@@ -61,10 +61,12 @@ export interface ClaimMaterializationResult {
 const CLAIM_ENTITY: GcsDestinationEntity = 'claim'
 const CLAIM_LINE_ITEM_ENTITY: GcsDestinationEntity = 'claim_line_item'
 
+const AGREEMENT_OWNER_TYPE: DestinationOwnerType = 'fundingcaseagreement'
 const CLAIM_OWNER_TYPE: DestinationOwnerType = 'fundingcaseagreementclaim'
 const CLAIM_LINE_ITEM_OWNER_TYPE: DestinationOwnerType = 'fundingcaseagreementclaimlineitem'
 
-const CLAIM_AGREEMENT_NUMBER_PATH = 'egcs_fc_fundingagreement'
+export const CLAIM_AGREEMENT_NUMBER_PATH = 'egcs_fc_fundingagreement'
+export const CLAIM_AGREEMENT_DESTINATION_PATH = `${CLAIM_ENTITY}.${CLAIM_AGREEMENT_NUMBER_PATH}`
 const CLAIM_REQUIRED_PATHS = [
   CLAIM_AGREEMENT_NUMBER_PATH,
   'egcs_fc_fiscalyear',
@@ -302,13 +304,31 @@ const prepareClaimInput = async (
     }
   }
 
-  const agreement = await db
-    .selectFrom('Funding_Case_Agreement_Profile')
-    .select('id')
-    .where('egcs_fc_transferpaymentstream', '=', input.streamId)
-    .where('egcs_fc_agreementnumber', '=', agreementNumber)
+  const agreementOverride = await db
+    .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+    .select('owner_id')
+    .where('submission_id', '=', input.submissionId)
+    .where('destination_entity', '=', CLAIM_ENTITY)
+    .where('destination_path', '=', CLAIM_AGREEMENT_NUMBER_PATH)
+    .where('owner_type', '=', AGREEMENT_OWNER_TYPE)
     .where('_deleted', '=', false)
     .executeTakeFirst()
+
+  const agreement = agreementOverride
+    ? await db
+        .selectFrom('Funding_Case_Agreement_Profile')
+        .select(['id', 'egcs_fc_agreementnumber'])
+        .where('id', '=', String(agreementOverride.owner_id))
+        .where('egcs_fc_transferpaymentstream', '=', input.streamId)
+        .where('_deleted', '=', false)
+        .executeTakeFirst()
+    : await db
+        .selectFrom('Funding_Case_Agreement_Profile')
+        .select(['id', 'egcs_fc_agreementnumber'])
+        .where('egcs_fc_transferpaymentstream', '=', input.streamId)
+        .where('egcs_fc_agreementnumber', '=', agreementNumber)
+        .where('_deleted', '=', false)
+        .executeTakeFirst()
 
   if (!agreement) {
     return {
@@ -316,8 +336,10 @@ const prepareClaimInput = async (
         input.mappings,
         CLAIM_ENTITY,
         CLAIM_AGREEMENT_NUMBER_PATH,
-        'invalid_value',
-        'Agreement number could not be resolved in the configured transfer payment stream.'
+        agreementOverride ? 'invalid_value' : 'agreement_not_found',
+        agreementOverride
+          ? 'Selected agreement is no longer available in the configured transfer payment stream.'
+          : 'Agreement number could not be resolved in the configured transfer payment stream.'
       )]
     }
   }
@@ -347,7 +369,7 @@ const prepareClaimInput = async (
   return {
     claim: {
       agreementId: String(agreement.id),
-      agreementNumber,
+      agreementNumber: String(agreement.egcs_fc_agreementnumber),
       agreementMappingId: agreementMapping ? agreementMapping.id : '',
       fiscalYearId,
       isFinalForYear,
