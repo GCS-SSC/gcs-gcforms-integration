@@ -11,6 +11,7 @@ import {
   DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
   GCFORMS_EXTENSION_KEY,
   GcFormsPrivateApiKeySchema,
+  gcFormsTemplateShapesEqual,
   normalizeGcFormsAnswers,
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
@@ -489,6 +490,41 @@ export const refreshTemplate = async (
   }
 }
 
+const assertGcFormsTemplateShapeUnchanged = async (
+  db: GcFormsIntegrationDb,
+  connectionId: string,
+  currentTemplate: unknown
+) => {
+  const stored = await db
+    .selectFrom('extensions.gcs_gcforms_templates')
+    .select('template')
+    .where('connection_id', '=', connectionId)
+    .where('_deleted', '=', false)
+    .executeTakeFirst()
+
+  if (!stored) {
+    throw createGcsExtensionUserError({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_TEMPLATE_NOT_REVIEWED',
+      message: {
+        en: 'Refresh and review the GC Forms template before syncing submissions.',
+        fr: 'Actualisez et verifiez le modele GC Forms avant de synchroniser les soumissions.'
+      }
+    })
+  }
+
+  if (!gcFormsTemplateShapesEqual(stored.template, currentTemplate)) {
+    throw createGcsExtensionUserError({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
+      message: {
+        en: 'The GC Forms template has changed since it was last reviewed. Refresh the template, review the mappings, save the stream configuration, and sync again.',
+        fr: 'Le modele GC Forms a change depuis sa derniere verification. Actualisez le modele, verifiez les correspondances, enregistrez la configuration du volet, puis synchronisez de nouveau.'
+      }
+    })
+  }
+}
+
 export const syncStream = async (
   rawDb: unknown,
   streamId: string
@@ -496,8 +532,10 @@ export const syncStream = async (
   const db = asGcFormsIntegrationDb(rawDb)
   const config = await getStreamConfig(rawDb as HostDb, streamId)
   const connection = await ensureConnection(rawDb, streamId, config)
-  const integration = await ensureIntegration(rawDb, streamId, String(connection.id), config)
   const client = await createConfiguredClient(rawDb, streamId, config)
+  const currentTemplate = await client.getFormTemplate()
+  await assertGcFormsTemplateShapeUnchanged(db, String(connection.id), currentTemplate)
+  const integration = await ensureIntegration(rawDb, streamId, String(connection.id), config)
 
   const run = await db
     .insertInto('extensions.gcs_gcforms_import_runs')

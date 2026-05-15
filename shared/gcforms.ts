@@ -104,6 +104,16 @@ export interface GcFormsFieldCatalogItem {
   required: boolean
 }
 
+export interface GcFormsTemplateShapeElement {
+  id: string
+  questionId: string
+  type: string
+  required: boolean
+  tags: string[]
+  choices: JsonValue[]
+  children: GcFormsTemplateShapeElement[]
+}
+
 export const GcsDestinationEntitySchema = z.enum([
   'agreement',
   'proponent',
@@ -227,6 +237,39 @@ const childElements = (element: GcFormsTemplateElement): GcFormsTemplateElement[
   return []
 }
 
+const normalizeJsonValue = (value: unknown): JsonValue => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeJsonValue(item))
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.keys(value)
+      .sort()
+      .map(key => [key, normalizeJsonValue(value[key])])) as JsonValue
+  }
+
+  return String(value)
+}
+
+const choicesProperty = (properties: Record<string, unknown> | undefined): JsonValue[] => {
+  const rawChoices = properties?.choices
+  if (!Array.isArray(rawChoices)) {
+    return []
+  }
+
+  return rawChoices.map(choice => normalizeJsonValue(choice))
+}
+
+const stableStringify = (value: unknown): string => JSON.stringify(normalizeJsonValue(value))
+
 export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalogItem[] => {
   const parsed = GcFormsFormTemplateSchema.parse(template)
   const fields: GcFormsFieldCatalogItem[] = []
@@ -260,6 +303,32 @@ export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalog
 
   return fields
 }
+
+export const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplateShapeElement[] => {
+  const parsed = GcFormsFormTemplateSchema.parse(template)
+
+  const visit = (element: GcFormsTemplateElement): GcFormsTemplateShapeElement => {
+    const properties = element.properties
+    const id = String(element.id)
+    const questionId = stringProperty(properties, ['questionId', 'apiQuestionId', 'apiId']) || id
+    const validation = isRecord(properties?.validation) ? properties.validation : {}
+
+    return {
+      id,
+      questionId,
+      type: element.type,
+      required: validation.required === true,
+      tags: tagsProperty(properties).sort(),
+      choices: choicesProperty(properties),
+      children: childElements(element).map(child => visit(child))
+    }
+  }
+
+  return parsed.elements.map(element => visit(element))
+}
+
+export const gcFormsTemplateShapesEqual = (left: unknown, right: unknown): boolean =>
+  stableStringify(normalizeGcFormsTemplateShape(left)) === stableStringify(normalizeGcFormsTemplateShape(right))
 
 export const parseGcFormsStreamConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsStreamConfig =>
   GcsGcFormsStreamConfigSchema.parse(config ?? {})

@@ -1,12 +1,18 @@
 # GC Forms Integration Extension
 
-This extension connects GC Forms templates and submissions to configured GCS field mappings. It is currently hosted in the main application repository, but is intended to move to its own repository and be brought back as a submodule like the other GCS extensions.
+This extension connects GC Forms templates and submissions to configured GCS field mappings.
 
 ## Credentials
 
 GC Forms private API keys are stored through the agency extension UI. The private key is encrypted in the host-managed `extensions.secret_entry` table and is never returned to the browser after saving. Stream configuration stores only the selected `credentialId`, form ID, identity provider URL, support settings, and mappings.
 
 The server requires `GCS_EXTENSION_SECRETS_KEY` to be configured with a base64-encoded 32-byte encryption key before credentials can be saved or used.
+
+## Template Shape Guard
+
+The stream configuration flow stores the GC Forms template shape when the template is refreshed. Sync checks the live GC Forms template before reading submissions. If the shape changed since the last reviewed refresh, sync stops with `GCS_GCFORMS_TEMPLATE_CHANGED` and does not fetch or materialize submissions.
+
+To accept a changed GC Forms form, refresh the template from the stream configuration UI, review and update mappings as needed, save the stream configuration, and run sync again.
 
 ## Current Materializer
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  gcFormsTemplateShapesEqual,
   normalizeGcFormsAnswers,
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
@@ -67,6 +68,51 @@ describe('GC Forms shared mapping utilities', () => {
         label_fr: 'Montant'
       })
     ])
+  })
+
+  it('compares the stored form shape independently of non-shape labels', () => {
+    const baseTemplate = {
+      elements: [
+        {
+          id: 1,
+          type: 'textField',
+          properties: {
+            questionId: 'agreement_id',
+            titleEn: 'Agreement',
+            validation: { required: true }
+          }
+        }
+      ]
+    }
+    const relabelledTemplate = {
+      elements: [
+        {
+          id: 1,
+          type: 'textField',
+          properties: {
+            questionId: 'agreement_id',
+            titleEn: 'Agreement number',
+            validation: { required: true }
+          }
+        }
+      ]
+    }
+    const changedTemplate = {
+      elements: [
+        {
+          id: 1,
+          type: 'number',
+          properties: {
+            questionId: 'agreement_id',
+            titleEn: 'Agreement',
+            validation: { required: true }
+          }
+        }
+      ]
+    }
+
+    expect(gcFormsTemplateShapesEqual(baseTemplate, relabelledTemplate)).toBe(true)
+    expect(gcFormsTemplateShapesEqual(baseTemplate, changedTemplate)).toBe(false)
   })
 
   it('previews mapped values and reports user-correctable mapping issues', () => {
