@@ -77,7 +77,7 @@ afterEach(async () => {
 })
 
 describe('GC Forms materialization failure queue', () => {
-  it('lists unresolved agreement failures with stream agreement options and selected overrides', async () => {
+  it('lists unresolved failures with stream agreement options and selected overrides', async () => {
     await db
       .insertInto('Funding_Case_Agreement_Profile')
       .values([
@@ -157,14 +157,20 @@ describe('GC Forms materialization failure queue', () => {
 
     const result = await listClaimMaterializationFailures(db, '31')
 
-    expect(result.items).toEqual([
-      expect.objectContaining({
-        submissionId: '901',
-        submissionName: 'submission-1',
-        agreementNumber: 'AGR-MISSING',
-        selectedAgreementId: '101'
-      })
-    ])
+    expect(result.items).toHaveLength(2)
+    expect(result.items).toContainEqual(expect.objectContaining({
+      submissionId: '901',
+      submissionName: 'submission-1',
+      agreementNumber: 'AGR-MISSING',
+      selectedAgreementId: '101'
+    }))
+    expect(result.items).toContainEqual(expect.objectContaining({
+      submissionId: '902',
+      submissionName: 'submission-2',
+      agreementNumber: null,
+      selectedAgreementId: null,
+      lastError: 'Claim fiscal year is not valid for the resolved agreement.'
+    }))
     expect(result.agreements).toEqual([
       {
         id: '101',

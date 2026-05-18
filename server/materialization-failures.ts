@@ -109,12 +109,6 @@ const mappedValues = (value: JsonValue | null): GcsGcFormsMappedValue[] => {
   return values
 }
 
-const hasAgreementResolutionIssue = (issues: GcsGcFormsMappingIssue[]): boolean =>
-  issues.some(issue =>
-    issue.destinationPath === CLAIM_AGREEMENT_DESTINATION_PATH
-    && (issue.code === 'agreement_not_found' || issue.message.includes('Agreement number could not be resolved'))
-  )
-
 const mappedAgreementNumber = (values: GcsGcFormsMappedValue[]): string | null => {
   const mapped = values.find(value =>
     value.destinationEntity === CLAIM_ENTITY
@@ -206,17 +200,16 @@ export const listClaimMaterializationFailures = async (
     .orderBy('updated_at', 'desc')
     .execute() as SubmissionFailureRow[]
 
-  const unresolvedRows = rows
+  const failedRows = rows
     .map(row => ({
       row,
       issues: mappingIssues(row.mapping_issues),
       values: mappedValues(row.mapped_values)
     }))
-    .filter(item => hasAgreementResolutionIssue(item.issues))
 
-  const overrides = await selectedAgreementOverrides(rawDb, unresolvedRows.map(item => String(item.row.id)))
+  const overrides = await selectedAgreementOverrides(rawDb, failedRows.map(item => String(item.row.id)))
   const agreements = await streamAgreements(rawDb, streamId)
-  const items: GcFormsMaterializationFailureItem[] = unresolvedRows.map(item => {
+  const items: GcFormsMaterializationFailureItem[] = failedRows.map(item => {
     const submissionId = String(item.row.id)
     const createdAt = item.row.created_at instanceof Date
       ? item.row.created_at.toISOString()
@@ -342,6 +335,7 @@ export const resolveClaimMaterializationFailure = async (
     streamId,
     integrationId,
     submissionId,
+    submissionUuid: submission.submission_name,
     mappings: streamConfig.mappings,
     mappedValues: mappedValues(submission.mapped_values)
   })

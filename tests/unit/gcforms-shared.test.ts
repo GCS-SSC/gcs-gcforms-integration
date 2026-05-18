@@ -5,7 +5,8 @@ import {
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
-  previewGcFormsMapping
+  previewGcFormsMapping,
+  resolveGcFormsClaimFormId
 } from '../../shared/gcforms'
 
 describe('GC Forms shared mapping utilities', () => {
@@ -161,28 +162,94 @@ describe('GC Forms shared mapping utilities', () => {
     ])
   })
 
+  it('previews dynamic row claim line items as aligned mapped arrays', () => {
+    const config = parseGcFormsStreamConfig({
+      preferredLanguage: 'en',
+      mappings: [
+        {
+          id: 'submitted-line',
+          sourceQuestionId: 'submitted_line_item',
+          destinationEntity: 'claim_line_item',
+          destinationPath: 'egcs_fc_submittedlineitem',
+          transform: 'string',
+          required: true,
+          onMissing: 'block',
+          onInvalid: 'block'
+        },
+        {
+          id: 'submitted-amount',
+          sourceQuestionId: 'submitted_amount',
+          destinationEntity: 'claim_line_item',
+          destinationPath: 'egcs_fc_amount',
+          transform: 'money',
+          required: true,
+          onMissing: 'block',
+          onInvalid: 'block'
+        }
+      ]
+    })
+
+    const preview = previewGcFormsMapping(
+      normalizeGcFormsAnswers({
+        submitted_line_items: [
+          { submitted_line_item: 'Equipment', submitted_amount: '30.00' },
+          { submitted_line_item: 'Travel', submitted_amount: '75.00' }
+        ]
+      }),
+      config.mappings
+    )
+
+    expect(preview.issues).toEqual([])
+    expect(preview.values).toEqual([
+      expect.objectContaining({
+        mappingId: 'submitted-line',
+        value: ['Equipment', 'Travel']
+      }),
+      expect.objectContaining({
+        mappingId: 'submitted-amount',
+        value: [30, 75]
+      })
+    ])
+  })
+
   it('parses agency-level GC Forms base URL configuration', () => {
     expect(parseGcFormsAgencyConfig({
       apiUrl: 'http://localhost:3000/v1'
     })).toEqual({
-      apiUrl: 'http://localhost:3000/v1'
+      apiUrl: 'http://localhost:3000/v1',
+      confirmSubmissions: false
     })
   })
 
   it('treats cleared config fields as absent values', () => {
-    expect(parseGcFormsAgencyConfig({ apiUrl: null })).toEqual({})
+    expect(parseGcFormsAgencyConfig({ apiUrl: null })).toEqual({
+      confirmSubmissions: false
+    })
     expect(parseGcFormsStreamConfig({
       credentialId: null,
-      formId: ' form-1 ',
+      claim: {
+        formId: ' form-1 '
+      },
       identityProviderUrl: '',
       preferredLanguage: 'en',
       mappings: []
     })).toMatchObject({
-      formId: 'form-1',
+      claim: {
+        formId: 'form-1'
+      },
       confirmSubmissions: false,
       preferredLanguage: 'en',
       mappings: []
     })
+  })
+
+  it('keeps legacy top-level form ID as a compatibility fallback', () => {
+    const config = parseGcFormsStreamConfig({
+      formId: ' legacy-form '
+    })
+
+    expect(config.formId).toBe('legacy-form')
+    expect(resolveGcFormsClaimFormId(config)).toBe('legacy-form')
   })
 
   it('normalizes numeric answer keys to template question ids', () => {
@@ -214,6 +281,39 @@ describe('GC Forms shared mapping utilities', () => {
       agreement_number: 'AGR-0001',
       fiscal_year: '2025-2026'
     })
+  })
+
+  it('normalizes numeric dynamic row child keys to template question ids', () => {
+    const answers = normalizeGcFormsAnswers(JSON.stringify({
+      '5': [
+        { '0': 'Operating Costs', '1': 'Administration', '2': 'Equipment', '3': '11.11' }
+      ]
+    }), {
+      elements: [
+        {
+          id: 5,
+          type: 'dynamicRow',
+          properties: {
+            questionId: 'submitted_line_items'
+          },
+          elements: [
+            { id: 501, type: 'dropdown', properties: { questionId: 'submitted_cost_category' } },
+            { id: 502, type: 'dropdown', properties: { questionId: 'submitted_cost_subsection' } },
+            { id: 503, type: 'dropdown', properties: { questionId: 'submitted_line_item' } },
+            { id: 504, type: 'textField', properties: { questionId: 'submitted_amount' } }
+          ]
+        }
+      ]
+    })
+
+    expect(answers.submitted_line_items).toEqual([
+      expect.objectContaining({
+        submitted_cost_category: 'Operating Costs',
+        submitted_cost_subsection: 'Administration',
+        submitted_line_item: 'Equipment',
+        submitted_amount: '11.11'
+      })
+    ])
   })
 
   it('parses confirm submissions stream config with a disabled default', () => {

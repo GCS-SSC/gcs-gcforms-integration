@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /* eslint-disable jsdoc/require-jsdoc */
-import { getClientRequestUrl } from '~/utils/client-request-url'
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
-import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
+import { getClientRequestUrl, type GcsExtensionJsonConfig, type GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions/server'
+import { buildGcFormsEntitySourceEndpoint } from './gcforms-entity-source-tab'
 
 const {
   extensionKey,
@@ -52,25 +52,7 @@ interface LinkedSubmission {
 const items: Ref<LinkedSubmission[]> = ref([])
 const isLoading: Ref<boolean> = ref(true)
 
-const endpoint = computed(() => {
-  if (context.target === 'agreement' && context.agreementId) {
-    return `/api/extensions/${extensionKey}/agreements/${context.agreementId}/submissions`
-  }
-
-  if (context.target === 'proponent' && context.applicantRecipientId) {
-    return `/api/extensions/${extensionKey}/proponents/${context.applicantRecipientId}/submissions`
-  }
-
-  if (context.target === 'claim' && context.claimId) {
-    return `/api/extensions/${extensionKey}/claims/${context.claimId}/submissions`
-  }
-
-  if (context.target === 'monitor' && context.monitorId) {
-    return `/api/extensions/${extensionKey}/monitors/${context.monitorId}/submissions`
-  }
-
-  return ''
-})
+const endpoint = computed(() => buildGcFormsEntitySourceEndpoint(extensionKey, context))
 
 const refresh = async () => {
   try {

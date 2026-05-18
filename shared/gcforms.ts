@@ -7,6 +7,21 @@ export const GCFORMS_EXTENSION_KEY = 'gcs-gcforms-integration'
 export const DEFAULT_GCFORMS_API_URL = 'https://api.forms-formulaires.alpha.canada.ca/v1'
 export const DEFAULT_GCFORMS_IDP_URL = 'https://auth.forms-formulaires.alpha.canada.ca'
 export const DEFAULT_GCFORMS_PROJECT_IDENTIFIER = '284778202772022819'
+export const GCFORMS_CLAIM_LINE_ITEMS_QUESTION_ID = 'submitted_line_items'
+export const GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS = [
+  'submitted_cost_category',
+  'submitted_cost_subsection',
+  'submitted_line_item',
+  'submitted_amount'
+] as const
+export const GCFORMS_CLAIM_REQUIRED_QUESTION_IDS = [
+  'agreement_number',
+  'fiscal_year',
+  'claim_period_start_month',
+  'claim_period_end_month',
+  GCFORMS_CLAIM_LINE_ITEMS_QUESTION_ID,
+  ...GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS
+] as const
 
 export const GcFormsPrivateApiKeySchema = z.object({
   keyId: z.string().min(1),
@@ -162,7 +177,9 @@ export const GcsGcFormsFieldMappingSchema = z.object({
 export type GcsGcFormsFieldMapping = z.infer<typeof GcsGcFormsFieldMappingSchema>
 
 export const GcsGcFormsAgencyConfigSchema = z.object({
-  apiUrl: OptionalStringSchema
+  apiUrl: OptionalStringSchema,
+  identityProviderUrl: OptionalStringSchema,
+  confirmSubmissions: z.boolean().default(false)
 })
 
 export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema>
@@ -170,16 +187,23 @@ export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema
 export const GcsGcFormsStreamConfigSchema = z.object({
   credentialId: OptionalStringSchema,
   formId: OptionalStringSchema,
+  claim: z.object({
+    formId: OptionalStringSchema
+  }).default({}),
   apiUrl: OptionalStringSchema,
   identityProviderUrl: OptionalStringSchema,
   projectIdentifier: OptionalStringSchema,
   contactEmail: OptionalStringSchema,
   preferredLanguage: z.enum(['en', 'fr']).default('en'),
   confirmSubmissions: z.boolean().default(false),
+  templateShapeChanged: z.boolean().default(false),
   mappings: z.array(GcsGcFormsFieldMappingSchema).default([])
 })
 
 export type GcsGcFormsStreamConfig = z.infer<typeof GcsGcFormsStreamConfigSchema>
+
+export const resolveGcFormsClaimFormId = (config: GcsGcFormsStreamConfig): string | undefined =>
+  config.claim.formId ?? config.formId
 
 export interface GcsGcFormsMappedValue {
   mappingId: string
@@ -331,6 +355,20 @@ export const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplat
 export const gcFormsTemplateShapesEqual = (left: unknown, right: unknown): boolean =>
   stableStringify(normalizeGcFormsTemplateShape(left)) === stableStringify(normalizeGcFormsTemplateShape(right))
 
+export const getMissingGcFormsClaimQuestionIds = (template: unknown): string[] => {
+  const found = new Set<string>()
+  const visit = (elements: GcFormsTemplateShapeElement[]) => {
+    for (const element of elements) {
+      found.add(element.questionId)
+      visit(element.children)
+    }
+  }
+
+  visit(normalizeGcFormsTemplateShape(template))
+
+  return GCFORMS_CLAIM_REQUIRED_QUESTION_IDS.filter(questionId => !found.has(questionId))
+}
+
 export const parseGcFormsStreamConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsStreamConfig =>
   GcsGcFormsStreamConfigSchema.parse(config ?? {})
 
@@ -356,13 +394,28 @@ export const normalizeGcFormsAnswers = (
 
   const parsedTemplate = GcFormsFormTemplateSchema.parse(template)
   const aliases = new Map<string, string>()
+  const dynamicRowAliases = new Map<string, Map<string, string>>()
   const visit = (element: GcFormsTemplateElement) => {
     const id = String(element.id)
     const questionId = stringProperty(element.properties, ['questionId', 'apiQuestionId', 'apiId'])
     if (questionId) {
       aliases.set(id, questionId)
     }
-    for (const child of childElements(element)) {
+    const children = childElements(element)
+    if (questionId && children.length > 0) {
+      const childAliases = new Map<string, string>()
+      children.forEach((child, index) => {
+        const childQuestionId = stringProperty(child.properties, ['questionId', 'apiQuestionId', 'apiId'])
+        if (childQuestionId) {
+          childAliases.set(String(index), childQuestionId)
+          childAliases.set(String(child.id), childQuestionId)
+        }
+      })
+      dynamicRowAliases.set(id, childAliases)
+      dynamicRowAliases.set(questionId, childAliases)
+    }
+
+    for (const child of children) {
       visit(child)
     }
   }
@@ -378,7 +431,75 @@ export const normalizeGcFormsAnswers = (
     }
   }
 
+  for (const [parentKey, childAliases] of dynamicRowAliases) {
+    const rows = normalized[parentKey]
+    if (!Array.isArray(rows)) {
+      continue
+    }
+
+    normalized[parentKey] = rows.map(row => {
+      if (!isRecord(row)) {
+        return row
+      }
+
+      const normalizedRow: Record<string, unknown> = { ...row }
+      for (const [childKey, childQuestionId] of childAliases) {
+        if (Object.hasOwn(row, childKey) && !Object.hasOwn(normalizedRow, childQuestionId)) {
+          normalizedRow[childQuestionId] = row[childKey]
+        }
+      }
+
+      return normalizedRow
+    })
+  }
+
   return normalized
+}
+
+const coerceMappedNumber = (value: unknown): number => {
+  const numberValue = typeof value === 'number' ? value : Number(String(value).replace(/,/g, '').trim())
+  if (!Number.isFinite(numberValue)) {
+    throw new Error('invalid number')
+  }
+
+  return numberValue
+}
+
+const coerceMappedBoolean = (value: unknown): boolean => {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  const normalized = String(value).trim().toLowerCase()
+  if (['true', 'yes', 'y', '1', 'oui'].includes(normalized)) {
+    return true
+  }
+  if (['false', 'no', 'n', '0', 'non'].includes(normalized)) {
+    return false
+  }
+
+  throw new Error('invalid boolean')
+}
+
+const coerceMappedDate = (value: unknown): string => {
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('invalid date')
+  }
+
+  return date.toISOString()
+}
+
+const MAPPED_VALUE_COERCERS: Record<GcsGcFormsTransform, (value: unknown) => JsonValue> = {
+  string: (value: unknown) => String(value),
+  number: coerceMappedNumber,
+  money: coerceMappedNumber,
+  boolean: coerceMappedBoolean,
+  date: coerceMappedDate,
+  enum: (value: unknown) => String(value),
+  bilingual_text: (value: unknown) => String(value),
+  attachment: (value: unknown) => String(value),
+  json: (value: unknown) => JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
 const coerceMappedValue = (value: unknown, transform: GcsGcFormsTransform): JsonValue => {
@@ -386,37 +507,108 @@ const coerceMappedValue = (value: unknown, transform: GcsGcFormsTransform): Json
     return null
   }
 
-  if (transform === 'number' || transform === 'money') {
-    const numberValue = typeof value === 'number' ? value : Number(String(value).replace(/,/g, '').trim())
-    if (!Number.isFinite(numberValue)) {
-      throw new Error('invalid number')
+  return MAPPED_VALUE_COERCERS[transform](value)
+}
+
+const coerceMappedAnswerValue = (value: unknown, transform: GcsGcFormsTransform): JsonValue =>
+  Array.isArray(value)
+    ? value.map(item => coerceMappedValue(item, transform))
+    : coerceMappedValue(value, transform)
+
+const hasGcFormsMappedValue = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.some(item => hasGcFormsMappedValue(item))
+  }
+
+  return value !== undefined && value !== null && String(value).trim() !== ''
+}
+
+const dynamicRowAnswerValues = (
+  answers: Record<string, unknown>,
+  sourceQuestionId: string
+): unknown[] | undefined => {
+  if (!GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS.includes(sourceQuestionId as typeof GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS[number])) {
+    return undefined
+  }
+
+  const rows = answers[GCFORMS_CLAIM_LINE_ITEMS_QUESTION_ID]
+  if (!Array.isArray(rows)) {
+    return undefined
+  }
+
+  return rows.map(row => isRecord(row) ? row[sourceQuestionId] : undefined)
+}
+
+const gcFormsAnswerValue = (
+  answers: Record<string, unknown>,
+  sourceQuestionId: string
+): unknown => Object.hasOwn(answers, sourceQuestionId)
+  ? answers[sourceQuestionId]
+  : dynamicRowAnswerValues(answers, sourceQuestionId)
+
+const createMappedValue = (
+  mapping: GcsGcFormsFieldMapping,
+  value: JsonValue
+): GcsGcFormsMappedValue => ({
+  mappingId: mapping.id,
+  sourceQuestionId: mapping.sourceQuestionId,
+  destinationEntity: mapping.destinationEntity,
+  destinationPath: mapping.destinationPath,
+  value
+})
+
+const createMappingIssue = (
+  mapping: GcsGcFormsFieldMapping,
+  code: GcsGcFormsMappingIssue['code'],
+  message: string
+): GcsGcFormsMappingIssue => ({
+  mappingId: mapping.id,
+  sourceQuestionId: mapping.sourceQuestionId,
+  destinationPath: mapping.destinationPath,
+  code,
+  message
+})
+
+const getMappingDefaultValue = (mapping: GcsGcFormsFieldMapping): JsonValue =>
+  mapping.defaultValue === undefined ? null : mapping.defaultValue as JsonValue
+
+const previewMissingGcFormsValue = (
+  mapping: GcsGcFormsFieldMapping
+): { value?: GcsGcFormsMappedValue; issue?: GcsGcFormsMappingIssue } => {
+  if (mapping.required || mapping.onMissing === 'block') {
+    return {
+      issue: createMappingIssue(mapping, 'missing_required_value', 'Required GC Forms value is missing.')
     }
-    return numberValue
   }
 
-  if (transform === 'boolean') {
-    if (typeof value === 'boolean') {
-      return value
-    }
-    const normalized = String(value).trim().toLowerCase()
-    if (['true', 'yes', 'y', '1', 'oui'].includes(normalized)) return true
-    if (['false', 'no', 'n', '0', 'non'].includes(normalized)) return false
-    throw new Error('invalid boolean')
+  return mapping.onMissing === 'default'
+    ? { value: createMappedValue(mapping, getMappingDefaultValue(mapping)) }
+    : {}
+}
+
+const previewInvalidGcFormsValue = (
+  mapping: GcsGcFormsFieldMapping
+): { value?: GcsGcFormsMappedValue; issue?: GcsGcFormsMappingIssue; skip?: boolean } => {
+  if (mapping.onInvalid === 'default') {
+    return { value: createMappedValue(mapping, getMappingDefaultValue(mapping)) }
   }
 
-  if (transform === 'date') {
-    const date = new Date(String(value))
-    if (Number.isNaN(date.getTime())) {
-      throw new Error('invalid date')
-    }
-    return date.toISOString()
+  if (mapping.onInvalid === 'skip') {
+    return { skip: true }
   }
 
-  if (transform === 'json') {
-    return JSON.parse(JSON.stringify(value)) as JsonValue
+  return {
+    issue: createMappingIssue(mapping, 'invalid_value', 'GC Forms value cannot be transformed for the selected destination.')
   }
+}
 
-  return String(value)
+const collectGcFormsPreviewResult = (
+  result: { value?: GcsGcFormsMappedValue; issue?: GcsGcFormsMappingIssue; skip?: boolean },
+  values: GcsGcFormsMappedValue[],
+  issues: GcsGcFormsMappingIssue[]
+) => {
+  if (result.value) values.push(result.value)
+  if (result.issue) issues.push(result.issue)
 }
 
 export const previewGcFormsMapping = (
@@ -427,64 +619,19 @@ export const previewGcFormsMapping = (
   const issues: GcsGcFormsMappingIssue[] = []
 
   for (const mapping of mappings) {
-    const rawValue = answers[mapping.sourceQuestionId]
-    const hasValue = rawValue !== undefined && rawValue !== null && String(rawValue).trim() !== ''
+    const rawValue = gcFormsAnswerValue(answers, mapping.sourceQuestionId)
 
-    if (!hasValue) {
-      if (mapping.required || mapping.onMissing === 'block') {
-        issues.push({
-          mappingId: mapping.id,
-          sourceQuestionId: mapping.sourceQuestionId,
-          destinationPath: mapping.destinationPath,
-          code: 'missing_required_value',
-          message: 'Required GC Forms value is missing.'
-        })
-        continue
-      }
-
-      if (mapping.onMissing === 'default') {
-        values.push({
-          mappingId: mapping.id,
-          sourceQuestionId: mapping.sourceQuestionId,
-          destinationEntity: mapping.destinationEntity,
-          destinationPath: mapping.destinationPath,
-          value: mapping.defaultValue === undefined ? null : mapping.defaultValue as JsonValue
-        })
-      }
+    if (!hasGcFormsMappedValue(rawValue)) {
+      const result = previewMissingGcFormsValue(mapping)
+      collectGcFormsPreviewResult(result, values, issues)
       continue
     }
 
     try {
-      values.push({
-        mappingId: mapping.id,
-        sourceQuestionId: mapping.sourceQuestionId,
-        destinationEntity: mapping.destinationEntity,
-        destinationPath: mapping.destinationPath,
-        value: coerceMappedValue(rawValue, mapping.transform)
-      })
+      values.push(createMappedValue(mapping, coerceMappedAnswerValue(rawValue, mapping.transform)))
     } catch {
-      if (mapping.onInvalid === 'default') {
-        values.push({
-          mappingId: mapping.id,
-          sourceQuestionId: mapping.sourceQuestionId,
-          destinationEntity: mapping.destinationEntity,
-          destinationPath: mapping.destinationPath,
-          value: mapping.defaultValue === undefined ? null : mapping.defaultValue as JsonValue
-        })
-        continue
-      }
-
-      if (mapping.onInvalid === 'skip') {
-        continue
-      }
-
-      issues.push({
-        mappingId: mapping.id,
-        sourceQuestionId: mapping.sourceQuestionId,
-        destinationPath: mapping.destinationPath,
-        code: 'invalid_value',
-        message: 'GC Forms value cannot be transformed for the selected destination.'
-      })
+      const result = previewInvalidGcFormsValue(mapping)
+      collectGcFormsPreviewResult(result, values, issues)
     }
   }
 

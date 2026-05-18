@@ -80,15 +80,35 @@ const lineItemMappings: GcsGcFormsFieldMapping[] = [
     destinationEntity: 'claim_line_item',
     destinationPath: 'egcs_fc_fundingagreementbudgetlineitem',
     transform: 'string',
+    required: false,
+    onMissing: 'skip',
+    onInvalid: 'skip'
+  },
+  {
+    id: 'submitted-category',
+    sourceQuestionId: 'submitted_cost_category',
+    destinationEntity: 'claim_line_item',
+    destinationPath: 'egcs_fc_submittedcostcategory',
+    transform: 'string',
     required: true,
     onMissing: 'block',
     onInvalid: 'block'
   },
   {
-    id: 'line-description',
-    sourceQuestionId: 'line_description',
+    id: 'submitted-subsection',
+    sourceQuestionId: 'submitted_cost_subsection',
     destinationEntity: 'claim_line_item',
-    destinationPath: 'egcs_fc_description',
+    destinationPath: 'egcs_fc_submittedcostsubsection',
+    transform: 'string',
+    required: true,
+    onMissing: 'block',
+    onInvalid: 'block'
+  },
+  {
+    id: 'submitted-line-item',
+    sourceQuestionId: 'submitted_line_item',
+    destinationEntity: 'claim_line_item',
+    destinationPath: 'egcs_fc_submittedlineitem',
     transform: 'string',
     required: true,
     onMissing: 'block',
@@ -96,20 +116,10 @@ const lineItemMappings: GcsGcFormsFieldMapping[] = [
   },
   {
     id: 'line-amount',
-    sourceQuestionId: 'line_amount',
+    sourceQuestionId: 'submitted_amount',
     destinationEntity: 'claim_line_item',
     destinationPath: 'egcs_fc_amount',
     transform: 'money',
-    required: true,
-    onMissing: 'block',
-    onInvalid: 'block'
-  },
-  {
-    id: 'line-currency',
-    sourceQuestionId: 'line_currency',
-    destinationEntity: 'claim_line_item',
-    destinationPath: 'egcs_fc_currency',
-    transform: 'string',
     required: true,
     onMissing: 'block',
     onInvalid: 'block'
@@ -170,25 +180,32 @@ const lineItemValues: GcsGcFormsMappedValue[] = [
     value: '701'
   },
   {
-    mappingId: 'line-description',
-    sourceQuestionId: 'line_description',
+    mappingId: 'submitted-category',
+    sourceQuestionId: 'submitted_cost_category',
     destinationEntity: 'claim_line_item',
-    destinationPath: 'egcs_fc_description',
-    value: 'Training supplies'
+    destinationPath: 'egcs_fc_submittedcostcategory',
+    value: 'Operating Costs'
+  },
+  {
+    mappingId: 'submitted-subsection',
+    sourceQuestionId: 'submitted_cost_subsection',
+    destinationEntity: 'claim_line_item',
+    destinationPath: 'egcs_fc_submittedcostsubsection',
+    value: 'Delivery'
+  },
+  {
+    mappingId: 'submitted-line-item',
+    sourceQuestionId: 'submitted_line_item',
+    destinationEntity: 'claim_line_item',
+    destinationPath: 'egcs_fc_submittedlineitem',
+    value: 'Travel'
   },
   {
     mappingId: 'line-amount',
-    sourceQuestionId: 'line_amount',
+    sourceQuestionId: 'submitted_amount',
     destinationEntity: 'claim_line_item',
     destinationPath: 'egcs_fc_amount',
     value: 1234.56
-  },
-  {
-    mappingId: 'line-currency',
-    sourceQuestionId: 'line_currency',
-    destinationEntity: 'claim_line_item',
-    destinationPath: 'egcs_fc_currency',
-    value: 'CAD'
   }
 ]
 
@@ -250,9 +267,37 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
+    CREATE TABLE "Agency_Cost_Category" (
+      id bigserial PRIMARY KEY,
+      egcs_ay_name_en varchar(255) NOT NULL,
+      egcs_ay_name_fr varchar(255) NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE TABLE "Agency_Cost_Category_Line_Item" (
+      id bigserial PRIMARY KEY,
+      egcs_ay_name_en varchar(255) NOT NULL,
+      egcs_ay_name_fr varchar(255) NOT NULL,
+      egcs_ay_organizationcostcategory bigint NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (
+      id bigserial PRIMARY KEY,
+      egcs_tp_transferpaymentstream bigint NOT NULL,
+      egcs_tp_organizationcostcategory bigint NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
     CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (
       id bigserial PRIMARY KEY,
       egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL,
+      egcs_fc_organizationcostcategory bigint NOT NULL,
+      egcs_fc_costsubsection varchar(255) NOT NULL,
+      egcs_fc_description text NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -265,6 +310,7 @@ const createSchema = async () => {
       egcs_fc_periodend smallint NOT NULL,
       egcs_fc_periodstart smallint NOT NULL,
       egcs_fc_receiveddate timestamptz NOT NULL,
+      egcs_fc_gcformssubmissionuuid varchar(80),
       egcs_fc_status varchar(40) NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
@@ -273,7 +319,10 @@ const createSchema = async () => {
     CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (
       id bigserial PRIMARY KEY,
       egcs_fc_fundingagreementclaim bigint NOT NULL,
-      egcs_fc_fundingagreementbudgetlineitem bigint NOT NULL,
+      egcs_fc_fundingagreementbudgetlineitem bigint,
+      egcs_fc_submittedcostcategory text,
+      egcs_fc_submittedcostsubsection text,
+      egcs_fc_submittedlineitem text,
       egcs_fc_description text NOT NULL,
       egcs_fc_amount numeric(19, 2) NOT NULL,
       egcs_fc_currency varchar(3) NOT NULL,
@@ -390,15 +439,61 @@ const seedBaseData = async () => {
     ])
     .execute()
   await db
+    .insertInto('Agency_Cost_Category')
+    .values({
+      id: '301',
+      egcs_ay_name_en: 'Operating Costs',
+      egcs_ay_name_fr: 'Couts de fonctionnement'
+    })
+    .execute()
+  await db
+    .insertInto('Agency_Cost_Category_Line_Item')
+    .values([
+      {
+        id: '601',
+        egcs_ay_name_en: 'Travel',
+        egcs_ay_name_fr: 'Deplacement',
+        egcs_ay_organizationcostcategory: '301'
+      },
+      {
+        id: '602',
+        egcs_ay_name_en: 'Equipment',
+        egcs_ay_name_fr: 'Equipement',
+        egcs_ay_organizationcostcategory: '301'
+      }
+    ])
+    .execute()
+  await db
+    .insertInto('Transfer_Payment_Stream_Cost_Category_Line_Item')
+    .values([
+      {
+        id: '801',
+        egcs_tp_transferpaymentstream: '31',
+        egcs_tp_organizationcostcategory: '601'
+      },
+      {
+        id: '802',
+        egcs_tp_transferpaymentstream: '31',
+        egcs_tp_organizationcostcategory: '602'
+      }
+    ])
+    .execute()
+  await db
     .insertInto('Funding_Case_Agreement_Budget_Line_Item')
     .values([
       {
         id: '701',
-        egcs_fc_fundingagreementbudgetfiscalyear: '501'
+        egcs_fc_fundingagreementbudgetfiscalyear: '501',
+        egcs_fc_organizationcostcategory: '801',
+        egcs_fc_costsubsection: 'Delivery',
+        egcs_fc_description: 'Travel'
       },
       {
         id: '702',
-        egcs_fc_fundingagreementbudgetfiscalyear: '502'
+        egcs_fc_fundingagreementbudgetfiscalyear: '502',
+        egcs_fc_organizationcostcategory: '802',
+        egcs_fc_costsubsection: 'Administration',
+        egcs_fc_description: 'Equipment'
       }
     ])
     .execute()
@@ -441,11 +536,13 @@ const seedMappings = async (mappings: GcsGcFormsFieldMapping[]) => {
 const materialize = async (
   mappings: GcsGcFormsFieldMapping[],
   mappedValues: GcsGcFormsMappedValue[],
-  submissionId = '901'
+  submissionId = '901',
+  submissionUuid = '05-09-09f4'
 ) => await materializeGcFormsClaimSubmission(db, {
   streamId: '31',
   integrationId: '601',
   submissionId,
+  submissionUuid,
   mappings,
   mappedValues
 })
@@ -484,7 +581,7 @@ describe('GC Forms claim materialization', () => {
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
   })
 
-  it('creates a draft claim and destination link for claim mappings', async () => {
+  it('creates a submitted claim and destination link for claim mappings', async () => {
     await seedMappings(claimMappings)
 
     const result = await materialize(claimMappings, claimValues)
@@ -501,10 +598,11 @@ describe('GC Forms claim materialization', () => {
     expect(claim).toEqual(expect.objectContaining({
       egcs_fc_fundingagreement: 101,
       egcs_fc_fiscalyear: 501,
-      egcs_fc_status: 'draft',
+      egcs_fc_status: 'submitted',
       egcs_fc_isfinalforyear: false,
       egcs_fc_periodstart: 0,
-      egcs_fc_periodend: 2
+      egcs_fc_periodend: 2,
+      egcs_fc_gcformssubmissionuuid: '05-09-09f4'
     }))
 
     const link = await db
@@ -517,6 +615,21 @@ describe('GC Forms claim materialization', () => {
       owner_id: 1,
       destination_entity: 'claim'
     }))
+  })
+
+  it('defaults final for year to false when no source field is mapped', async () => {
+    const mappingsWithoutFinalForYear = claimMappings.filter(mapping => mapping.destinationPath !== 'egcs_fc_isfinalforyear')
+    const valuesWithoutFinalForYear = claimValues.filter(value => value.destinationPath !== 'egcs_fc_isfinalforyear')
+    await seedMappings(mappingsWithoutFinalForYear)
+
+    const result = await materialize(mappingsWithoutFinalForYear, valuesWithoutFinalForYear)
+
+    expect(result.status).toBe('created')
+    const claim = await db
+      .selectFrom('Funding_Case_Agreement_Claim')
+      .select(['egcs_fc_isfinalforyear'])
+      .executeTakeFirstOrThrow()
+    expect(claim.egcs_fc_isfinalforyear).toBe(false)
   })
 
   it('resolves the agreement number only within the configured stream', async () => {
@@ -630,7 +743,21 @@ describe('GC Forms claim materialization', () => {
     await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toHaveLength(1)
   })
 
-  it('creates claim line items only when the budget line item is valid for the claim fiscal year', async () => {
+  it('skips materialization when the host claim already tracks the GC Forms submission UUID', async () => {
+    await seedMappings(claimMappings)
+
+    const first = await materialize(claimMappings, claimValues)
+    const second = await materialize(claimMappings, claimValues, '902', '05-09-09f4')
+
+    expect(first.status).toBe('created')
+    expect(second).toEqual(expect.objectContaining({
+      status: 'already_materialized',
+      claimId: '1'
+    }))
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toHaveLength(1)
+  })
+
+  it('creates claim line items with valid budget links when available', async () => {
     await seedMappings([...claimMappings, ...lineItemMappings])
 
     const result = await materialize([...claimMappings, ...lineItemMappings], [...claimValues, ...lineItemValues])
@@ -647,35 +774,118 @@ describe('GC Forms claim materialization', () => {
     expect(lineItem).toEqual(expect.objectContaining({
       egcs_fc_fundingagreementclaim: 1,
       egcs_fc_fundingagreementbudgetlineitem: 701,
-      egcs_fc_description: 'Training supplies',
-      egcs_fc_currency: 'CAD'
+      egcs_fc_submittedcostcategory: 'Operating Costs',
+      egcs_fc_submittedcostsubsection: 'Delivery',
+      egcs_fc_submittedlineitem: 'Travel',
+      egcs_fc_description: 'Operating Costs / Delivery / Travel',
+      egcs_fc_currency: 'cad'
     }))
     expect(Number(lineItem.egcs_fc_amount)).toBe(1234.56)
+  })
 
+  it('creates multiple claim line items from repeated GC Forms line item answers', async () => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+
+    const result = await materialize([...claimMappings, ...lineItemMappings], [
+      ...claimValues,
+      {
+        mappingId: 'submitted-category',
+        sourceQuestionId: 'submitted_cost_category',
+        destinationEntity: 'claim_line_item',
+        destinationPath: 'egcs_fc_submittedcostcategory',
+        value: ['Operating Costs', 'Operating Costs']
+      },
+      {
+        mappingId: 'submitted-subsection',
+        sourceQuestionId: 'submitted_cost_subsection',
+        destinationEntity: 'claim_line_item',
+        destinationPath: 'egcs_fc_submittedcostsubsection',
+        value: ['Delivery', 'Administration']
+      },
+      {
+        mappingId: 'submitted-line-item',
+        sourceQuestionId: 'submitted_line_item',
+        destinationEntity: 'claim_line_item',
+        destinationPath: 'egcs_fc_submittedlineitem',
+        value: ['Travel', 'Equipment']
+      },
+      {
+        mappingId: 'line-amount',
+        sourceQuestionId: 'submitted_amount',
+        destinationEntity: 'claim_line_item',
+        destinationPath: 'egcs_fc_amount',
+        value: [75, 30]
+      }
+    ])
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'created',
+      claimId: '1',
+      lineItemIds: ['1', '2']
+    }))
+    const lineItems = await db
+      .selectFrom('Funding_Case_Agreement_Claim_Line_Item')
+      .select([
+        'egcs_fc_fundingagreementbudgetlineitem as budgetLineItem',
+        'egcs_fc_submittedcostsubsection as subsection',
+        'egcs_fc_submittedlineitem as lineItem',
+        'egcs_fc_amount as amount'
+      ])
+      .orderBy('id', 'asc')
+      .execute()
+    expect(lineItems).toEqual([
+      expect.objectContaining({
+        budgetLineItem: 701,
+        subsection: 'Delivery',
+        lineItem: 'Travel'
+      }),
+      expect.objectContaining({
+        budgetLineItem: null,
+        subsection: 'Administration',
+        lineItem: 'Equipment'
+      })
+    ])
+    expect(lineItems.map(item => Number(item.amount))).toEqual([75, 30])
+  })
+
+  it('preserves raw submitted claim line hierarchy and leaves invalid budget links unallocated', async () => {
     await seedSubmission('902', 'submission-2')
+    await seedMappings([...claimMappings, ...lineItemMappings])
 
-    const invalid = await materialize(
+    const result = await materialize(
       [...claimMappings, ...lineItemMappings],
       [
         ...claimValues,
         ...lineItemValues.map(value =>
           value.destinationPath === 'egcs_fc_fundingagreementbudgetlineitem'
             ? { ...value, value: '702' }
-            : value
+            : value.destinationPath === 'egcs_fc_submittedcostcategory'
+              ? { ...value, value: 'Submitted category' }
+              : value.destinationPath === 'egcs_fc_submittedcostsubsection'
+                ? { ...value, value: 'Submitted subsection' }
+                : value.destinationPath === 'egcs_fc_submittedlineitem'
+                  ? { ...value, value: 'Submitted line' }
+                  : value
         )
       ],
       '902'
     )
 
-    expect(invalid.status).toBe('failed')
-    expect(invalid.issues).toEqual([
-      expect.objectContaining({
-        destinationPath: 'claim_line_item.egcs_fc_fundingagreementbudgetlineitem',
-        code: 'invalid_value'
-      })
-    ])
-    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toHaveLength(1)
-    await expect(db.selectFrom('Funding_Case_Agreement_Claim_Line_Item').selectAll().execute()).resolves.toHaveLength(1)
+    expect(result).toEqual(expect.objectContaining({
+      status: 'created',
+      claimId: '1',
+      lineItemIds: ['1']
+    }))
+    const lineItem = await db
+      .selectFrom('Funding_Case_Agreement_Claim_Line_Item')
+      .selectAll()
+      .executeTakeFirstOrThrow()
+    expect(lineItem).toEqual(expect.objectContaining({
+      egcs_fc_fundingagreementbudgetlineitem: null,
+      egcs_fc_submittedcostcategory: 'Submitted category',
+      egcs_fc_submittedcostsubsection: 'Submitted subsection',
+      egcs_fc_submittedlineitem: 'Submitted line'
+    }))
   })
 
   it('accepts entity-prefixed destination paths and string-coerced booleans', async () => {
@@ -737,14 +947,14 @@ describe('GC Forms claim materialization', () => {
       [...claimMappings, ...lineItemMappings],
       [
         ...claimValues,
-        ...lineItemValues.filter(value => value.destinationPath !== 'egcs_fc_currency')
+        ...lineItemValues.filter(value => value.destinationPath !== 'egcs_fc_submittedlineitem')
       ]
     )
 
     expect(result.status).toBe('failed')
     expect(result.issues).toEqual([
       expect.objectContaining({
-        destinationPath: 'claim_line_item.egcs_fc_currency',
+        destinationPath: 'claim_line_item.egcs_fc_submittedlineitem',
         code: 'missing_required_value'
       })
     ])

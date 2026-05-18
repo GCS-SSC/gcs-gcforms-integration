@@ -28,11 +28,15 @@ describe('GC Forms extension manifest and entity tab contract', () => {
       resolve(testDirectory, '../../components/GcFormsEntitySourceTab.vue'),
       'utf8'
     )
+    const helperSource = await readFile(
+      resolve(testDirectory, '../../components/gcforms-entity-source-tab.ts'),
+      'utf8'
+    )
 
     expect(source).toContain('context: ExtensionEntityTabContext')
-    expect(source).toContain('context.target === \'agreement\'')
-    expect(source).toContain('/api/extensions/${extensionKey}/agreements/${context.agreementId}/submissions')
+    expect(helperSource).toContain('context.target === \'agreement\'')
+    expect(helperSource).toContain('/api/extensions/${extensionKey}/agreements/${context.agreementId}/submissions')
     expect(source).not.toContain('ownerType, ownerId')
-    expect(source).not.toContain('/entities/')
+    expect(helperSource).not.toContain('/entities/')
   })
 })

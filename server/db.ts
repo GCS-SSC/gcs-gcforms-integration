@@ -9,6 +9,7 @@ export type GcFormsSubmissionStatus =
   | 'imported'
   | 'imported_pending_confirm'
   | 'confirmed'
+  | 'skipped'
   | 'problem'
   | 'mapping_failed'
 
@@ -33,6 +34,28 @@ export interface GcFormsIntegrationHostDatabase {
   'Funding_Case_Agreement_Budget_Line_Item': {
     id: Generated<string>
     egcs_fc_fundingagreementbudgetfiscalyear: string
+    egcs_fc_organizationcostcategory: string
+    egcs_fc_costsubsection: string
+    egcs_fc_description: string
+    _deleted: Generated<boolean>
+  }
+  'Transfer_Payment_Stream_Cost_Category_Line_Item': {
+    id: Generated<string>
+    egcs_tp_transferpaymentstream: string
+    egcs_tp_organizationcostcategory: string
+    _deleted: Generated<boolean>
+  }
+  'Agency_Cost_Category_Line_Item': {
+    id: Generated<string>
+    egcs_ay_name_en: string
+    egcs_ay_name_fr: string
+    egcs_ay_organizationcostcategory: string
+    _deleted: Generated<boolean>
+  }
+  'Agency_Cost_Category': {
+    id: Generated<string>
+    egcs_ay_name_en: string
+    egcs_ay_name_fr: string
     _deleted: Generated<boolean>
   }
   'Funding_Case_Agreement_Claim': {
@@ -43,13 +66,17 @@ export interface GcFormsIntegrationHostDatabase {
     egcs_fc_periodend: number
     egcs_fc_periodstart: number
     egcs_fc_receiveddate: Date | string
+    egcs_fc_gcformssubmissionuuid?: string | null
     egcs_fc_status: string
     _deleted: Generated<boolean>
   }
   'Funding_Case_Agreement_Claim_Line_Item': {
     id: Generated<string>
     egcs_fc_fundingagreementclaim: string
-    egcs_fc_fundingagreementbudgetlineitem: string
+    egcs_fc_fundingagreementbudgetlineitem: string | null
+    egcs_fc_submittedcostcategory: string | null
+    egcs_fc_submittedcostsubsection: string | null
+    egcs_fc_submittedlineitem: string | null
     egcs_fc_description: string
     egcs_fc_amount: number
     egcs_fc_currency: string

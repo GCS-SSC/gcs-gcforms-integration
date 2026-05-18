@@ -38,6 +38,48 @@ const initialTemplate = {
         titleEn: 'Agreement number',
         validation: { required: true }
       }
+    },
+    {
+      id: 2,
+      type: 'textField',
+      properties: {
+        questionId: 'fiscal_year',
+        titleEn: 'Fiscal year',
+        validation: { required: true }
+      }
+    },
+    {
+      id: 3,
+      type: 'textField',
+      properties: {
+        questionId: 'claim_period_start_month',
+        titleEn: 'Claim period start month',
+        validation: { required: true }
+      }
+    },
+    {
+      id: 4,
+      type: 'textField',
+      properties: {
+        questionId: 'claim_period_end_month',
+        titleEn: 'Claim period end month',
+        validation: { required: true }
+      }
+    },
+    {
+      id: 5,
+      type: 'dynamicRow',
+      properties: {
+        questionId: 'submitted_line_items',
+        titleEn: 'Submitted claim items',
+        validation: { required: true }
+      },
+      elements: [
+        { id: 501, type: 'dropdown', properties: { questionId: 'submitted_cost_category', titleEn: 'Cost category' } },
+        { id: 502, type: 'dropdown', properties: { questionId: 'submitted_cost_subsection', titleEn: 'Cost subsection' } },
+        { id: 503, type: 'dropdown', properties: { questionId: 'submitted_line_item', titleEn: 'Line item' } },
+        { id: 504, type: 'textField', properties: { questionId: 'submitted_amount', titleEn: 'Submitted amount' } }
+      ]
     }
   ]
 }
@@ -53,7 +95,8 @@ const changedTemplate = {
         titleEn: 'Agreement number',
         validation: { required: true }
       }
-    }
+    },
+    ...initialTemplate.elements.slice(1)
   ]
 }
 
@@ -226,11 +269,9 @@ const seedConfig = async () => {
       stream_id: '30',
       enabled: true,
       config: {
-        credentialId: 'credential-1',
-        formId: 'form-1',
-        identityProviderUrl: 'https://idp.example.test',
-        projectIdentifier: 'project-1',
-        preferredLanguage: 'en',
+        claim: {
+          formId: 'form-1'
+        },
         mappings: []
       },
       _deleted: false
