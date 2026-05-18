@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /* eslint-disable jsdoc/require-jsdoc */
-import { throwFetchResponseError } from '~/utils/fetch-error'
-import { getClientRequestUrl } from '~/utils/client-request-url'
 import { onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
-import type { GcsExtensionJsonConfig, GcsResolvedExtension } from '@gcs-ssc/extensions'
+import {
+  getClientRequestUrl,
+  throwFetchResponseError,
+  type GcsExtensionJsonConfig,
+  type GcsResolvedExtension
+} from '@gcs-ssc/extensions'
 import {
   DEFAULT_GCFORMS_API_URL,
+  DEFAULT_GCFORMS_IDP_URL,
   parseGcFormsAgencyConfig,
   type GcFormsCredentialSummary,
   type GcsGcFormsAgencyConfig
@@ -26,6 +30,9 @@ const labels = {
     description: 'Set the GC Forms API base URL for this agency. Use the hosted GC Forms URL or a locally hosted instance.',
     apiUrl: 'API base URL',
     apiUrlHelp: 'Example: http://localhost:3000/v1',
+    identityProviderUrl: 'Identity provider URL',
+    identityProviderUrlHelp: 'Token issuer URL for the configured GC Forms instance.',
+    confirmSubmissions: 'Confirm submissions after successful sync',
     defaultUrl: 'Hosted GC Forms default',
     credentials: 'Credentials',
     credentialsDescription: 'Store GC Forms private API keys for this agency. Private keys are encrypted and are never shown after saving.',
@@ -46,6 +53,9 @@ const labels = {
     description: 'Definissez l URL de base de l API GC Forms pour cette organisation. Utilisez l URL hebergee de GC Forms ou une instance locale.',
     apiUrl: 'URL de base de l API',
     apiUrlHelp: 'Exemple : http://localhost:3000/v1',
+    identityProviderUrl: 'URL du fournisseur d identite',
+    identityProviderUrlHelp: 'URL de l emetteur de jetons pour l instance GC Forms configuree.',
+    confirmSubmissions: 'Confirmer les soumissions apres une synchronisation reussie',
     defaultUrl: 'Valeur par defaut de GC Forms heberge',
     credentials: 'Justificatifs',
     credentialsDescription: 'Enregistrez les cles API privees GC Forms pour cette organisation. Les cles privees sont chiffrees et ne sont jamais affichees apres l enregistrement.',
@@ -86,7 +96,9 @@ const statusMessage: Ref<string> = ref('')
 
 watch(localConfig, value => {
   config.value = {
-    apiUrl: value.apiUrl || null
+    apiUrl: value.apiUrl || null,
+    identityProviderUrl: value.identityProviderUrl || null,
+    confirmSubmissions: value.confirmSubmissions
   }
 }, { deep: true })
 
@@ -172,6 +184,14 @@ onMounted(async () => {
       <UFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')">
         <UInput v-model="localConfig.apiUrl" :placeholder="DEFAULT_GCFORMS_API_URL" />
       </UFormField>
+      <UFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')">
+        <UInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
+      </UFormField>
+      <div class="md:col-span-2">
+        <UCheckbox
+          v-model="localConfig.confirmSubmissions"
+          :label="tLocal('confirmSubmissions')" />
+      </div>
     </div>
 
     <p class="text-sm text-muted">

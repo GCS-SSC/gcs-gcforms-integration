@@ -1,5 +1,5 @@
 /* eslint-disable jsdoc/require-jsdoc */
-import type { Insertable } from 'kysely'
+import { sql, type Insertable } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
 import type {
   GcsDestinationEntity,
@@ -28,6 +28,7 @@ interface ClaimMaterializationInput {
   streamId: string
   integrationId: string
   submissionId: string
+  submissionUuid: string
   mappings: GcsGcFormsFieldMapping[]
   mappedValues: GcsGcFormsMappedValue[]
 }
@@ -44,11 +45,29 @@ interface PreparedClaim {
 }
 
 interface PreparedClaimLineItem {
-  budgetLineItemId: string
+  budgetLineItemId: string | null
   budgetLineItemMappingId: string
+  submittedCostCategory: string | null
+  submittedCostSubsection: string | null
+  submittedLineItem: string | null
   description: string
   amount: number
   currency: string
+}
+
+interface NormalizedClaimInputValues {
+  agreementNumber: string | null
+  fiscalYearValue: string | null
+  isFinalForYear: boolean | null
+  periodStart: number | null
+  periodEnd: number | null
+  receivedDate: Date | null
+}
+
+interface ResolvedClaimAgreement {
+  agreementId: string
+  agreementNumber: string
+  hasOverride: boolean
 }
 
 export interface ClaimMaterializationResult {
@@ -70,17 +89,27 @@ export const CLAIM_AGREEMENT_DESTINATION_PATH = `${CLAIM_ENTITY}.${CLAIM_AGREEME
 const CLAIM_REQUIRED_PATHS = [
   CLAIM_AGREEMENT_NUMBER_PATH,
   'egcs_fc_fiscalyear',
-  'egcs_fc_isfinalforyear',
   'egcs_fc_periodstart',
   'egcs_fc_periodend',
   'egcs_fc_receiveddate'
 ] as const
 
 const CLAIM_LINE_ITEM_REQUIRED_PATHS = [
+  'egcs_fc_submittedcostcategory',
+  'egcs_fc_submittedcostsubsection',
+  'egcs_fc_submittedlineitem',
+  'egcs_fc_amount'
+] as const
+
+const CLAIM_LINE_ITEM_OPTIONAL_PATHS = [
   'egcs_fc_fundingagreementbudgetlineitem',
   'egcs_fc_description',
-  'egcs_fc_amount',
   'egcs_fc_currency'
+] as const
+
+const CLAIM_LINE_ITEM_PATHS = [
+  ...CLAIM_LINE_ITEM_REQUIRED_PATHS,
+  ...CLAIM_LINE_ITEM_OPTIONAL_PATHS
 ] as const
 
 const FISCAL_YEAR_MONTHS = [
@@ -168,6 +197,9 @@ const hasPresentValue = (value: JsonValue | undefined): boolean => {
 
   return true
 }
+
+const optionalBooleanDefaultFalse = (value: JsonValue | undefined): boolean | null =>
+  hasPresentValue(value) ? requiredBoolean(value) : false
 
 const createIssue = (
   mappings: GcsGcFormsFieldMapping[],
@@ -276,8 +308,16 @@ const claimFieldValue = (
 
 const claimLineItemFieldValue = (
   values: NormalizedMappedValue[],
-  path: typeof CLAIM_LINE_ITEM_REQUIRED_PATHS[number]
-): JsonValue | undefined => mappedValueForPath(values, CLAIM_LINE_ITEM_ENTITY, path)?.value
+  path: typeof CLAIM_LINE_ITEM_PATHS[number],
+  index?: number
+): JsonValue | undefined => {
+  const value = mappedValueForPath(values, CLAIM_LINE_ITEM_ENTITY, path)?.value
+  if (Array.isArray(value) && index !== undefined) {
+    return value[index]
+  }
+
+  return value
+}
 
 const resolveClaimFiscalYearId = async (
   rawDb: unknown,
@@ -310,12 +350,10 @@ const resolveClaimFiscalYearId = async (
   return fiscalYear ? String(fiscalYear.id) : null
 }
 
-const prepareClaimInput = async (
-  rawDb: unknown,
+const collectMissingClaimIssues = (
   input: ClaimMaterializationInput,
   values: NormalizedMappedValue[]
-): Promise<{ claim?: PreparedClaim; issues: GcsGcFormsMappingIssue[] }> => {
-  const db = asGcFormsIntegrationDb(rawDb)
+): GcsGcFormsMappingIssue[] => {
   const issues: GcsGcFormsMappingIssue[] = []
 
   for (const path of CLAIM_REQUIRED_PATHS) {
@@ -330,42 +368,46 @@ const prepareClaimInput = async (
     }
   }
 
-  if (issues.length > 0) {
-    return { issues }
-  }
+  return issues
+}
 
-  const agreementNumber = requiredString(claimFieldValue(values, CLAIM_AGREEMENT_NUMBER_PATH))
-  const fiscalYearValue = requiredString(claimFieldValue(values, 'egcs_fc_fiscalyear'))
-  const isFinalForYear = requiredBoolean(claimFieldValue(values, 'egcs_fc_isfinalforyear'))
-  const periodStart = requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodstart'))
-  const periodEnd = requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodend'))
-  const receivedDate = requiredDate(claimFieldValue(values, 'egcs_fc_receiveddate'))
+const getNormalizedClaimInputValues = (
+  values: NormalizedMappedValue[]
+): NormalizedClaimInputValues => ({
+  agreementNumber: requiredString(claimFieldValue(values, CLAIM_AGREEMENT_NUMBER_PATH)),
+  fiscalYearValue: requiredString(claimFieldValue(values, 'egcs_fc_fiscalyear')),
+  isFinalForYear: optionalBooleanDefaultFalse(claimFieldValue(values, 'egcs_fc_isfinalforyear')),
+  periodStart: requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodstart')),
+  periodEnd: requiredFiscalYearMonthIndex(claimFieldValue(values, 'egcs_fc_periodend')),
+  receivedDate: requiredDate(claimFieldValue(values, 'egcs_fc_receiveddate'))
+})
 
-  if (!agreementNumber || !fiscalYearValue || isFinalForYear === null || periodStart === null || periodEnd === null || !receivedDate) {
-    return {
-      issues: [createIssue(
-        input.mappings,
-        CLAIM_ENTITY,
-        CLAIM_AGREEMENT_NUMBER_PATH,
-        'invalid_value',
-        'Claim materialization values could not be coerced into the host claim fields.'
-      )]
-    }
-  }
+const claimInputValuesAreComplete = (
+  values: NormalizedClaimInputValues
+): values is NormalizedClaimInputValues & {
+  agreementNumber: string
+  fiscalYearValue: string
+  isFinalForYear: boolean
+  periodStart: number
+  periodEnd: number
+  receivedDate: Date
+} =>
+  Boolean(values.agreementNumber)
+  && Boolean(values.fiscalYearValue)
+  && values.isFinalForYear !== null
+  && values.periodStart !== null
+  && values.periodEnd !== null
+  && values.receivedDate !== null
 
-  if (periodStart < 0 || periodStart > 11 || periodEnd < 0 || periodEnd > 11 || periodStart > periodEnd) {
-    return {
-      issues: [createIssue(
-        input.mappings,
-        CLAIM_ENTITY,
-        'egcs_fc_periodend',
-        'invalid_value',
-        'Claim period must be within a single valid fiscal year range.'
-      )]
-    }
-  }
+const claimPeriodIsValid = (periodStart: number, periodEnd: number): boolean =>
+  periodStart >= 0 && periodStart <= 11 && periodEnd >= 0 && periodEnd <= 11 && periodStart <= periodEnd
 
-  const agreementOverride = await db
+const findClaimAgreementOverride = async (
+  rawDb: unknown,
+  input: ClaimMaterializationInput
+) => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  return await db
     .selectFrom('extensions.gcs_gcforms_materialization_overrides')
     .select('owner_id')
     .where('submission_id', '=', input.submissionId)
@@ -374,7 +416,15 @@ const prepareClaimInput = async (
     .where('owner_type', '=', AGREEMENT_OWNER_TYPE)
     .where('_deleted', '=', false)
     .executeTakeFirst()
+}
 
+const resolveClaimAgreement = async (
+  rawDb: unknown,
+  input: ClaimMaterializationInput,
+  agreementNumber: string
+): Promise<ResolvedClaimAgreement | null> => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  const agreementOverride = await findClaimAgreementOverride(rawDb, input)
   const agreement = agreementOverride
     ? await db
         .selectFrom('Funding_Case_Agreement_Profile')
@@ -391,21 +441,67 @@ const prepareClaimInput = async (
         .where('_deleted', '=', false)
         .executeTakeFirst()
 
-  if (!agreement) {
+  return agreement
+    ? {
+        agreementId: String(agreement.id),
+        agreementNumber: String(agreement.egcs_fc_agreementnumber),
+        hasOverride: Boolean(agreementOverride)
+      }
+    : null
+}
+
+const prepareClaimInput = async (
+  rawDb: unknown,
+  input: ClaimMaterializationInput,
+  values: NormalizedMappedValue[]
+): Promise<{ claim?: PreparedClaim; issues: GcsGcFormsMappingIssue[] }> => {
+  const issues = collectMissingClaimIssues(input, values)
+  if (issues.length > 0) {
+    return { issues }
+  }
+
+  const claimValues = getNormalizedClaimInputValues(values)
+  if (!claimInputValuesAreComplete(claimValues)) {
     return {
       issues: [createIssue(
         input.mappings,
         CLAIM_ENTITY,
         CLAIM_AGREEMENT_NUMBER_PATH,
-        agreementOverride ? 'invalid_value' : 'agreement_not_found',
-        agreementOverride
+        'invalid_value',
+        'Claim materialization values could not be coerced into the host claim fields.'
+      )]
+    }
+  }
+
+  if (!claimPeriodIsValid(claimValues.periodStart, claimValues.periodEnd)) {
+    return {
+      issues: [createIssue(
+        input.mappings,
+        CLAIM_ENTITY,
+        'egcs_fc_periodend',
+        'invalid_value',
+        'Claim period must be within a single valid fiscal year range.'
+      )]
+    }
+  }
+
+  const agreement = await resolveClaimAgreement(rawDb, input, claimValues.agreementNumber)
+  if (!agreement) {
+    const hasOverride = Boolean(await findClaimAgreementOverride(rawDb, input))
+    return {
+      issues: [createIssue(
+        input.mappings,
+        CLAIM_ENTITY,
+        CLAIM_AGREEMENT_NUMBER_PATH,
+        hasOverride ? 'invalid_value' : 'agreement_not_found',
+        hasOverride
           ? 'Selected agreement is no longer available in the configured transfer payment stream.'
           : 'Agreement number could not be resolved in the configured transfer payment stream.'
       )]
     }
   }
 
-  const fiscalYearId = await resolveClaimFiscalYearId(rawDb, String(agreement.id), fiscalYearValue)
+  const fiscalYearId = await resolveClaimFiscalYearId(rawDb, agreement.agreementId, claimValues.fiscalYearValue)
 
   if (!fiscalYearId) {
     return {
@@ -423,110 +519,196 @@ const prepareClaimInput = async (
 
   return {
     claim: {
-      agreementId: String(agreement.id),
-      agreementNumber: String(agreement.egcs_fc_agreementnumber),
+      agreementId: agreement.agreementId,
+      agreementNumber: agreement.agreementNumber,
       agreementMappingId: agreementMapping ? agreementMapping.id : '',
       fiscalYearId,
-      isFinalForYear,
-      periodStart,
-      periodEnd,
-      receivedDate
+      isFinalForYear: claimValues.isFinalForYear,
+      periodStart: claimValues.periodStart,
+      periodEnd: claimValues.periodEnd,
+      receivedDate: claimValues.receivedDate
     },
     issues: []
   }
 }
 
-const prepareClaimLineItemInput = async (
-  rawDb: unknown,
+const normalizedText = (value: string): string => value.trim().toLowerCase()
+
+const mappedValueLength = (values: NormalizedMappedValue[], path: typeof CLAIM_LINE_ITEM_PATHS[number]): number => {
+  const value = mappedValueForPath(values, CLAIM_LINE_ITEM_ENTITY, path)?.value
+  return Array.isArray(value) ? value.length : hasPresentValue(value) ? 1 : 0
+}
+
+const claimLineItemValueCount = (values: NormalizedMappedValue[]): number =>
+  CLAIM_LINE_ITEM_PATHS.reduce((count, path) => Math.max(count, mappedValueLength(values, path)), 0)
+
+const hasAnyClaimLineItemValue = (values: NormalizedMappedValue[], index: number): boolean => CLAIM_LINE_ITEM_PATHS.some(path =>
+  hasPresentValue(claimLineItemFieldValue(values, path, index))
+)
+
+const collectMissingClaimLineItemIssues = (
   input: ClaimMaterializationInput,
+  values: NormalizedMappedValue[],
+  index: number
+): GcsGcFormsMappingIssue[] => CLAIM_LINE_ITEM_REQUIRED_PATHS
+  .filter(path => !hasPresentValue(claimLineItemFieldValue(values, path, index)))
+  .map(path => createIssue(
+    input.mappings,
+    CLAIM_LINE_ITEM_ENTITY,
+    path,
+    'missing_required_value',
+    'Required claim line item materialization value is missing.'
+  ))
+
+const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number) => ({
+  budgetLineItemId: requiredString(claimLineItemFieldValue(values, 'egcs_fc_fundingagreementbudgetlineitem', index)),
+  submittedCostCategory: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostcategory', index)),
+  submittedCostSubsection: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostsubsection', index)),
+  submittedLineItem: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedlineitem', index)),
+  description: requiredString(claimLineItemFieldValue(values, 'egcs_fc_description', index)),
+  amount: requiredNumber(claimLineItemFieldValue(values, 'egcs_fc_amount', index)),
+  currency: requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency', index))
+})
+
+const invalidClaimLineItemValuesIssue = (input: ClaimMaterializationInput): GcsGcFormsMappingIssue => createIssue(
+  input.mappings,
+  CLAIM_LINE_ITEM_ENTITY,
+  'egcs_fc_amount',
+  'invalid_value',
+  'Claim line item values could not be coerced into the host claim line fields.'
+)
+
+const lineItemDescription = (
+  description: string | null,
+  submittedCostCategory: string,
+  submittedCostSubsection: string,
+  submittedLineItem: string
+): string => description || `${submittedCostCategory} / ${submittedCostSubsection} / ${submittedLineItem}`
+
+const fetchMatchingClaimLineItemBudgetLineItem = async (
+  rawDb: unknown,
   claim: PreparedClaim,
-  values: NormalizedMappedValue[]
-): Promise<{ lineItem?: PreparedClaimLineItem; issues: GcsGcFormsMappingIssue[] }> => {
+  submittedCostCategory: string,
+  submittedCostSubsection: string,
+  submittedLineItem: string
+) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const hasAnyLineItemValue = CLAIM_LINE_ITEM_REQUIRED_PATHS.some(path =>
-    hasPresentValue(claimLineItemFieldValue(values, path))
-  )
+  const costCategory = normalizedText(submittedCostCategory)
+  const costSubsection = normalizedText(submittedCostSubsection)
+  const lineItem = normalizedText(submittedLineItem)
 
-  if (!hasAnyLineItemValue && !hasMaterializationMapping(input.mappings, CLAIM_LINE_ITEM_ENTITY)) {
-    return { issues: [] }
-  }
-
-  if (!hasAnyLineItemValue) {
-    return { issues: [] }
-  }
-
-  const issues: GcsGcFormsMappingIssue[] = []
-  for (const path of CLAIM_LINE_ITEM_REQUIRED_PATHS) {
-    if (!hasPresentValue(claimLineItemFieldValue(values, path))) {
-      issues.push(createIssue(
-        input.mappings,
-        CLAIM_LINE_ITEM_ENTITY,
-        path,
-        'missing_required_value',
-        'Required claim line item materialization value is missing.'
-      ))
-    }
-  }
-
-  if (issues.length > 0) {
-    return { issues }
-  }
-
-  const budgetLineItemId = requiredString(claimLineItemFieldValue(values, 'egcs_fc_fundingagreementbudgetlineitem'))
-  const description = requiredString(claimLineItemFieldValue(values, 'egcs_fc_description'))
-  const amount = requiredNumber(claimLineItemFieldValue(values, 'egcs_fc_amount'))
-  const currency = requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency'))
-
-  if (!budgetLineItemId || !description || amount === null || !currency) {
-    return {
-      issues: [createIssue(
-        input.mappings,
-        CLAIM_LINE_ITEM_ENTITY,
-        'egcs_fc_fundingagreementbudgetlineitem',
-        'invalid_value',
-        'Claim line item values could not be coerced into the host claim line fields.'
-      )]
-    }
-  }
-
-  const budgetLineItem = await db
+  return await db
     .selectFrom('Funding_Case_Agreement_Budget_Line_Item')
     .innerJoin(
       'Funding_Case_Agreement_Budget_Fiscal_Year',
       'Funding_Case_Agreement_Budget_Fiscal_Year.id',
       'Funding_Case_Agreement_Budget_Line_Item.egcs_fc_fundingagreementbudgetfiscalyear'
     )
+    .innerJoin(
+      'Transfer_Payment_Stream_Cost_Category_Line_Item',
+      'Transfer_Payment_Stream_Cost_Category_Line_Item.id',
+      'Funding_Case_Agreement_Budget_Line_Item.egcs_fc_organizationcostcategory'
+    )
+    .innerJoin(
+      'Agency_Cost_Category_Line_Item',
+      'Agency_Cost_Category_Line_Item.id',
+      'Transfer_Payment_Stream_Cost_Category_Line_Item.egcs_tp_organizationcostcategory'
+    )
+    .innerJoin(
+      'Agency_Cost_Category',
+      'Agency_Cost_Category.id',
+      'Agency_Cost_Category_Line_Item.egcs_ay_organizationcostcategory'
+    )
     .select('Funding_Case_Agreement_Budget_Line_Item.id as id')
-    .where('Funding_Case_Agreement_Budget_Line_Item.id', '=', budgetLineItemId)
     .where('Funding_Case_Agreement_Budget_Line_Item.egcs_fc_fundingagreementbudgetfiscalyear', '=', claim.fiscalYearId)
     .where('Funding_Case_Agreement_Budget_Fiscal_Year.egcs_fc_fundingagreement', '=', claim.agreementId)
     .where('Funding_Case_Agreement_Budget_Line_Item._deleted', '=', false)
     .where('Funding_Case_Agreement_Budget_Fiscal_Year._deleted', '=', false)
+    .where('Transfer_Payment_Stream_Cost_Category_Line_Item._deleted', '=', false)
+    .where('Agency_Cost_Category_Line_Item._deleted', '=', false)
+    .where('Agency_Cost_Category._deleted', '=', false)
+    .where(sql<boolean>`lower("Funding_Case_Agreement_Budget_Line_Item"."egcs_fc_costsubsection") = ${costSubsection}`)
+    .where(sql<boolean>`(
+      lower("Agency_Cost_Category"."egcs_ay_name_en") = ${costCategory}
+      OR lower("Agency_Cost_Category"."egcs_ay_name_fr") = ${costCategory}
+    )`)
+    .where(sql<boolean>`(
+      lower("Agency_Cost_Category_Line_Item"."egcs_ay_name_en") = ${lineItem}
+      OR lower("Agency_Cost_Category_Line_Item"."egcs_ay_name_fr") = ${lineItem}
+    )`)
     .executeTakeFirst()
+}
 
-  if (!budgetLineItem) {
-    return {
-      issues: [createIssue(
-        input.mappings,
-        CLAIM_LINE_ITEM_ENTITY,
-        'egcs_fc_fundingagreementbudgetlineitem',
-        'invalid_value',
-        'Claim line item budget line item is not valid for the claim fiscal year.'
-      )]
-    }
+const prepareClaimLineItemInputs = async (
+  rawDb: unknown,
+  input: ClaimMaterializationInput,
+  claim: PreparedClaim,
+  values: NormalizedMappedValue[]
+): Promise<{ lineItems: PreparedClaimLineItem[]; issues: GcsGcFormsMappingIssue[] }> => {
+  const lineItemCount = claimLineItemValueCount(values)
+
+  if (lineItemCount === 0 && !hasMaterializationMapping(input.mappings, CLAIM_LINE_ITEM_ENTITY)) {
+    return { lineItems: [], issues: [] }
   }
 
-  const budgetLineItemMapping = mappingForPath(input.mappings, CLAIM_LINE_ITEM_ENTITY, 'egcs_fc_fundingagreementbudgetlineitem')
+  if (lineItemCount === 0) {
+    return { lineItems: [], issues: [] }
+  }
 
-  return {
-    lineItem: {
-      budgetLineItemId,
-      budgetLineItemMappingId: budgetLineItemMapping ? budgetLineItemMapping.id : '',
+  const lineItems: PreparedClaimLineItem[] = []
+  const issues: GcsGcFormsMappingIssue[] = []
+
+  for (let index = 0; index < lineItemCount; index += 1) {
+    if (!hasAnyClaimLineItemValue(values, index)) {
+      continue
+    }
+
+    const rowMissingIssues = collectMissingClaimLineItemIssues(input, values, index)
+    if (rowMissingIssues.length > 0) {
+      issues.push(...rowMissingIssues)
+      continue
+    }
+
+    const {
+      submittedCostCategory,
+      submittedCostSubsection,
+      submittedLineItem,
       description,
       amount,
       currency
-    },
-    issues: []
+    } = readClaimLineItemValues(values, index)
+
+    if (!submittedCostCategory || !submittedCostSubsection || !submittedLineItem || amount === null) {
+      issues.push(invalidClaimLineItemValuesIssue(input))
+      continue
+    }
+
+    const matchedBudgetLineItem = await fetchMatchingClaimLineItemBudgetLineItem(
+      rawDb,
+      claim,
+      submittedCostCategory,
+      submittedCostSubsection,
+      submittedLineItem
+    )
+
+    const budgetLineItemMapping = mappingForPath(input.mappings, CLAIM_LINE_ITEM_ENTITY, 'egcs_fc_fundingagreementbudgetlineitem')
+      || mappingForPath(input.mappings, CLAIM_LINE_ITEM_ENTITY, 'egcs_fc_submittedlineitem')
+
+    lineItems.push({
+      budgetLineItemId: matchedBudgetLineItem ? String(matchedBudgetLineItem.id) : null,
+      budgetLineItemMappingId: budgetLineItemMapping ? budgetLineItemMapping.id : '',
+      submittedCostCategory,
+      submittedCostSubsection,
+      submittedLineItem,
+      description: lineItemDescription(description, submittedCostCategory, submittedCostSubsection, submittedLineItem),
+      amount,
+      currency: normalizedText(currency || 'cad')
+    })
+  }
+
+  return {
+    lineItems,
+    issues
   }
 }
 
@@ -560,6 +742,19 @@ const existingClaimLink = async (
     .executeTakeFirst()
 }
 
+const existingClaimBySubmissionUuid = async (
+  rawDb: unknown,
+  submissionUuid: string
+) => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  return await db
+    .selectFrom('Funding_Case_Agreement_Claim')
+    .select(['id'])
+    .where('egcs_fc_gcformssubmissionuuid', '=', submissionUuid)
+    .where('_deleted', '=', false)
+    .executeTakeFirst()
+}
+
 const claimLinkValue = (claimId: string, claim: PreparedClaim): JsonValue => ({
   claimId,
   agreementId: claim.agreementId,
@@ -574,6 +769,9 @@ const claimLinkValue = (claimId: string, claim: PreparedClaim): JsonValue => ({
 const lineItemLinkValue = (lineItemId: string, lineItem: PreparedClaimLineItem): JsonValue => ({
   lineItemId,
   budgetLineItemId: lineItem.budgetLineItemId,
+  submittedCostCategory: lineItem.submittedCostCategory,
+  submittedCostSubsection: lineItem.submittedCostSubsection,
+  submittedLineItem: lineItem.submittedLineItem,
   description: lineItem.description,
   amount: lineItem.amount,
   currency: lineItem.currency
@@ -586,11 +784,21 @@ export const materializeGcFormsClaimSubmission = async (
   const hasClaimMappings = hasMaterializationMapping(input.mappings, CLAIM_ENTITY)
   const hasLineItemMappings = hasMaterializationMapping(input.mappings, CLAIM_LINE_ITEM_ENTITY)
   const existing = await existingClaimLink(rawDb, input.submissionId)
+  const existingBySubmissionUuid = await existingClaimBySubmissionUuid(rawDb, input.submissionUuid)
 
   if (existing) {
     return {
       status: 'already_materialized',
       claimId: String(existing.owner_id),
+      lineItemIds: [],
+      issues: []
+    }
+  }
+
+  if (existingBySubmissionUuid) {
+    return {
+      status: 'already_materialized',
+      claimId: String(existingBySubmissionUuid.id),
       lineItemIds: [],
       issues: []
     }
@@ -615,12 +823,12 @@ export const materializeGcFormsClaimSubmission = async (
   }
   const claimInput = preparedClaim.claim
 
-  const preparedLineItem = await prepareClaimLineItemInput(rawDb, input, claimInput, values)
-  if (preparedLineItem.issues.length > 0) {
+  const preparedLineItems = await prepareClaimLineItemInputs(rawDb, input, claimInput, values)
+  if (preparedLineItems.issues.length > 0) {
     return {
       status: 'failed',
       lineItemIds: [],
-      issues: preparedLineItem.issues
+      issues: preparedLineItems.issues
     }
   }
 
@@ -635,7 +843,8 @@ export const materializeGcFormsClaimSubmission = async (
       egcs_fc_periodstart: claimInput.periodStart,
       egcs_fc_periodend: claimInput.periodEnd,
       egcs_fc_receiveddate: claimInput.receivedDate,
-      egcs_fc_status: 'draft'
+      egcs_fc_gcformssubmissionuuid: input.submissionUuid,
+      egcs_fc_status: 'submitted'
     }
 
     const claim = await trx
@@ -659,13 +868,16 @@ export const materializeGcFormsClaimSubmission = async (
       .execute()
 
     const lineItemIds: string[] = []
-    if (preparedLineItem.lineItem) {
+    for (const preparedLineItem of preparedLineItems.lineItems) {
       const lineValues: ClaimLineItemInsert = {
         egcs_fc_fundingagreementclaim: claimId,
-        egcs_fc_fundingagreementbudgetlineitem: preparedLineItem.lineItem.budgetLineItemId,
-        egcs_fc_description: preparedLineItem.lineItem.description,
-        egcs_fc_amount: preparedLineItem.lineItem.amount,
-        egcs_fc_currency: preparedLineItem.lineItem.currency
+        egcs_fc_fundingagreementbudgetlineitem: preparedLineItem.budgetLineItemId,
+        egcs_fc_submittedcostcategory: preparedLineItem.submittedCostCategory,
+        egcs_fc_submittedcostsubsection: preparedLineItem.submittedCostSubsection,
+        egcs_fc_submittedlineitem: preparedLineItem.submittedLineItem,
+        egcs_fc_description: preparedLineItem.description,
+        egcs_fc_amount: preparedLineItem.amount,
+        egcs_fc_currency: preparedLineItem.currency
       }
 
       const lineItem = await trx
@@ -680,12 +892,12 @@ export const materializeGcFormsClaimSubmission = async (
         .insertInto('extensions.gcs_gcforms_destination_links')
         .values({
           submission_id: input.submissionId,
-          mapping_id: mappingIdsByKey.get(preparedLineItem.lineItem.budgetLineItemMappingId) ?? null,
+          mapping_id: mappingIdsByKey.get(preparedLineItem.budgetLineItemMappingId) ?? null,
           owner_type: getGcFormsDestinationOwnerType(CLAIM_LINE_ITEM_ENTITY),
           owner_id: lineItemId,
           destination_entity: CLAIM_LINE_ITEM_ENTITY,
           destination_path: CLAIM_LINE_ITEM_ENTITY,
-          value: lineItemLinkValue(lineItemId, preparedLineItem.lineItem) as never
+          value: lineItemLinkValue(lineItemId, preparedLineItem) as never
         })
         .execute()
     }

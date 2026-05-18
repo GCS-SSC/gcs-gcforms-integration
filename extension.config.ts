@@ -16,6 +16,9 @@ export default defineGcsExtension({
     },
     streamConfig: {
       path: './components/StreamGcFormsIntegrationConfig.vue'
+    },
+    streamConfigPage: {
+      path: './components/StreamGcFormsIntegrationConfig.vue'
     }
   },
   client: {
@@ -81,6 +84,9 @@ export default defineGcsExtension({
   migrations: [
     {
       path: './server/migrations/0001_gcforms_integration.ts'
+    },
+    {
+      path: './server/migrations/0002_claim_submission_uuid.ts'
     }
   ],
   serverHandlers: [
@@ -98,6 +104,11 @@ export default defineGcsExtension({
       route: '/agencies/[agencyId]/credentials/[credentialId]',
       method: 'delete',
       path: './server/api/agency-credentials.delete.ts'
+    },
+    {
+      route: '/streams/[streamId]/template',
+      method: 'get',
+      path: './server/api/template.get.ts'
     },
     {
       route: '/streams/[streamId]/template',
