@@ -3,12 +3,32 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
-  getClientRequestUrl,
-  throwFetchResponseError,
   type GcsExtensionJsonConfig,
   type GcsResolvedExtension,
   type JsonValue
 } from '@gcs-ssc/extensions'
+import {
+  ExtensionAlert,
+  ExtensionButton,
+  ExtensionEntityEditorWorkspace,
+  ExtensionFormField,
+  ExtensionIcon,
+  ExtensionInput,
+  ExtensionModal,
+  ExtensionProgress,
+  ExtensionResourceLayoutCard,
+  ExtensionRouteTabs,
+  ExtensionSaveButton,
+  ExtensionSelect,
+  ExtensionSelectMenu,
+  ExtensionStatusBadge,
+  useHostApi,
+  useExtensionApi,
+  useExtensionGroupedTableExpansion,
+  useExtensionI18n,
+  useExtensionToast,
+  type GcsGroupedTableRow
+} from '@gcs-ssc/extensions/ui'
 import {
   parseGcFormsStreamConfig,
   type GcFormsFieldCatalogItem,
@@ -16,7 +36,6 @@ import {
   type GcsGcFormsTransform,
   type GcsGcFormsStreamConfig
 } from '../shared/gcforms'
-import type { GroupedTableRow } from '~/composables/useGroupedTableExpansion'
 
 const {
   extension,
@@ -33,8 +52,10 @@ const {
 }>()
 
 const config = defineModel<GcsExtensionJsonConfig>({ required: true })
-const { locale } = useI18n()
-const toast = useToast()
+const { locale } = useExtensionI18n()
+const toast = useExtensionToast()
+const api = useExtensionApi(extension.key)
+const hostApi = useHostApi()
 
 const labels = {
   en: {
@@ -46,6 +67,7 @@ const labels = {
     templateShapeChangedDescription: 'The saved GC Forms template no longer matches the remote form shape. Refresh the template, review the mappings, and save to clear this warning.',
     sync: 'Sync submissions',
     syncTitle: 'Sync submissions',
+    syncDescription: 'Import new GC Forms submissions and report synced, skipped, and failed results.',
     syncInProgress: 'Syncing submissions from GC Forms.',
     syncComplete: 'Sync complete',
     syncFailed: 'Sync failed',
@@ -108,6 +130,7 @@ const labels = {
     failedOn: 'Failed on',
     matchTarget: 'Match target',
     matchSubmission: 'Match submission',
+    matchSubmissionDescription: 'Select the existing host record that should be linked to this failed GC Forms submission.',
     selectedMatch: 'Selected match',
     possibleAgreement: 'Agreement',
     matcherUnavailable: 'No matcher is available for this failure yet.',
@@ -138,6 +161,7 @@ const labels = {
     templateShapeChangedDescription: 'Le modele GC Forms enregistre ne correspond plus a la structure du formulaire distant. Actualisez le modele, verifiez les correspondances et enregistrez pour effacer cet avertissement.',
     sync: 'Synchroniser les soumissions',
     syncTitle: 'Synchroniser les soumissions',
+    syncDescription: 'Importer les nouvelles soumissions GC Forms et afficher les resultats synchronises, ignores et echoues.',
     syncInProgress: 'Synchronisation des soumissions GC Forms.',
     syncComplete: 'Synchronisation terminee',
     syncFailed: 'Echec de la synchronisation',
@@ -200,6 +224,7 @@ const labels = {
     failedOn: 'Echec sur',
     matchTarget: 'Cible de correspondance',
     matchSubmission: 'Associer la soumission',
+    matchSubmissionDescription: 'Selectionnez l enregistrement hote existant a associer a cette soumission GC Forms echouee.',
     selectedMatch: 'Correspondance selectionnee',
     possibleAgreement: 'Entente',
     matcherUnavailable: 'Aucun outil de correspondance n est encore disponible pour cet echec.',
@@ -320,7 +345,7 @@ type FormFieldTableRow = {
 
 type MappingFieldTableRow = ClaimMappingFieldTableRow | FormFieldTableRow
 
-type GroupedMappingFieldRow = GroupedTableRow<MappingFieldTableRow>
+type GroupedMappingFieldRow = GcsGroupedTableRow<MappingFieldTableRow>
 
 const buildHostConfig = (value: GcsGcFormsStreamConfig): GcsExtensionJsonConfig => ({
   claim: {
@@ -634,7 +659,7 @@ const {
   getGroupedRowCount: getMappingGroupedRowCount,
   canExpandGroupedRow: canExpandMappingGroupedRow,
   updateExpandedRows: updateMappingExpandedRows
-} = useGroupedTableExpansion<MappingFieldTableRow>({
+} = useExtensionGroupedTableExpansion<MappingFieldTableRow>({
   rows: mappingFieldRows,
   groups: [
     {
@@ -773,30 +798,12 @@ const upsertMappingRow = (row: MappingFieldTableRow, value: unknown) => {
 
 const errorDescription = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
-const postJson = async (path: string, body?: unknown): Promise<unknown> => {
-  const response = await fetch(getClientRequestUrl(`/api/extensions/gcs-gcforms-integration${path}`), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  })
-
-  if (!response.ok) {
-    await throwFetchResponseError(response)
-  }
-
-  return await response.json() as unknown
+const postJson = async (path: string, body?: JsonValue | Record<string, unknown>): Promise<unknown> => {
+  return body === undefined ? await api.post(path) : await api.post(path, body)
 }
 
 const getJson = async (path: string): Promise<unknown> => {
-  const response = await fetch(getClientRequestUrl(`/api/extensions/gcs-gcforms-integration${path}`))
-
-  if (!response.ok) {
-    await throwFetchResponseError(response)
-  }
-
-  return await response.json() as unknown
+  return await api.get(path)
 }
 
 const refreshTemplate = async () => {
@@ -830,19 +837,13 @@ const saveConfiguration = async () => {
   try {
     isSaving.value = true
     statusMessage.value = tLocal('loading')
-    const response = await fetch(getClientRequestUrl(`/api/extensions/streams/${streamId}`), {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        extensionKey: extension.key,
-        enabled: streamEnabled,
-        config: config.value
-      })
+    await hostApi.patch(`/api/extensions/streams/${streamId}`, {
+      extensionKey: extension.key,
+      enabled: streamEnabled,
+      config: config.value
+    }, {
+      signal: controller.signal
     })
-    if (!response.ok) {
-      await throwFetchResponseError(response)
-    }
 
     statusMessage.value = tLocal('success')
     toast.add({
@@ -961,9 +962,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <CommonEntityEditorWorkspace :content-test-id="hostLayout ? 'gcforms-config-page-content' : undefined">
+  <ExtensionEntityEditorWorkspace :content-test-id="hostLayout ? 'gcforms-config-page-content' : undefined">
     <template #sidebar>
-      <CommonRouteTabs
+      <ExtensionRouteTabs
         v-model="selectedTab"
         :items="entityTabs"
         orientation="vertical"
@@ -979,7 +980,7 @@ onMounted(async () => {
         <h3 class="text-base font-semibold text-highlighted">
           {{ tLocal('failedMaterializations') }}
         </h3>
-        <UButton
+        <ExtensionButton
           icon="i-lucide-refresh-cw"
           color="neutral"
           variant="outline"
@@ -988,7 +989,7 @@ onMounted(async () => {
           :loading="isLoadingMaterializationFailures"
           @click="refreshMaterializationFailures" />
       </div>
-      <CommonResourceLayoutCard
+      <ExtensionResourceLayoutCard
         v-model:search="failedMaterializationSearch"
         v-model:status-filter="failedMaterializationStatusFilter"
         v-model:pagination="failedMaterializationPagination"
@@ -1029,7 +1030,7 @@ onMounted(async () => {
         </template>
 
         <template #actions-cell="{ row }">
-          <UButton
+          <ExtensionButton
             icon="i-lucide-link"
             color="primary"
             variant="ghost"
@@ -1038,7 +1039,7 @@ onMounted(async () => {
             :aria-label="tLocal('match')"
             @click="openMatchModal(row.original)" />
         </template>
-      </CommonResourceLayoutCard>
+      </ExtensionResourceLayoutCard>
     </section>
 
     <section v-else-if="selectedTab === 'fundingclaimreconcile'" class="space-y-6">
@@ -1052,7 +1053,7 @@ onMounted(async () => {
           </p>
         </div>
         <div class="flex items-center gap-2">
-          <UButton
+          <ExtensionButton
             icon="i-lucide-refresh-cw"
             color="neutral"
             variant="outline"
@@ -1060,7 +1061,7 @@ onMounted(async () => {
             :label="tLocal('refreshTemplate')"
             :loading="isRefreshingTemplate"
             @click="refreshTemplate" />
-          <UButton
+          <ExtensionButton
             icon="i-lucide-download"
             color="neutral"
             variant="outline"
@@ -1068,7 +1069,7 @@ onMounted(async () => {
             :label="tLocal('sync')"
             :loading="isSyncing"
             @click="openSyncModal" />
-          <CommonSaveButton
+          <ExtensionSaveButton
             type="button"
             :label="tLocal('save')"
             :loading="isSaving"
@@ -1077,11 +1078,11 @@ onMounted(async () => {
         </div>
       </div>
 
-      <UFormField :label="tLocal('formId')" class="max-w-xl">
-        <UInput v-model="localConfig.claim.formId" />
-      </UFormField>
+      <ExtensionFormField :label="tLocal('formId')" class="max-w-xl">
+        <ExtensionInput v-model="localConfig.claim.formId" />
+      </ExtensionFormField>
 
-      <UAlert
+      <ExtensionAlert
         v-if="templateShapeChanged"
         color="error"
         variant="soft"
@@ -1089,7 +1090,7 @@ onMounted(async () => {
         :title="tLocal('templateShapeChanged')"
         :description="tLocal('templateShapeChangedDescription')" />
 
-      <UAlert
+      <ExtensionAlert
         v-if="fieldCatalog.length === 0"
         color="warning"
         variant="soft"
@@ -1098,7 +1099,7 @@ onMounted(async () => {
         :description="tLocal('refreshBeforeMapping')" />
 
       <div class="space-y-4">
-        <CommonResourceLayoutCard
+        <ExtensionResourceLayoutCard
           v-model:search="mappingFieldSearch"
           v-model:pagination="mappingFieldPagination"
           :data="mappingFieldRows"
@@ -1120,19 +1121,19 @@ onMounted(async () => {
                 class="group flex min-w-0 items-center gap-3 text-left"
                 :aria-label="row.getIsExpanded?.() ? tLocal('collapse') : tLocal('expand')"
                 @click="row.toggleExpanded?.()">
-                <UIcon
+                <ExtensionIcon
                   :name="row.getIsExpanded?.() ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
                   class="size-4 text-zinc-400 transition-colors group-hover:text-primary" />
                 <span class="text-sm font-semibold text-zinc-900 dark:text-white">
                   {{ row.original.mappingGroupLabel }}
                 </span>
-                <CommonStatusBadge variant="count" size="sm" :label="String(getMappingGroupedRowCount(row as GroupedMappingFieldRow))" />
+                <ExtensionStatusBadge variant="count" size="sm" :label="String(getMappingGroupedRowCount(row as GroupedMappingFieldRow))" />
               </button>
               <div v-else class="flex min-w-0 items-center gap-3">
                 <span class="ml-7 text-sm font-semibold text-zinc-900 dark:text-white">
                   {{ row.original.mappingGroupLabel }}
                 </span>
-                <CommonStatusBadge variant="count" size="sm" :label="String(getMappingGroupedRowCount(row as GroupedMappingFieldRow))" />
+                <ExtensionStatusBadge variant="count" size="sm" :label="String(getMappingGroupedRowCount(row as GroupedMappingFieldRow))" />
               </div>
             </div>
 
@@ -1161,12 +1162,12 @@ onMounted(async () => {
             <span v-else-if="rowIsFormField(row.original)" class="font-mono text-xs text-muted">
               {{ row.original.sourceQuestionId }}
             </span>
-            <USelect
+            <ExtensionSelect
               v-else-if="rowIsRepeatedClaimMappingField(row.original)"
               :model-value="mappingRowSourceValue(row.original)"
               :items="repeatedSourceOptions"
               @update:model-value="(value: unknown) => upsertMappingRow(row.original, value)" />
-            <USelect
+            <ExtensionSelect
               v-else-if="rowIsClaimMappingField(row.original)"
               :model-value="mappingRowSelectValue(row.original)"
               :items="sourceOptionsForMappingRow(row.original)"
@@ -1178,12 +1179,12 @@ onMounted(async () => {
               {{ mappingFieldRows.length }} {{ tLocal('mappings') }}
             </span>
           </template>
-        </CommonResourceLayoutCard>
+        </ExtensionResourceLayoutCard>
 
       </div>
     </section>
 
-    <UAlert
+    <ExtensionAlert
       v-else
       color="info"
       variant="soft"
@@ -1191,9 +1192,10 @@ onMounted(async () => {
       :title="tLocal('inProgress')"
       :description="tLocal('inProgressDescription')" />
 
-    <UModal
+    <ExtensionModal
       v-model:open="isMatchModalOpen"
       :title="matchModalTitle"
+      :description="tLocal('matchSubmissionDescription')"
       :dismissible="resolvingSubmissionId === null">
       <template #body>
         <div v-if="selectedMaterializationFailure" class="space-y-4">
@@ -1216,8 +1218,8 @@ onMounted(async () => {
             </div>
           </div>
 
-          <UFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')">
-            <USelectMenu
+          <ExtensionFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')">
+            <ExtensionSelectMenu
               v-model:search-term="matchSearchTerm"
               v-model="selectedMatchId"
               :items="searchedAgreementSelectOptions"
@@ -1226,9 +1228,9 @@ onMounted(async () => {
               searchable
               :search-input="{ placeholder: tLocal('match') }"
               :placeholder="tLocal('selectedMatch')" />
-          </UFormField>
+          </ExtensionFormField>
 
-          <UAlert
+          <ExtensionAlert
             v-else
             color="info"
             variant="soft"
@@ -1240,14 +1242,14 @@ onMounted(async () => {
 
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton
+          <ExtensionButton
             color="neutral"
             variant="ghost"
             class="cursor-default"
             :label="tLocal('close')"
             :disabled="resolvingSubmissionId !== null"
             @click="isMatchModalOpen = false" />
-          <UButton
+          <ExtensionButton
             v-if="selectedFailureHasAgreementMatcher"
             color="primary"
             variant="solid"
@@ -1259,23 +1261,24 @@ onMounted(async () => {
             @click="resolveMaterializationFailure" />
         </div>
       </template>
-    </UModal>
+    </ExtensionModal>
 
-    <UModal
+    <ExtensionModal
       v-model:open="isSyncModalOpen"
       :title="tLocal('syncTitle')"
+      :description="tLocal('syncDescription')"
       :dismissible="!isSyncing">
       <template #body>
         <div class="space-y-4">
           <div v-if="isSyncing" class="space-y-3">
             <div class="flex items-center gap-3 text-sm text-muted">
-              <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+              <ExtensionIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
               <span>{{ tLocal('syncInProgress') }}</span>
             </div>
-            <UProgress animation="carousel" />
+            <ExtensionProgress animation="carousel" />
           </div>
 
-          <UAlert
+          <ExtensionAlert
             v-else-if="syncError"
             color="error"
             variant="soft"
@@ -1284,7 +1287,7 @@ onMounted(async () => {
             :description="syncError" />
 
           <div v-else-if="syncResult" class="space-y-4">
-            <UAlert
+            <ExtensionAlert
               color="success"
               variant="soft"
               icon="i-lucide-circle-check"
@@ -1326,7 +1329,7 @@ onMounted(async () => {
               </div>
             </div>
 
-            <UAlert
+            <ExtensionAlert
               v-if="syncResult.problems > 0"
               color="warning"
               variant="soft"
@@ -1339,14 +1342,14 @@ onMounted(async () => {
 
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton
+          <ExtensionButton
             color="neutral"
             variant="ghost"
             class="cursor-default"
             :label="tLocal('close')"
             :disabled="isSyncing"
             @click="isSyncModalOpen = false" />
-          <UButton
+          <ExtensionButton
             v-if="syncResult && syncResult.problems > 0"
             color="primary"
             variant="solid"
@@ -1356,6 +1359,6 @@ onMounted(async () => {
             @click="reviewFailedMaterializations" />
         </div>
       </template>
-    </UModal>
-  </CommonEntityEditorWorkspace>
+    </ExtensionModal>
+  </ExtensionEntityEditorWorkspace>
 </template>

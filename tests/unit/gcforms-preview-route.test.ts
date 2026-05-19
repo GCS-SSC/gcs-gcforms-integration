@@ -39,7 +39,14 @@ describe('GC Forms preview route', () => {
 
     const result = await handler(event)
 
-    expect(authorizeGcFormsStreamMock).toHaveBeenCalledWith(event, 'stream-1', 'update')
+    expect(authorizeGcFormsStreamMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { streamId: 'stream-1' },
+        db: {}
+      }),
+      'stream-1',
+      'update'
+    )
     expect(result).toEqual(expect.objectContaining({
       ok: true,
       values: [expect.objectContaining({

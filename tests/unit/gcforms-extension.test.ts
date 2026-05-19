@@ -10,8 +10,8 @@ describe('GC Forms extension manifest and entity tab contract', () => {
   it('declares static RBAC routes for entity submission tabs', () => {
     const routes = extensionDefinition.serverHandlers?.map(handler => ({
       route: handler.route,
-      target: handler.rbac?.entity.target,
-      param: handler.rbac?.entity.param
+      target: handler.rbac && 'entity' in handler.rbac ? handler.rbac.entity.target : undefined,
+      param: handler.rbac && 'entity' in handler.rbac ? handler.rbac.entity.param : undefined
     }))
 
     expect(routes).toEqual(expect.arrayContaining([
@@ -35,7 +35,7 @@ describe('GC Forms extension manifest and entity tab contract', () => {
 
     expect(source).toContain('context: ExtensionEntityTabContext')
     expect(helperSource).toContain('context.target === \'agreement\'')
-    expect(helperSource).toContain('/api/extensions/${extensionKey}/agreements/${context.agreementId}/submissions')
+    expect(helperSource).toContain('/agreements/${context.agreementId}/submissions')
     expect(source).not.toContain('ownerType, ownerId')
     expect(helperSource).not.toContain('/entities/')
   })

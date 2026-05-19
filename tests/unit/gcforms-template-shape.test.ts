@@ -5,7 +5,7 @@ import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
-import { refreshTemplate, syncStream } from '../../server/runtime'
+import { ensureConnection, ensureIntegration, refreshTemplate, syncStream } from '../../server/runtime'
 import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
@@ -312,6 +312,105 @@ afterEach(async () => {
 })
 
 describe('GC Forms template shape guard', () => {
+  it('updates an existing connection using the generated bigint id', async () => {
+    await db
+      .insertInto('extensions.gcs_gcforms_connections')
+      .values({
+        agency_id: '20',
+        stream_id: '30',
+        credential_id: 'old-credential',
+        form_id: 'form-1',
+        api_url: 'https://old.example.test/v1',
+        identity_provider_url: 'https://old-idp.example.test',
+        project_identifier: 'old-project',
+        contact_email: null,
+        preferred_language: 'en',
+        status: 'active',
+        _deleted: false
+      })
+      .execute()
+
+    await expect(ensureConnection(db, '30', {
+      credentialId: 'credential-1',
+      claim: {
+        formId: 'form-1'
+      },
+      apiUrl: 'https://api.example.test/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      preferredLanguage: 'fr',
+      mappings: []
+    })).resolves.toMatchObject({
+      credential_id: 'credential-1',
+      form_id: 'form-1',
+      identity_provider_url: 'https://idp.example.test',
+      preferred_language: 'fr'
+    })
+
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(db.fn.countAll().as('count'))
+      .where('stream_id', '=', '30')
+      .where('form_id', '=', 'form-1')
+      .where('_deleted', '=', false)
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 1 })
+  })
+
+  it('replaces existing mappings when ensuring the same integration again', async () => {
+    const connection = await ensureConnection(db, '30', {
+      credentialId: 'credential-1',
+      claim: {
+        formId: 'form-1'
+      },
+      preferredLanguage: 'en',
+      mappings: []
+    })
+    const config = {
+      claim: {
+        formId: 'form-1'
+      },
+      mappings: [
+        {
+          id: 'agreement-number',
+          sourceQuestionId: 'agreement_number',
+          destinationEntity: 'claim' as const,
+          destinationPath: 'egcs_fc_fundingagreement',
+          transform: 'string' as const,
+          required: true,
+          defaultValue: null,
+          onMissing: 'block' as const,
+          onInvalid: 'block' as const
+        }
+      ]
+    }
+
+    const first = await ensureIntegration(db, '30', String(connection.id), config)
+    await ensureIntegration(db, '30', String(connection.id), {
+      ...config,
+      mappings: [
+        {
+          ...config.mappings[0],
+          sourceQuestionId: 'agreement_number_updated'
+        }
+      ]
+    })
+
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_field_mappings')
+      .select(['source_question_id', '_deleted'])
+      .where('integration_id', '=', String(first.id))
+      .orderBy('id')
+      .execute()).resolves.toEqual([
+      expect.objectContaining({
+        source_question_id: 'agreement_number',
+        _deleted: true
+      }),
+      expect.objectContaining({
+        source_question_id: 'agreement_number_updated',
+        _deleted: false
+      })
+    ])
+  })
+
   it('blocks sync when the remote template shape changed until the user refreshes the stored baseline', async () => {
     let currentTemplate = initialTemplate
     const fetchMock = vi.fn(async (url: string) => {

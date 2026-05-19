@@ -1,19 +1,12 @@
 /* eslint-disable jsdoc/require-jsdoc */
-import type { H3Event } from 'h3'
+import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { authorizeGcFormsStream } from '../runtime'
 import { listClaimMaterializationFailures } from '../materialization-failures'
 
-type ExtensionEvent = H3Event & {
-  context: {
-    $authContext?: unknown
-    $db: unknown
-    params?: Record<string, string | undefined>
-  }
-}
+export default defineGcsExtensionRouteHandler(async (context) => {
+  const { params, db } = context
+  const streamId = params.streamId ?? ''
+  await authorizeGcFormsStream(context, streamId, 'read')
 
-export default async (event: ExtensionEvent) => {
-  const streamId = event.context.params?.streamId ?? ''
-  await authorizeGcFormsStream(event as never, streamId, 'read')
-
-  return await listClaimMaterializationFailures(event.context.$db, streamId)
-}
+  return await listClaimMaterializationFailures(db, streamId)
+})

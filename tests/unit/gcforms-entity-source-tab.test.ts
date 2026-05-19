@@ -6,29 +6,29 @@ describe('GC Forms entity source tab helpers', () => {
     [
       'agreement',
       { target: 'agreement', agreementId: 'agreement-1' },
-      '/api/extensions/gcs-gcforms-integration/agreements/agreement-1/submissions'
+      '/agreements/agreement-1/submissions'
     ],
     [
       'proponent',
       { target: 'proponent', applicantRecipientId: 'recipient-1' },
-      '/api/extensions/gcs-gcforms-integration/proponents/recipient-1/submissions'
+      '/proponents/recipient-1/submissions'
     ],
     [
       'claim',
       { target: 'claim', claimId: 'claim-1' },
-      '/api/extensions/gcs-gcforms-integration/claims/claim-1/submissions'
+      '/claims/claim-1/submissions'
     ],
     [
       'monitor',
       { target: 'monitor', monitorId: 'monitor-1' },
-      '/api/extensions/gcs-gcforms-integration/monitors/monitor-1/submissions'
+      '/monitors/monitor-1/submissions'
     ]
   ])('builds the %s submissions endpoint', (_label, context, expected) => {
-    expect(buildGcFormsEntitySourceEndpoint('gcs-gcforms-integration', context as never)).toBe(expected)
+    expect(buildGcFormsEntitySourceEndpoint(context as never)).toBe(expected)
   })
 
   it('returns an empty endpoint when the target id is unavailable', () => {
-    expect(buildGcFormsEntitySourceEndpoint('gcs-gcforms-integration', {
+    expect(buildGcFormsEntitySourceEndpoint({
       target: 'agreement'
     } as never)).toBe('')
   })

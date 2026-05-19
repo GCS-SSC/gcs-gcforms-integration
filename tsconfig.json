@@ -9,23 +9,6 @@
       "./types/host-globals.d.ts",
       "node"
     ],
-    "paths": {
-      "@gcs-ssc/extensions": [
-        "../../packages/gcs-ssc-extensions/src/index.ts"
-      ],
-      "@gcs-ssc/extensions/server": [
-        "../../packages/gcs-ssc-extensions/src/server.ts"
-      ],
-      "@gcs-ssc/extensions/nuxt": [
-        "../../packages/gcs-ssc-extensions/src/nuxt.ts"
-      ],
-      "~/*": [
-        "../../app/*"
-      ],
-      "@/*": [
-        "../../app/*"
-      ]
-    },
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true

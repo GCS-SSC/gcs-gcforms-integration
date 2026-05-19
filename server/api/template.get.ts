@@ -1,18 +1,11 @@
 /* eslint-disable jsdoc/require-jsdoc */
-import type { H3Event } from 'h3'
+import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { authorizeGcFormsStream, getStoredTemplate } from '../runtime'
 
-type ExtensionEvent = H3Event & {
-  context: {
-    $authContext?: unknown
-    $db: unknown
-    params?: Record<string, string | undefined>
-  }
-}
+export default defineGcsExtensionRouteHandler(async (context) => {
+  const { params, db } = context
+  const streamId = params.streamId ?? ''
+  await authorizeGcFormsStream(context, streamId, 'read')
 
-export default async (event: ExtensionEvent) => {
-  const streamId = event.context.params?.streamId ?? ''
-  await authorizeGcFormsStream(event as never, streamId, 'read')
-
-  return await getStoredTemplate(event.context.$db, streamId)
-}
+  return await getStoredTemplate(db, streamId)
+})

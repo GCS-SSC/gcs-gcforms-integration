@@ -1,4 +1,4 @@
-import type { H3Event } from 'h3'
+import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { listGcFormsCredentials } from '../credentials'
 
-export default async (event: H3Event) => await listGcFormsCredentials(event as never)
+export default defineGcsExtensionRouteHandler(async context => await listGcFormsCredentials(context))

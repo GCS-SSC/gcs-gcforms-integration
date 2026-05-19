@@ -2,8 +2,9 @@
 /* eslint-disable jsdoc/require-jsdoc */
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
-import { getClientRequestUrl, type GcsExtensionJsonConfig, type GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
-import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions/server'
+import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
+import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
+import { ExtensionBadge, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { buildGcFormsEntitySourceEndpoint } from './gcforms-entity-source-tab'
 
 const {
@@ -16,7 +17,8 @@ const {
   rbac: GcsExtensionRbacRequirement
 }>()
 
-const { locale } = useI18n()
+const { locale } = useExtensionI18n()
+const api = useExtensionApi(extensionKey)
 
 const labels = {
   en: {
@@ -52,7 +54,7 @@ interface LinkedSubmission {
 const items: Ref<LinkedSubmission[]> = ref([])
 const isLoading: Ref<boolean> = ref(true)
 
-const endpoint = computed(() => buildGcFormsEntitySourceEndpoint(extensionKey, context))
+const endpoint = computed(() => buildGcFormsEntitySourceEndpoint(context))
 
 const refresh = async () => {
   try {
@@ -62,13 +64,10 @@ const refresh = async () => {
       return
     }
 
-    const response = await fetch(getClientRequestUrl(endpoint.value))
-    if (!response.ok) {
-      items.value = []
-      return
-    }
-    const payload = await response.json() as { items?: LinkedSubmission[] }
+    const payload = await api.get<{ items?: LinkedSubmission[] }>(endpoint.value)
     items.value = payload.items ?? []
+  } catch {
+    items.value = []
   } finally {
     isLoading.value = false
   }
@@ -117,9 +116,9 @@ const hasItems = computed(() => items.value.length > 0)
               {{ item.submission_name }}
             </td>
             <td class="px-3 py-2">
-              <UBadge color="neutral" variant="subtle">
+              <ExtensionBadge color="neutral" variant="subtle">
                 {{ item.status }}
-              </UBadge>
+              </ExtensionBadge>
             </td>
             <td class="px-3 py-2 text-muted">
               {{ item.gcforms_created_at || '-' }}

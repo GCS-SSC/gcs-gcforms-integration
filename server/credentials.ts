@@ -1,10 +1,10 @@
 /* eslint-disable jsdoc/require-jsdoc */
 import { createPrivateKey } from 'node:crypto'
-import { readBody, type H3Event } from 'h3'
 import {
   createGcsExtensionUserError,
   deleteEncryptedExtensionSecret,
-  setEncryptedExtensionSecret
+  setEncryptedExtensionSecret,
+  type GcsExtensionRouteContext
 } from '@gcs-ssc/extensions/server'
 import {
   GCFORMS_EXTENSION_KEY,
@@ -20,18 +20,37 @@ type ExtensionAuthContext = {
   }
 }
 
-type CredentialRouteEvent = H3Event & {
+type CredentialRouteContext = GcsExtensionRouteContext
+
+const toCredentialContext = (contextOrEvent: CredentialRouteContext | {
   context: {
-    $authContext?: ExtensionAuthContext
+    $authContext?: unknown
     $db: unknown
     params?: Record<string, string | undefined>
   }
+}): CredentialRouteContext => {
+  if ('params' in contextOrEvent && 'db' in contextOrEvent) {
+    return contextOrEvent
+  }
+
+  const event = contextOrEvent
+  return {
+    event,
+    db: event.context.$db,
+    params: event.context.params ?? {},
+    auth: event.context.$authContext as never,
+    config: {},
+    readBody: async () => {
+      throw new Error('Request body is not available on this test credential context.')
+    },
+    getHeader: () => undefined
+  } as CredentialRouteContext
 }
 
-const getAgencyId = (event: CredentialRouteEvent): string => event.context.params?.agencyId ?? ''
+const getAgencyId = (context: CredentialRouteContext): string => context.params.agencyId ?? ''
 
 const authorizeGcFormsAgencyCredentials = (
-  event: CredentialRouteEvent,
+  context: CredentialRouteContext,
   agencyId: string,
   action: 'read' | 'update'
 ) => {
@@ -46,7 +65,7 @@ const authorizeGcFormsAgencyCredentials = (
     })
   }
 
-  const authContext = event.context.$authContext
+  const authContext = context.auth as ExtensionAuthContext | undefined
   if (!authContext) {
     throw createGcsExtensionUserError({
       statusCode: 401,
@@ -86,11 +105,12 @@ const parseCredentialMetadata = (
   }
 }
 
-export const listGcFormsCredentials = async (event: CredentialRouteEvent) => {
-  const agencyId = getAgencyId(event)
-  authorizeGcFormsAgencyCredentials(event, agencyId, 'read')
+export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
+  const context = toCredentialContext(contextOrEvent)
+  const agencyId = getAgencyId(context)
+  authorizeGcFormsAgencyCredentials(context, agencyId, 'read')
 
-  const rows = await asGcFormsIntegrationDb(event.context.$db)
+  const rows = await asGcFormsIntegrationDb(context.db)
     .selectFrom('extensions.secret_entry')
     .select(['secret_key', 'metadata', 'updated_at', 'created_at'])
     .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
@@ -118,11 +138,12 @@ export const listGcFormsCredentials = async (event: CredentialRouteEvent) => {
   }
 }
 
-export const saveGcFormsCredential = async (event: CredentialRouteEvent) => {
-  const agencyId = getAgencyId(event)
-  authorizeGcFormsAgencyCredentials(event, agencyId, 'update')
+export const saveGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
+  const context = toCredentialContext(contextOrEvent)
+  const agencyId = getAgencyId(context)
+  authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
-  const body = GcFormsCredentialInputSchema.parse(await readBody(event))
+  const body = GcFormsCredentialInputSchema.parse(await context.readBody())
   try {
     createPrivateKey(body.key)
   } catch {
@@ -136,7 +157,7 @@ export const saveGcFormsCredential = async (event: CredentialRouteEvent) => {
     })
   }
 
-  await setEncryptedExtensionSecret(asGcFormsIntegrationDb(event.context.$db) as never, {
+  await setEncryptedExtensionSecret(asGcFormsIntegrationDb(context.db) as never, {
     rootKey: getGcFormsSecretRootKey(),
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
@@ -168,13 +189,14 @@ export const saveGcFormsCredential = async (event: CredentialRouteEvent) => {
   }
 }
 
-export const deleteGcFormsCredential = async (event: CredentialRouteEvent) => {
-  const agencyId = getAgencyId(event)
-  const credentialId = event.context.params?.credentialId ?? ''
-  authorizeGcFormsAgencyCredentials(event, agencyId, 'update')
+export const deleteGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
+  const context = toCredentialContext(contextOrEvent)
+  const agencyId = getAgencyId(context)
+  const credentialId = context.params.credentialId ?? ''
+  authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
   await deleteEncryptedExtensionSecret(
-    asGcFormsIntegrationDb(event.context.$db) as never,
+    asGcFormsIntegrationDb(context.db) as never,
     GCFORMS_EXTENSION_KEY,
     'agency',
     agencyId,

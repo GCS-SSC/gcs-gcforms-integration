@@ -1,23 +1,10 @@
 /* eslint-disable jsdoc/require-jsdoc */
-import type { H3Event } from 'h3'
-import { createGcsExtensionUserError } from '@gcs-ssc/extensions/server'
+import { createGcsExtensionUserError, defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db'
 
-type ExtensionEvent = H3Event & {
-  context: {
-    $db: unknown
-    gcsExtension?: {
-      entity?: {
-        ownerType?: string
-        ownerId?: string
-      }
-    }
-  }
-}
-
-export default async (event: ExtensionEvent) => {
-  const ownerType = event.context.gcsExtension?.entity?.ownerType
-  const ownerId = event.context.gcsExtension?.entity?.ownerId
+export default defineGcsExtensionRouteHandler(async ({ entity, db: rawDb }) => {
+  const ownerType = entity?.ownerType
+  const ownerId = entity?.ownerId
   if (!ownerType || !ownerId) {
     throw createGcsExtensionUserError({
       statusCode: 400,
@@ -29,7 +16,7 @@ export default async (event: ExtensionEvent) => {
     })
   }
 
-  const db = asGcFormsIntegrationDb(event.context.$db)
+  const db = asGcFormsIntegrationDb(rawDb)
 
   const items = await db
     .selectFrom('extensions.gcs_gcforms_destination_links')
@@ -47,8 +34,8 @@ export default async (event: ExtensionEvent) => {
       'extensions.gcs_gcforms_submissions.mapped_values as mapped_values',
       'extensions.gcs_gcforms_submissions.mapping_issues as mapping_issues'
     ])
-    .where('extensions.gcs_gcforms_destination_links.owner_type', '=', ownerType)
-    .where('extensions.gcs_gcforms_destination_links.owner_id', '=', ownerId)
+    .where('extensions.gcs_gcforms_destination_links.owner_type', '=', String(ownerType))
+    .where('extensions.gcs_gcforms_destination_links.owner_id', '=', String(ownerId))
     .where('extensions.gcs_gcforms_destination_links._deleted', '=', false)
     .where('extensions.gcs_gcforms_submissions._deleted', '=', false)
     .orderBy('extensions.gcs_gcforms_submissions.gcforms_created_at', 'desc')
@@ -64,4 +51,4 @@ export default async (event: ExtensionEvent) => {
     page: 1,
     limit: items.length || 10
   }
-}
+})

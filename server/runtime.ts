@@ -3,9 +3,9 @@ import { sql } from 'kysely'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
+  type GcsExtensionRouteContext,
   resolveExtensionStreamContext
 } from '@gcs-ssc/extensions/server'
-import type { H3Event } from 'h3'
 import {
   DEFAULT_GCFORMS_API_URL,
   DEFAULT_GCFORMS_IDP_URL,
@@ -46,7 +46,7 @@ type AgencyEnablementRow = {
 }
 
 type ConnectionRow = {
-  id: string
+  id: string | number
   form_id: string
   credential_id: string
   api_url: string
@@ -98,13 +98,6 @@ type SyncSubmissionContext = {
   currentTemplate: unknown
 }
 
-type ExtensionRouteEvent = H3Event & {
-  context: {
-    $authContext?: ExtensionAuthContext
-    $db: unknown
-  }
-}
-
 const maybeString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null
 
@@ -116,8 +109,7 @@ const jsonbValue = (value: unknown) =>
 const DEV_EXTENSION_SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
 export const getGcFormsSecretRootKey = (): string => {
-  const runtimeConfig = typeof useRuntimeConfig === 'function' ? useRuntimeConfig() : {}
-  const key = runtimeConfig.extensionSecretsEncryptionKey ?? process.env.GCS_EXTENSION_SECRETS_KEY
+  const key = process.env.GCS_EXTENSION_SECRETS_KEY
   if (key) {
     return key
   }
@@ -206,11 +198,11 @@ const resolveGcFormsCredentialId = async (
 }
 
 export const authorizeGcFormsStream = async (
-  event: ExtensionRouteEvent,
+  context: GcsExtensionRouteContext,
   streamId: string,
   action: 'read' | 'update'
 ): Promise<void> => {
-  const authContext = event.context.$authContext
+  const authContext = context.auth as ExtensionAuthContext | undefined
   if (!authContext) {
     throw createGcsExtensionUserError({
       statusCode: 401,
@@ -222,7 +214,7 @@ export const authorizeGcFormsStream = async (
     })
   }
 
-  const streamContext = await resolveExtensionStreamContext(event.context.$db as never, streamId)
+  const streamContext = await resolveExtensionStreamContext(context.db as never, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
       statusCode: 404,
@@ -240,7 +232,7 @@ export const authorizeGcFormsStream = async (
     streamContext.scope,
     authContext.userId,
     true,
-    event.context.$db
+    context.db
   )
   const canAccessScope = authContext.userAbilities.authorize('transfer_payment', action, streamContext.scope)
 
@@ -407,7 +399,7 @@ export const getStoredTemplate = async (
 
 const updateConnection = async (
   db: GcFormsIntegrationDb,
-  id: string,
+  id: string | number,
   config: GcsGcFormsStreamConfig
 ) => {
   const claimFormId = resolveGcFormsClaimFormId(config)
@@ -423,7 +415,7 @@ const updateConnection = async (
       preferred_language: config.preferredLanguage,
       updated_at: new Date()
     })
-    .where('id', '=', id)
+    .where('id', '=', sql<string>`${String(id)}::bigint`)
     .returningAll()
     .executeTakeFirstOrThrow()
 }
@@ -456,7 +448,7 @@ export const ensureConnection = async (
     .executeTakeFirst()
 
   if (existing) {
-    return await updateConnection(db, String(existing.id), config) as ConnectionRow
+    return await updateConnection(db, existing.id, config) as ConnectionRow
   }
 
   return await db
@@ -522,7 +514,7 @@ export const ensureIntegration = async (
   await db
     .updateTable('extensions.gcs_gcforms_field_mappings')
     .set({ _deleted: true })
-    .where('integration_id', '=', String(integration.id))
+    .where('integration_id', '=', sql<string>`${String(integration.id)}::bigint`)
     .where('_deleted', '=', false)
     .execute()
 
@@ -644,7 +636,19 @@ const updateStreamTemplateShapeChanged = async (
   streamId: string,
   templateShapeChanged: boolean
 ) => {
-  await (rawDb as HostDb)
+  await (rawDb as {
+    updateTable: (table: 'extensions.stream_configuration') => {
+      set: (values: Record<string, unknown>) => {
+        where: (...args: unknown[]) => {
+          where: (...args: unknown[]) => {
+            where: (...args: unknown[]) => {
+              execute: () => Promise<unknown>
+            }
+          }
+        }
+      }
+    }
+  })
     .updateTable('extensions.stream_configuration')
     .set({
       config: sql`jsonb_set(config, '{templateShapeChanged}', ${sql.raw(templateShapeChanged ? "'true'" : "'false'")}::jsonb, true)` as never

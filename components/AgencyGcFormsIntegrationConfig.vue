@@ -3,11 +3,19 @@
 import { onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
-  getClientRequestUrl,
-  throwFetchResponseError,
   type GcsExtensionJsonConfig,
   type GcsResolvedExtension
 } from '@gcs-ssc/extensions'
+import {
+  ExtensionButton,
+  ExtensionCheckbox,
+  ExtensionFormField,
+  ExtensionInput,
+  ExtensionRawTextarea,
+  ExtensionSaveButton,
+  useExtensionApi,
+  useExtensionI18n
+} from '@gcs-ssc/extensions/ui'
 import {
   DEFAULT_GCFORMS_API_URL,
   DEFAULT_GCFORMS_IDP_URL,
@@ -16,13 +24,13 @@ import {
   type GcsGcFormsAgencyConfig
 } from '../shared/gcforms'
 
-const { agencyId } = defineProps<{
+const { agencyId, extension } = defineProps<{
   extension: GcsResolvedExtension
   agencyId: string
 }>()
 
 const config = defineModel<GcsExtensionJsonConfig>({ required: true })
-const { locale } = useI18n()
+const { locale } = useExtensionI18n()
 
 const labels = {
   en: {
@@ -106,18 +114,16 @@ watch(config, value => {
   localConfig.value = parseGcFormsAgencyConfig(value)
 })
 
-const credentialEndpoint = `/api/extensions/gcs-gcforms-integration/agencies/${agencyId}/credentials`
+const api = useExtensionApi(extension.key)
+const credentialEndpoint = `/agencies/${agencyId}/credentials`
 
 const refreshCredentials = async () => {
   try {
     isLoadingCredentials.value = true
-    const response = await fetch(getClientRequestUrl(credentialEndpoint))
-    if (!response.ok) {
-      credentials.value = []
-      return
-    }
-    const payload = await response.json() as { items?: GcFormsCredentialSummary[] }
+    const payload = await api.get<{ items?: GcFormsCredentialSummary[] }>(credentialEndpoint)
     credentials.value = payload.items ?? []
+  } catch {
+    credentials.value = []
   } finally {
     isLoadingCredentials.value = false
   }
@@ -127,17 +133,7 @@ const saveCredential = async () => {
   try {
     isSavingCredential.value = true
     statusMessage.value = ''
-    const response = await fetch(getClientRequestUrl(credentialEndpoint), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(credentialForm.value)
-    })
-    if (!response.ok) {
-      await throwFetchResponseError(response)
-    }
-
+    await api.post(credentialEndpoint, credentialForm.value)
     credentialForm.value.key = ''
     statusMessage.value = tLocal('saved')
     await refreshCredentials()
@@ -151,12 +147,7 @@ const saveCredential = async () => {
 const deleteCredential = async (credentialId: string) => {
   try {
     statusMessage.value = ''
-    const response = await fetch(getClientRequestUrl(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`), {
-      method: 'DELETE'
-    })
-    if (!response.ok) {
-      await throwFetchResponseError(response)
-    }
+    await api.delete(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`)
     statusMessage.value = tLocal('deleted')
     await refreshCredentials()
   } catch {
@@ -181,14 +172,14 @@ onMounted(async () => {
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
-      <UFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')">
-        <UInput v-model="localConfig.apiUrl" :placeholder="DEFAULT_GCFORMS_API_URL" />
-      </UFormField>
-      <UFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')">
-        <UInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
-      </UFormField>
+      <ExtensionFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')">
+        <ExtensionInput v-model="localConfig.apiUrl" :placeholder="DEFAULT_GCFORMS_API_URL" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')">
+        <ExtensionInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
+      </ExtensionFormField>
       <div class="md:col-span-2">
-        <UCheckbox
+        <ExtensionCheckbox
           v-model="localConfig.confirmSubmissions"
           :label="tLocal('confirmSubmissions')" />
       </div>
@@ -248,7 +239,7 @@ onMounted(async () => {
               {{ credential.formId }}
             </td>
             <td class="px-3 py-2">
-              <UButton
+              <ExtensionButton
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
@@ -263,25 +254,25 @@ onMounted(async () => {
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
-      <UFormField :label="tLocal('credentialId')">
-        <UInput v-model="credentialForm.credentialId" />
-      </UFormField>
-      <UFormField :label="tLocal('keyId')">
-        <UInput v-model="credentialForm.keyId" />
-      </UFormField>
-      <UFormField :label="tLocal('userId')">
-        <UInput v-model="credentialForm.userId" />
-      </UFormField>
-      <UFormField :label="tLocal('formId')">
-        <UInput v-model="credentialForm.formId" />
-      </UFormField>
-      <UFormField :label="tLocal('privateKey')" class="md:col-span-2">
-        <UTextarea v-model="credentialForm.key" :rows="8" />
-      </UFormField>
+      <ExtensionFormField :label="tLocal('credentialId')">
+        <ExtensionInput v-model="credentialForm.credentialId" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('keyId')">
+        <ExtensionInput v-model="credentialForm.keyId" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('userId')">
+        <ExtensionInput v-model="credentialForm.userId" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('formId')">
+        <ExtensionInput v-model="credentialForm.formId" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('privateKey')" class="md:col-span-2">
+        <ExtensionRawTextarea v-model="credentialForm.key" :rows="8" />
+      </ExtensionFormField>
     </div>
 
     <div class="flex items-center gap-3">
-      <CommonSaveButton
+      <ExtensionSaveButton
         :label="tLocal('saveCredential')"
         :loading="isSavingCredential"
         :disabled="isSavingCredential"

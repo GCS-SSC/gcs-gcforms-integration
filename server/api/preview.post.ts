@@ -1,22 +1,14 @@
 /* eslint-disable jsdoc/require-jsdoc */
-import type { H3Event } from 'h3'
-import { readBody } from 'h3'
+import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { normalizeGcFormsAnswers, parseGcFormsStreamConfig, previewGcFormsMapping } from '../../shared/gcforms'
 import { authorizeGcFormsStream } from '../runtime'
 
-type ExtensionEvent = H3Event & {
-  context: {
-    $authContext?: unknown
-    $db: unknown
-    params?: Record<string, string | undefined>
-  }
-}
+export default defineGcsExtensionRouteHandler(async (context) => {
+  const { params, readBody } = context
+  const streamId = params.streamId ?? ''
+  await authorizeGcFormsStream(context, streamId, 'update')
 
-export default async (event: ExtensionEvent) => {
-  const streamId = event.context.params?.streamId ?? ''
-  await authorizeGcFormsStream(event as never, streamId, 'update')
-
-  const body = await readBody(event) as { answers?: unknown; config?: unknown }
+  const body = await readBody<{ answers?: unknown; config?: unknown }>()
   const config = parseGcFormsStreamConfig(body.config ?? {})
   const answers = typeof body.answers === 'string'
     ? normalizeGcFormsAnswers(body.answers)
@@ -26,4 +18,4 @@ export default async (event: ExtensionEvent) => {
     ok: true,
     ...previewGcFormsMapping(answers, config.mappings)
   }
-}
+})

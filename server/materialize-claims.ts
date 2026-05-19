@@ -93,6 +93,13 @@ const CLAIM_REQUIRED_PATHS = [
   'egcs_fc_periodend',
   'egcs_fc_receiveddate'
 ] as const
+const CLAIM_OPTIONAL_PATHS = [
+  'egcs_fc_isfinalforyear'
+] as const
+const CLAIM_PATHS = [
+  ...CLAIM_REQUIRED_PATHS,
+  ...CLAIM_OPTIONAL_PATHS
+] as const
 
 const CLAIM_LINE_ITEM_REQUIRED_PATHS = [
   'egcs_fc_submittedcostcategory',
@@ -303,7 +310,7 @@ const requiredDate = (value: JsonValue | undefined): Date | null => {
 
 const claimFieldValue = (
   values: NormalizedMappedValue[],
-  path: typeof CLAIM_REQUIRED_PATHS[number]
+  path: typeof CLAIM_PATHS[number]
 ): JsonValue | undefined => mappedValueForPath(values, CLAIM_ENTITY, path)?.value
 
 const claimLineItemFieldValue = (
