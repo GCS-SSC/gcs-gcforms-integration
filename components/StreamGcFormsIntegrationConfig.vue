@@ -66,6 +66,8 @@ const labels = {
     template: 'Form fields',
     refreshTemplate: 'Refresh template',
     refreshTemplateFailed: 'Template refresh failed',
+    downloadClaimForm: 'Download claim form',
+    downloadClaimFormFailed: 'Claim form download failed',
     templateShapeChanged: 'GC Forms template shape changed',
     templateShapeChangedDescription: 'The saved GC Forms template no longer matches the remote form shape. Refresh the template, review the mappings, and save to clear this warning.',
     sync: 'Sync submissions',
@@ -162,6 +164,8 @@ const labels = {
     template: 'Champs du formulaire',
     refreshTemplate: 'Actualiser le modele',
     refreshTemplateFailed: 'Echec de l actualisation du modele',
+    downloadClaimForm: 'Telecharger le formulaire de reclamation',
+    downloadClaimFormFailed: 'Echec du telechargement du formulaire de reclamation',
     templateShapeChanged: 'La structure du modele GC Forms a change',
     templateShapeChangedDescription: 'Le modele GC Forms enregistre ne correspond plus a la structure du formulaire distant. Actualisez le modele, verifiez les correspondances et enregistrez pour effacer cet avertissement.',
     sync: 'Synchroniser les soumissions',
@@ -269,6 +273,7 @@ const fieldCatalog: Ref<GcFormsFieldCatalogItem[]> = ref([])
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
 const isLoadingCredentials: Ref<boolean> = ref(false)
 const isRefreshingTemplate: Ref<boolean> = ref(false)
+const isDownloadingClaimTemplate: Ref<boolean> = ref(false)
 const isSyncing: Ref<boolean> = ref(false)
 const isSaving: Ref<boolean> = ref(false)
 const isSyncModalOpen: Ref<boolean> = ref(false)
@@ -910,6 +915,36 @@ const loadStoredTemplate = async () => {
   }
 }
 
+const downloadJsonFile = (fileName: string, value: unknown) => {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+const downloadClaimTemplate = async () => {
+  if (isDownloadingClaimTemplate.value) {
+    return
+  }
+
+  try {
+    isDownloadingClaimTemplate.value = true
+    const template = await getJson(`/streams/${streamId}/claim-template`)
+    downloadJsonFile(`gcs-claim-form-stream-${streamId}.json`, template)
+  } catch (error: unknown) {
+    toast.add({
+      title: tLocal('downloadClaimFormFailed'),
+      description: errorDescription(error),
+      color: 'error'
+    })
+  } finally {
+    isDownloadingClaimTemplate.value = false
+  }
+}
+
 const syncSubmissions = async () => {
   if (selectedCredentialMissing.value) {
     syncError.value = tLocal('credentialRequired')
@@ -1078,16 +1113,8 @@ onMounted(async () => {
     </section>
 
     <section v-else-if="selectedTab === 'fundingclaimreconcile'" class="space-y-6">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 class="text-base font-semibold text-highlighted">
-            {{ tLocal('claimMappings') }}
-          </h3>
-          <p class="mt-1 text-sm text-muted">
-            {{ tLocal('savedByHost') }}
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-center justify-end gap-2">
           <ExtensionButton
             icon="i-lucide-refresh-cw"
             color="neutral"
@@ -1097,6 +1124,14 @@ onMounted(async () => {
             :loading="isRefreshingTemplate"
             :disabled="selectedCredentialMissing"
             @click="refreshTemplate" />
+          <ExtensionButton
+            icon="i-lucide-file-json"
+            color="neutral"
+            variant="outline"
+            class="cursor-default"
+            :label="tLocal('downloadClaimForm')"
+            :loading="isDownloadingClaimTemplate"
+            @click="downloadClaimTemplate" />
           <ExtensionButton
             icon="i-lucide-download"
             color="neutral"
@@ -1112,6 +1147,15 @@ onMounted(async () => {
             :loading="isSaving"
             :disabled="isSaving"
             @click="saveConfiguration" />
+        </div>
+
+        <div>
+          <h3 class="text-base font-semibold text-highlighted">
+            {{ tLocal('claimMappings') }}
+          </h3>
+          <p class="mt-1 text-sm text-muted">
+            {{ tLocal('savedByHost') }}
+          </p>
         </div>
       </div>
 

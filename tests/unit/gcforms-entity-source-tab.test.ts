@@ -4,11 +4,6 @@ import { buildGcFormsEntitySourceEndpoint } from '../../components/gcforms-entit
 describe('GC Forms entity source tab helpers', () => {
   it.each([
     [
-      'agreement',
-      { target: 'agreement', agreementId: 'agreement-1' },
-      '/agreements/agreement-1/submissions'
-    ],
-    [
       'proponent',
       { target: 'proponent', applicantRecipientId: 'recipient-1' },
       '/proponents/recipient-1/submissions'
@@ -29,7 +24,7 @@ describe('GC Forms entity source tab helpers', () => {
 
   it('returns an empty endpoint when the target id is unavailable', () => {
     expect(buildGcFormsEntitySourceEndpoint({
-      target: 'agreement'
+      target: 'proponent'
     } as never)).toBe('')
   })
 })

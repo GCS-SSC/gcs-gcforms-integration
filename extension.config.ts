@@ -39,20 +39,6 @@ export default defineGcsExtension({
   client: {
     tabs: [
       {
-        target: 'agreement',
-        id: 'gcforms-source',
-        label: {
-          en: 'GC Forms',
-          fr: 'GC Forms'
-        },
-        icon: 'i-lucide-file-input',
-        path: './components/GcFormsEntitySourceTab.vue',
-        rbac: {
-          subject: 'agreement',
-          action: 'read'
-        }
-      },
-      {
         target: 'proponent',
         id: 'gcforms-source',
         label: {
@@ -156,6 +142,16 @@ export default defineGcsExtension({
       path: './server/api/template.get.ts'
     },
     {
+      route: '/streams/[streamId]/claim-template',
+      method: 'get',
+      rbac: {
+        subject: 'transfer_payment',
+        action: 'read',
+        stream: { param: 'streamId' }
+      },
+      path: './server/api/claim-template.get.ts'
+    },
+    {
       route: '/streams/[streamId]/template',
       method: 'post',
       rbac: {
@@ -214,19 +210,6 @@ export default defineGcsExtension({
         stream: { param: 'streamId' }
       },
       path: './server/api/preview.post.ts'
-    },
-    {
-      route: '/agreements/[agreementId]/submissions',
-      method: 'get',
-      path: './server/api/entity-submissions.get.ts',
-      rbac: {
-        subject: 'agreement',
-        action: 'read',
-        entity: {
-          target: 'agreement',
-          param: 'agreementId'
-        }
-      }
     },
     {
       route: '/proponents/[applicantRecipientId]/submissions',

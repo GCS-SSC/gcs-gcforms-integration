@@ -1,0 +1,440 @@
+{
+  "layout": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "titleEn": "GCS claim submission integration test",
+  "titleFr": "Test d integration des demandes GCS",
+  "elements": [
+    {
+      "id": 1,
+      "type": "textField",
+      "uuid": "00000000-0000-4000-8000-000000000001",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim",
+          "agreement"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          }
+        ],
+        "titleEn": "Agreement number",
+        "titleFr": "Numero d accord",
+        "questionId": "agreement_number",
+        "validation": {
+          "required": true
+        },
+        "subElements": [],
+        "descriptionEn": "",
+        "descriptionFr": "",
+        "placeholderEn": "AGR-0001",
+        "placeholderFr": "AGR-0001"
+      }
+    },
+    {
+      "id": 2,
+      "type": "dropdown",
+      "uuid": "00000000-0000-4000-8000-000000000002",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim",
+          "agreement-51"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          },
+          {
+            "en": "2025-2026",
+            "fr": "2025-2026"
+          },
+          {
+            "en": "2026-2027",
+            "fr": "2026-2027"
+          }
+        ],
+        "titleEn": "Fiscal year",
+        "titleFr": "Exercice financier",
+        "questionId": "fiscal_year",
+        "validation": {
+          "required": true
+        },
+        "subElements": [],
+        "descriptionEn": "Limited to fiscal years seeded for the agency that owns GCS agreement 51.",
+        "descriptionFr": "Limite aux exercices financiers initialises pour l organisation de l accord GCS 51.",
+        "placeholderEn": "",
+        "placeholderFr": ""
+      }
+    },
+    {
+      "id": 3,
+      "type": "dropdown",
+      "uuid": "00000000-0000-4000-8000-000000000003",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          },
+          {
+            "en": "April",
+            "fr": "Avril"
+          },
+          {
+            "en": "May",
+            "fr": "Mai"
+          },
+          {
+            "en": "June",
+            "fr": "Juin"
+          },
+          {
+            "en": "July",
+            "fr": "Juillet"
+          },
+          {
+            "en": "August",
+            "fr": "Aout"
+          },
+          {
+            "en": "September",
+            "fr": "Septembre"
+          },
+          {
+            "en": "October",
+            "fr": "Octobre"
+          },
+          {
+            "en": "November",
+            "fr": "Novembre"
+          },
+          {
+            "en": "December",
+            "fr": "Decembre"
+          },
+          {
+            "en": "January",
+            "fr": "Janvier"
+          },
+          {
+            "en": "February",
+            "fr": "Fevrier"
+          },
+          {
+            "en": "March",
+            "fr": "Mars"
+          }
+        ],
+        "titleEn": "Claim period start month",
+        "titleFr": "Mois de debut de la periode de demande",
+        "questionId": "claim_period_start_month",
+        "validation": {
+          "required": true
+        },
+        "subElements": [],
+        "descriptionEn": "GCS stores April as 0 and March as 11.",
+        "descriptionFr": "GCS enregistre avril comme 0 et mars comme 11.",
+        "placeholderEn": "",
+        "placeholderFr": ""
+      }
+    },
+    {
+      "id": 4,
+      "type": "dropdown",
+      "uuid": "00000000-0000-4000-8000-000000000004",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          },
+          {
+            "en": "April",
+            "fr": "Avril"
+          },
+          {
+            "en": "May",
+            "fr": "Mai"
+          },
+          {
+            "en": "June",
+            "fr": "Juin"
+          },
+          {
+            "en": "July",
+            "fr": "Juillet"
+          },
+          {
+            "en": "August",
+            "fr": "Aout"
+          },
+          {
+            "en": "September",
+            "fr": "Septembre"
+          },
+          {
+            "en": "October",
+            "fr": "Octobre"
+          },
+          {
+            "en": "November",
+            "fr": "Novembre"
+          },
+          {
+            "en": "December",
+            "fr": "Decembre"
+          },
+          {
+            "en": "January",
+            "fr": "Janvier"
+          },
+          {
+            "en": "February",
+            "fr": "Fevrier"
+          },
+          {
+            "en": "March",
+            "fr": "Mars"
+          }
+        ],
+        "titleEn": "Claim period end month",
+        "titleFr": "Mois de fin de la periode de demande",
+        "questionId": "claim_period_end_month",
+        "validation": {
+          "required": true
+        },
+        "subElements": [],
+        "descriptionEn": "GCS stores April as 0 and March as 11.",
+        "descriptionFr": "GCS enregistre avril comme 0 et mars comme 11.",
+        "placeholderEn": "",
+        "placeholderFr": ""
+      }
+    },
+    {
+      "id": 5,
+      "type": "dynamicRow",
+      "uuid": "00000000-0000-4000-8000-000000000005",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim",
+          "line_items"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          }
+        ],
+        "titleEn": "Submitted claim items",
+        "titleFr": "Articles soumis pour la demande",
+        "dynamicRow": {
+          "rowTitleEn": "Claim item",
+          "rowTitleFr": "Article de demande",
+          "addButtonTextEn": "Add another item",
+          "addButtonTextFr": "Ajouter un autre article",
+          "removeButtonTextEn": "Remove item",
+          "removeButtonTextFr": "Supprimer l article"
+        },
+        "questionId": "submitted_line_items",
+        "validation": {
+          "required": true
+        },
+        "subElements": [
+          {
+            "id": 501,
+            "type": "dropdown",
+            "properties": {
+              "tags": [
+                "gcs",
+                "claim",
+                "line_item"
+              ],
+              "choices": [
+                {
+                  "en": "",
+                  "fr": ""
+                },
+                {
+                  "en": "Operating Costs",
+                  "fr": "Couts de fonctionnement"
+                }
+              ],
+              "titleEn": "Cost category",
+              "titleFr": "Categorie de cout",
+              "questionId": "submitted_cost_category",
+              "validation": {
+                "required": true
+              },
+              "descriptionEn": "",
+              "descriptionFr": "",
+              "placeholderEn": "",
+              "placeholderFr": ""
+            }
+          },
+          {
+            "id": 502,
+            "type": "dropdown",
+            "properties": {
+              "tags": [
+                "gcs",
+                "claim",
+                "line_item"
+              ],
+              "choices": [
+                {
+                  "en": "",
+                  "fr": ""
+                },
+                {
+                  "en": "Administration",
+                  "fr": "Administration"
+                },
+                {
+                  "en": "Delivery",
+                  "fr": "Prestation"
+                }
+              ],
+              "titleEn": "Cost subsection",
+              "titleFr": "Sous-section de cout",
+              "questionId": "submitted_cost_subsection",
+              "validation": {
+                "required": true
+              },
+              "descriptionEn": "",
+              "descriptionFr": "",
+              "placeholderEn": "",
+              "placeholderFr": ""
+            }
+          },
+          {
+            "id": 503,
+            "type": "dropdown",
+            "properties": {
+              "tags": [
+                "gcs",
+                "claim",
+                "line_item"
+              ],
+              "choices": [
+                {
+                  "en": "",
+                  "fr": ""
+                },
+                {
+                  "en": "Equipment",
+                  "fr": "Equipement"
+                },
+                {
+                  "en": "Travel",
+                  "fr": "Deplacement"
+                }
+              ],
+              "titleEn": "Line item",
+              "titleFr": "Article de poste budgetaire",
+              "questionId": "submitted_line_item",
+              "validation": {
+                "required": true
+              },
+              "descriptionEn": "Select the short line item label, not the longer budget description.",
+              "descriptionFr": "Selectionnez le libelle court de l article, et non la description budgetaire complete.",
+              "placeholderEn": "",
+              "placeholderFr": ""
+            }
+          },
+          {
+            "id": 504,
+            "type": "textField",
+            "properties": {
+              "tags": [
+                "gcs",
+                "claim",
+                "line_item",
+                "money"
+              ],
+              "choices": [
+                {
+                  "en": "",
+                  "fr": ""
+                }
+              ],
+              "titleEn": "Submitted amount",
+              "titleFr": "Montant soumis",
+              "questionId": "submitted_amount",
+              "validation": {
+                "required": true
+              },
+              "descriptionEn": "Enter a number without a currency symbol.",
+              "descriptionFr": "Entrez un nombre sans symbole de devise.",
+              "placeholderEn": "10.00",
+              "placeholderFr": "10.00"
+            }
+          }
+        ],
+        "descriptionEn": "Select the cost category, subsection, line item, and submitted amount from GCS agreement 51.",
+        "descriptionFr": "Selectionnez la categorie de cout, la sous-section, l article de poste budgetaire et le montant soumis de l accord GCS 51."
+      }
+    },
+    {
+      "id": 6,
+      "type": "textArea",
+      "uuid": "00000000-0000-4000-8000-000000000006",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim",
+          "notes"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          }
+        ],
+        "titleEn": "Claim notes",
+        "titleFr": "Notes sur la demande",
+        "questionId": "claim_notes",
+        "validation": {
+          "required": false
+        },
+        "subElements": [],
+        "descriptionEn": "",
+        "descriptionFr": "",
+        "placeholderEn": "",
+        "placeholderFr": ""
+      }
+    }
+  ],
+  "confirmation": {
+    "descriptionEn": "Your local test claim submission was received.",
+    "descriptionFr": "Votre soumission locale de test a ete recue.",
+    "referrerUrlEn": "",
+    "referrerUrlFr": ""
+  },
+  "introduction": {
+    "descriptionEn": "Local-only test form for GCS claim submission integration.",
+    "descriptionFr": "Formulaire de test local pour l integration des demandes GCS."
+  },
+  "privacyPolicy": {
+    "descriptionEn": "Use test data only. This local form is not connected to production GCForms.",
+    "descriptionFr": "Utilisez seulement des donnees de test. Ce formulaire local n est pas connecte a GCForms en production."
+  }
+}
