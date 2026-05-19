@@ -5,7 +5,7 @@ import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
-import { ensureConnection, ensureIntegration, refreshTemplate, syncStream } from '../../server/runtime'
+import { ensureConnection, ensureIntegration, getStreamConfig, refreshTemplate, syncStream } from '../../server/runtime'
 import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
@@ -133,6 +133,20 @@ const createSchema = async () => {
       stream_id bigint NOT NULL,
       enabled boolean DEFAULT false NOT NULL,
       config jsonb DEFAULT '{}'::jsonb NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_credentials (
+      id bigserial PRIMARY KEY,
+      agency_id bigint NOT NULL,
+      name_en varchar(200) NOT NULL,
+      name_fr varchar(200) NOT NULL,
+      key_id varchar(200) NOT NULL,
+      user_id varchar(200) NOT NULL,
+      form_id varchar(80) NOT NULL,
+      created_at timestamptz DEFAULT now() NOT NULL,
+      updated_at timestamptz,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -269,11 +283,22 @@ const seedConfig = async () => {
       stream_id: '30',
       enabled: true,
       config: {
-        claim: {
-          formId: 'form-1'
-        },
+        credentialId: '1',
         mappings: []
       },
+      _deleted: false
+    })
+    .execute()
+  await db
+    .insertInto('extensions.gcs_gcforms_credentials')
+    .values({
+      id: '1',
+      agency_id: '20',
+      name_en: 'Claims',
+      name_fr: 'Reclamations',
+      key_id: 'key-1',
+      user_id: 'user-1',
+      form_id: 'form-1',
       _deleted: false
     })
     .execute()
@@ -282,12 +307,9 @@ const seedConfig = async () => {
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
     ownerId: '20',
-    secretKey: 'credential-1',
+    secretKey: '1',
     value: {
-      keyId: 'key-1',
-      key: privateKeyPem(),
-      userId: 'user-1',
-      formId: 'form-1'
+      key: privateKeyPem()
     }
   })
 }
@@ -312,13 +334,30 @@ afterEach(async () => {
 })
 
 describe('GC Forms template shape guard', () => {
+  it('fails with incomplete config when no credential id is selected', async () => {
+    await db
+      .updateTable('extensions.stream_configuration')
+      .set({
+        config: {
+          mappings: []
+        }
+      })
+      .where('stream_id', '=', '30')
+      .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
+      .execute()
+
+    await expect(getStreamConfig(db as never, '30')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CONFIG_INCOMPLETE'
+    })
+  })
+
   it('updates an existing connection using the generated bigint id', async () => {
     await db
       .insertInto('extensions.gcs_gcforms_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
-        credential_id: 'old-credential',
+        credential_id: '1',
         form_id: 'form-1',
         api_url: 'https://old.example.test/v1',
         identity_provider_url: 'https://old-idp.example.test',
@@ -331,16 +370,13 @@ describe('GC Forms template shape guard', () => {
       .execute()
 
     await expect(ensureConnection(db, '30', {
-      credentialId: 'credential-1',
-      claim: {
-        formId: 'form-1'
-      },
+      credentialId: '1',
       apiUrl: 'https://api.example.test/v1',
       identityProviderUrl: 'https://idp.example.test',
       preferredLanguage: 'fr',
       mappings: []
     })).resolves.toMatchObject({
-      credential_id: 'credential-1',
+      credential_id: '1',
       form_id: 'form-1',
       identity_provider_url: 'https://idp.example.test',
       preferred_language: 'fr'
@@ -355,19 +391,49 @@ describe('GC Forms template shape guard', () => {
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 1 })
   })
 
+  it('records selected credential id and selected credential form id', async () => {
+    await db
+      .insertInto('extensions.gcs_gcforms_credentials')
+      .values({
+        id: '2',
+        agency_id: '20',
+        name_en: 'Claims test',
+        name_fr: 'Reclamations test',
+        key_id: 'key-2',
+        user_id: 'user-2',
+        form_id: 'form-2',
+        _deleted: false
+      })
+      .execute()
+    await setEncryptedExtensionSecret(db as never, {
+      rootKey,
+      extensionKey: GCFORMS_EXTENSION_KEY,
+      ownerType: 'agency',
+      ownerId: '20',
+      secretKey: '2',
+      value: {
+        key: privateKeyPem()
+      }
+    })
+
+    await expect(ensureConnection(db, '30', {
+      credentialId: '2',
+      preferredLanguage: 'en',
+      mappings: []
+    })).resolves.toMatchObject({
+      credential_id: '2',
+      form_id: 'form-2'
+    })
+  })
+
   it('replaces existing mappings when ensuring the same integration again', async () => {
     const connection = await ensureConnection(db, '30', {
-      credentialId: 'credential-1',
-      claim: {
-        formId: 'form-1'
-      },
+      credentialId: '1',
       preferredLanguage: 'en',
       mappings: []
     })
     const config = {
-      claim: {
-        formId: 'form-1'
-      },
+      credentialId: '1',
       mappings: [
         {
           id: 'agreement-number',

@@ -44,11 +44,18 @@ const labels = {
     defaultUrl: 'Hosted GC Forms default',
     credentials: 'Credentials',
     credentialsDescription: 'Store GC Forms private API keys for this agency. Private keys are encrypted and are never shown after saving.',
-    credentialId: 'Credential ID',
+    nameEn: 'English name',
+    nameFr: 'French name',
+    name: 'Name',
     keyId: 'Key ID',
     userId: 'User ID',
     formId: 'Form ID',
     privateKey: 'Private key',
+    privateKeyEditHelp: 'Leave blank to keep the saved private key.',
+    updatedAt: 'Updated',
+    actions: 'Actions',
+    edit: 'Edit',
+    newCredential: 'New credential',
     saveCredential: 'Save credential',
     saved: 'Credential saved.',
     deleted: 'Credential deleted.',
@@ -67,11 +74,18 @@ const labels = {
     defaultUrl: 'Valeur par defaut de GC Forms heberge',
     credentials: 'Justificatifs',
     credentialsDescription: 'Enregistrez les cles API privees GC Forms pour cette organisation. Les cles privees sont chiffrees et ne sont jamais affichees apres l enregistrement.',
-    credentialId: 'ID du justificatif',
+    nameEn: 'Nom anglais',
+    nameFr: 'Nom francais',
+    name: 'Nom',
     keyId: 'ID de la cle',
     userId: 'ID utilisateur',
     formId: 'ID du formulaire',
     privateKey: 'Cle privee',
+    privateKeyEditHelp: 'Laissez vide pour conserver la cle privee enregistree.',
+    updatedAt: 'Mis a jour',
+    actions: 'Actions',
+    edit: 'Modifier',
+    newCredential: 'Nouveau justificatif',
     saveCredential: 'Enregistrer le justificatif',
     saved: 'Justificatif enregistre.',
     deleted: 'Justificatif supprime.',
@@ -85,19 +99,15 @@ const tLocal = (key: keyof typeof labels.en) => locale.value === 'fr' ? labels.f
 
 const localConfig: Ref<GcsGcFormsAgencyConfig> = ref(parseGcFormsAgencyConfig(config.value))
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
-const credentialForm: Ref<{
-  credentialId: string
+const credentialForm: Ref<Partial<{
+  id: string
+  name_en: string
+  name_fr: string
   keyId: string
   userId: string
   formId: string
   key: string
-}> = ref({
-  credentialId: '',
-  keyId: '',
-  userId: '',
-  formId: '',
-  key: ''
-})
+}> | null> = ref(null)
 const isLoadingCredentials: Ref<boolean> = ref(false)
 const isSavingCredential: Ref<boolean> = ref(false)
 const statusMessage: Ref<string> = ref('')
@@ -129,12 +139,38 @@ const refreshCredentials = async () => {
   }
 }
 
+const newCredential = () => {
+  credentialForm.value = {}
+}
+
+const editCredential = (credential: GcFormsCredentialSummary) => {
+  credentialForm.value = {
+    id: credential.id,
+    name_en: credential.name_en,
+    name_fr: credential.name_fr,
+    keyId: credential.keyId,
+    userId: credential.userId,
+    formId: credential.formId,
+    key: ''
+  }
+}
+
 const saveCredential = async () => {
+  const form = credentialForm.value
+  if (!form) {
+    return
+  }
+
   try {
     isSavingCredential.value = true
     statusMessage.value = ''
-    await api.post(credentialEndpoint, credentialForm.value)
-    credentialForm.value.key = ''
+    const body = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== ''))
+    if (form.id) {
+      await api.patch(`${credentialEndpoint}/${encodeURIComponent(form.id)}`, body)
+    } else {
+      await api.post(credentialEndpoint, form)
+    }
+    credentialForm.value = null
     statusMessage.value = tLocal('saved')
     await refreshCredentials()
   } catch {
@@ -154,6 +190,9 @@ const deleteCredential = async (credentialId: string) => {
     statusMessage.value = tLocal('failed')
   }
 }
+
+const displayName = (credential: GcFormsCredentialSummary): string =>
+  locale.value === 'fr' ? credential.name_fr : credential.name_en
 
 onMounted(async () => {
   await refreshCredentials()
@@ -199,6 +238,13 @@ onMounted(async () => {
         {{ tLocal('credentialsDescription') }}
       </p>
     </div>
+    <ExtensionButton
+      icon="i-lucide-plus"
+      color="primary"
+      variant="outline"
+      class="cursor-default"
+      :label="tLocal('newCredential')"
+      @click="newCredential" />
 
     <div v-if="credentials.length === 0 && !isLoadingCredentials" class="text-sm text-muted">
       {{ tLocal('noCredentials') }}
@@ -208,7 +254,10 @@ onMounted(async () => {
         <thead class="bg-muted/40 text-muted">
           <tr>
             <th class="px-3 py-2 font-medium">
-              {{ tLocal('credentialId') }}
+              {{ tLocal('name') }}
+            </th>
+            <th class="px-3 py-2 font-medium">
+              {{ tLocal('formId') }}
             </th>
             <th class="px-3 py-2 font-medium">
               {{ tLocal('keyId') }}
@@ -217,17 +266,20 @@ onMounted(async () => {
               {{ tLocal('userId') }}
             </th>
             <th class="px-3 py-2 font-medium">
-              {{ tLocal('formId') }}
+              {{ tLocal('updatedAt') }}
             </th>
             <th class="px-3 py-2 font-medium">
-              {{ tLocal('remove') }}
+              {{ tLocal('actions') }}
             </th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="credential in credentials" :key="credential.credentialId" class="border-t border-default">
-            <td class="px-3 py-2 font-mono text-xs">
-              {{ credential.credentialId }}
+          <tr v-for="credential in credentials" :key="credential.id" class="border-t border-default">
+            <td class="px-3 py-2 font-medium">
+              {{ displayName(credential) }}
+            </td>
+            <td class="px-3 py-2">
+              {{ credential.formId }}
             </td>
             <td class="px-3 py-2">
               {{ credential.keyId }}
@@ -236,26 +288,39 @@ onMounted(async () => {
               {{ credential.userId }}
             </td>
             <td class="px-3 py-2">
-              {{ credential.formId }}
+              {{ credential.updatedAt ?? '-' }}
             </td>
             <td class="px-3 py-2">
-              <ExtensionButton
-                icon="i-lucide-trash-2"
-                color="error"
-                variant="ghost"
-                size="sm"
-                class="cursor-default"
-                :aria-label="tLocal('remove')"
-                @click="deleteCredential(credential.credentialId)" />
+              <div class="flex items-center gap-1">
+                <ExtensionButton
+                  icon="i-lucide-pencil"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  class="cursor-default"
+                  :aria-label="tLocal('edit')"
+                  @click="editCredential(credential)" />
+                <ExtensionButton
+                  icon="i-lucide-trash-2"
+                  color="error"
+                  variant="ghost"
+                  size="sm"
+                  class="cursor-default"
+                  :aria-label="tLocal('remove')"
+                  @click="deleteCredential(credential.id)" />
+              </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2">
-      <ExtensionFormField :label="tLocal('credentialId')">
-        <ExtensionInput v-model="credentialForm.credentialId" />
+    <div v-if="credentialForm" class="grid gap-4 md:grid-cols-2">
+      <ExtensionFormField :label="tLocal('nameEn')">
+        <ExtensionInput v-model="credentialForm.name_en" />
+      </ExtensionFormField>
+      <ExtensionFormField :label="tLocal('nameFr')">
+        <ExtensionInput v-model="credentialForm.name_fr" />
       </ExtensionFormField>
       <ExtensionFormField :label="tLocal('keyId')">
         <ExtensionInput v-model="credentialForm.keyId" />
@@ -266,12 +331,15 @@ onMounted(async () => {
       <ExtensionFormField :label="tLocal('formId')">
         <ExtensionInput v-model="credentialForm.formId" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('privateKey')" class="md:col-span-2">
+      <ExtensionFormField
+        :label="tLocal('privateKey')"
+        :description="credentialForm.id ? tLocal('privateKeyEditHelp') : undefined"
+        class="md:col-span-2">
         <ExtensionRawTextarea v-model="credentialForm.key" :rows="8" />
       </ExtensionFormField>
     </div>
 
-    <div class="flex items-center gap-3">
+    <div v-if="credentialForm" class="flex items-center gap-3">
       <ExtensionSaveButton
         :label="tLocal('saveCredential')"
         :loading="isSavingCredential"

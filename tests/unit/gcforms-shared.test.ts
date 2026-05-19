@@ -5,8 +5,7 @@ import {
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
-  previewGcFormsMapping,
-  resolveGcFormsClaimFormId
+  previewGcFormsMapping
 } from '../../shared/gcforms'
 
 describe('GC Forms shared mapping utilities', () => {
@@ -226,30 +225,33 @@ describe('GC Forms shared mapping utilities', () => {
       confirmSubmissions: false
     })
     expect(parseGcFormsStreamConfig({
-      credentialId: null,
-      claim: {
-        formId: ' form-1 '
-      },
+      credentialId: ' 1 ',
       identityProviderUrl: '',
       preferredLanguage: 'en',
       mappings: []
     })).toMatchObject({
-      claim: {
-        formId: 'form-1'
-      },
+      credentialId: '1',
       confirmSubmissions: false,
       preferredLanguage: 'en',
       mappings: []
     })
   })
 
-  it('keeps legacy top-level form ID as a compatibility fallback', () => {
+  it('parses credential id and ignores legacy form id fields as runtime sources', () => {
     const config = parseGcFormsStreamConfig({
-      formId: ' legacy-form '
+      credentialId: ' 12 ',
+      formId: ' legacy-form ',
+      claim: {
+        formId: 'legacy-claim-form'
+      }
     })
 
-    expect(config.formId).toBe('legacy-form')
-    expect(resolveGcFormsClaimFormId(config)).toBe('legacy-form')
+    expect(config).toMatchObject({
+      credentialId: '12',
+      mappings: []
+    })
+    expect('formId' in config).toBe(false)
+    expect('claim' in config).toBe(false)
   })
 
   it('normalizes numeric answer keys to template question ids', () => {

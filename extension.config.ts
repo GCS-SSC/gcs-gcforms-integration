@@ -127,6 +127,16 @@ export default defineGcsExtension({
     },
     {
       route: '/agencies/[agencyId]/credentials/[credentialId]',
+      method: 'patch',
+      rbac: {
+        subject: 'agency',
+        action: 'update',
+        agency: { param: 'agencyId' }
+      },
+      path: './server/api/agency-credentials.patch.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/credentials/[credentialId]',
       method: 'delete',
       rbac: {
         subject: 'agency',

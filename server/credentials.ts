@@ -1,5 +1,6 @@
 /* eslint-disable jsdoc/require-jsdoc */
 import { createPrivateKey } from 'node:crypto'
+import { sql } from 'kysely'
 import {
   createGcsExtensionUserError,
   deleteEncryptedExtensionSecret,
@@ -8,10 +9,13 @@ import {
 } from '@gcs-ssc/extensions/server'
 import {
   GCFORMS_EXTENSION_KEY,
-  GcFormsCredentialInputSchema,
+  GcFormsCredentialCreateSchema,
+  GcFormsCredentialPatchSchema,
+  type GcFormsCredentialCreate,
+  type GcFormsCredentialPatch,
   type GcFormsCredentialSummary
 } from '../shared/gcforms'
-import { asGcFormsIntegrationDb } from './db'
+import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
 import { getGcFormsSecretRootKey } from './runtime'
 
 type ExtensionAuthContext = {
@@ -21,6 +25,17 @@ type ExtensionAuthContext = {
 }
 
 type CredentialRouteContext = GcsExtensionRouteContext
+
+type CredentialRow = {
+  id: string | number
+  name_en: string
+  name_fr: string
+  key_id: string
+  user_id: string
+  form_id: string
+  updated_at: Date | string | null
+  created_at: Date | string
+}
 
 const toCredentialContext = (contextOrEvent: CredentialRouteContext | {
   context: {
@@ -89,21 +104,38 @@ const authorizeGcFormsAgencyCredentials = (
   }
 }
 
-const parseCredentialMetadata = (
-  credentialId: string,
-  metadata: unknown,
-  updatedAt: unknown
-): GcFormsCredentialSummary => {
-  const source = typeof metadata === 'object' && metadata !== null ? metadata as Record<string, unknown> : {}
-
-  return {
-    credentialId,
-    keyId: typeof source.keyId === 'string' ? source.keyId : '',
-    userId: typeof source.userId === 'string' ? source.userId : '',
-    formId: typeof source.formId === 'string' ? source.formId : '',
-    updatedAt: updatedAt instanceof Date ? updatedAt.toISOString() : typeof updatedAt === 'string' ? updatedAt : null
+const assertValidPrivateKey = (key: string) => {
+  try {
+    createPrivateKey(key)
+  } catch {
+    throw createGcsExtensionUserError({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_PRIVATE_KEY_INVALID',
+      message: {
+        en: 'The GC Forms private key is not a valid PEM private key.',
+        fr: 'La cle privee GC Forms n est pas une cle privee PEM valide.'
+      }
+    })
   }
 }
+
+const toSummary = (row: CredentialRow): GcFormsCredentialSummary => ({
+  id: String(row.id),
+  name_en: row.name_en,
+  name_fr: row.name_fr,
+  keyId: row.key_id,
+  userId: row.user_id,
+  formId: row.form_id,
+  updatedAt: row.updated_at instanceof Date
+    ? row.updated_at.toISOString()
+    : typeof row.updated_at === 'string'
+      ? row.updated_at
+      : row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : typeof row.created_at === 'string'
+          ? row.created_at
+          : null
+})
 
 export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
   const context = toCredentialContext(contextOrEvent)
@@ -111,20 +143,15 @@ export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof t
   authorizeGcFormsAgencyCredentials(context, agencyId, 'read')
 
   const rows = await asGcFormsIntegrationDb(context.db)
-    .selectFrom('extensions.secret_entry')
-    .select(['secret_key', 'metadata', 'updated_at', 'created_at'])
-    .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
-    .where('owner_type', '=', 'agency')
-    .where('owner_id', '=', agencyId)
+    .selectFrom('extensions.gcs_gcforms_credentials')
+    .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+    .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
     .where('_deleted', '=', false)
-    .orderBy('secret_key', 'asc')
+    .orderBy('name_en', 'asc')
+    .orderBy('id', 'asc')
     .execute()
 
-  const items = rows.map(row => parseCredentialMetadata(
-    row.secret_key,
-    row.metadata,
-    row.updated_at ?? row.created_at
-  ))
+  const items = rows.map(row => toSummary(row))
 
   return {
     items,
@@ -138,54 +165,145 @@ export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof t
   }
 }
 
-export const saveGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
-  const context = toCredentialContext(contextOrEvent)
-  const agencyId = getAgencyId(context)
-  authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
-
-  const body = GcFormsCredentialInputSchema.parse(await context.readBody())
-  try {
-    createPrivateKey(body.key)
-  } catch {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_PRIVATE_KEY_INVALID',
-      message: {
-        en: 'The GC Forms private key is not a valid PEM private key.',
-        fr: 'La cle privee GC Forms n est pas une cle privee PEM valide.'
-      }
-    })
-  }
-
-  await setEncryptedExtensionSecret(asGcFormsIntegrationDb(context.db) as never, {
+const storePrivateKey = async (
+  db: GcFormsIntegrationDb,
+  agencyId: string,
+  credentialId: string,
+  key: string
+) => {
+  await setEncryptedExtensionSecret(db as never, {
     rootKey: getGcFormsSecretRootKey(),
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
     ownerId: agencyId,
-    secretKey: body.credentialId,
-    value: {
-      keyId: body.keyId,
-      key: body.key,
-      userId: body.userId,
-      formId: body.formId
-    },
-    metadata: {
-      credentialId: body.credentialId,
-      keyId: body.keyId,
-      userId: body.userId,
-      formId: body.formId
+    secretKey: credentialId,
+    value: { key },
+    metadata: { credentialId }
+  })
+}
+
+export const createGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
+  const context = toCredentialContext(contextOrEvent)
+  const agencyId = getAgencyId(context)
+  authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
+
+  const body = GcFormsCredentialCreateSchema.parse(await context.readBody())
+  assertValidPrivateKey(body.key)
+
+  const item = await asGcFormsIntegrationDb(context.db)
+    .transaction()
+    .execute(async trx => {
+      const row = await trx
+        .insertInto('extensions.gcs_gcforms_credentials')
+        .values({
+          agency_id: agencyId,
+          name_en: body.name_en,
+          name_fr: body.name_fr,
+          key_id: body.keyId,
+          user_id: body.userId,
+          form_id: body.formId
+        })
+        .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+        .executeTakeFirstOrThrow()
+
+      await storePrivateKey(trx, agencyId, String(row.id), body.key)
+
+      return toSummary(row)
+    })
+
+  return {
+    ok: true,
+    item
+  }
+}
+
+const getActiveCredentialRow = async (
+  db: GcFormsIntegrationDb,
+  agencyId: string,
+  credentialId: string
+) => await db
+  .selectFrom('extensions.gcs_gcforms_credentials')
+  .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+  .where('id', '=', sql<string>`${credentialId}::bigint`)
+  .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
+  .where('_deleted', '=', false)
+  .executeTakeFirst()
+
+const patchValues = (body: GcFormsCredentialPatch) => {
+  const values: Partial<{
+    name_en: string
+    name_fr: string
+    key_id: string
+    user_id: string
+    form_id: string
+    updated_at: Date
+  }> = {
+    updated_at: new Date()
+  }
+
+  if (body.name_en !== undefined) {
+    values.name_en = body.name_en
+  }
+  if (body.name_fr !== undefined) {
+    values.name_fr = body.name_fr
+  }
+  if (body.keyId !== undefined) {
+    values.key_id = body.keyId
+  }
+  if (body.userId !== undefined) {
+    values.user_id = body.userId
+  }
+  if (body.formId !== undefined) {
+    values.form_id = body.formId
+  }
+
+  return values
+}
+
+export const patchGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
+  const context = toCredentialContext(contextOrEvent)
+  const agencyId = getAgencyId(context)
+  const credentialId = context.params.credentialId ?? ''
+  authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
+
+  const body = GcFormsCredentialPatchSchema.parse(await context.readBody())
+  if (body.key !== undefined) {
+    assertValidPrivateKey(body.key)
+  }
+
+  const db = asGcFormsIntegrationDb(context.db)
+  const existing = await getActiveCredentialRow(db, agencyId, credentialId)
+  if (!existing) {
+    throw createGcsExtensionUserError({
+      statusCode: 404,
+      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+      message: {
+        en: 'The selected GC Forms credential is not available on the server.',
+        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+      }
+    })
+  }
+
+  const item = await db.transaction().execute(async trx => {
+    const row = await trx
+      .updateTable('extensions.gcs_gcforms_credentials')
+      .set(patchValues(body))
+      .where('id', '=', sql<string>`${credentialId}::bigint`)
+      .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
+      .where('_deleted', '=', false)
+      .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+      .executeTakeFirstOrThrow()
+
+    if (body.key !== undefined) {
+      await storePrivateKey(trx, agencyId, credentialId, body.key)
     }
+
+    return toSummary(row)
   })
 
   return {
     ok: true,
-    item: {
-      credentialId: body.credentialId,
-      keyId: body.keyId,
-      userId: body.userId,
-      formId: body.formId,
-      updatedAt: new Date().toISOString()
-    } satisfies GcFormsCredentialSummary
+    item
   }
 }
 
@@ -195,13 +313,29 @@ export const deleteGcFormsCredential = async (contextOrEvent: Parameters<typeof 
   const credentialId = context.params.credentialId ?? ''
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
-  await deleteEncryptedExtensionSecret(
-    asGcFormsIntegrationDb(context.db) as never,
-    GCFORMS_EXTENSION_KEY,
-    'agency',
-    agencyId,
-    credentialId
-  )
+  const db = asGcFormsIntegrationDb(context.db)
+  await db.transaction().execute(async trx => {
+    await trx
+      .updateTable('extensions.gcs_gcforms_credentials')
+      .set({
+        _deleted: true,
+        updated_at: new Date()
+      })
+      .where('id', '=', sql<string>`${credentialId}::bigint`)
+      .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
+      .where('_deleted', '=', false)
+      .execute()
+
+    await deleteEncryptedExtensionSecret(
+      trx as never,
+      GCFORMS_EXTENSION_KEY,
+      'agency',
+      agencyId,
+      credentialId
+    )
+  })
 
   return { ok: true }
 }
+
+export type { GcFormsCredentialCreate, GcFormsCredentialPatch }

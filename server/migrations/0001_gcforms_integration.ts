@@ -5,6 +5,21 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async db => {
     await db.schema
+      .createTable('extensions.gcs_gcforms_credentials')
+      .ifNotExists()
+      .addColumn('id', 'bigserial', col => col.primaryKey())
+      .addColumn('agency_id', 'bigint', col => col.notNull().references('Agency_Profile.id').onDelete('restrict'))
+      .addColumn('name_en', 'varchar(200)', col => col.notNull())
+      .addColumn('name_fr', 'varchar(200)', col => col.notNull())
+      .addColumn('key_id', 'varchar(200)', col => col.notNull())
+      .addColumn('user_id', 'varchar(200)', col => col.notNull())
+      .addColumn('form_id', 'varchar(80)', col => col.notNull())
+      .addColumn('created_at', 'timestamptz', col => col.defaultTo(sql`now()`).notNull())
+      .addColumn('updated_at', 'timestamptz')
+      .addColumn('_deleted', 'boolean', col => col.defaultTo(false).notNull())
+      .execute()
+
+    await db.schema
       .createTable('extensions.gcs_gcforms_connections')
       .addColumn('id', 'bigserial', col => col.primaryKey())
       .addColumn('agency_id', 'bigint', col => col.notNull().references('Agency_Profile.id').onDelete('restrict'))
@@ -25,8 +40,8 @@ export default defineGcsExtensionMigration({
       .execute()
 
     await sql`
-      CREATE UNIQUE INDEX gcs_gcforms_connection_stream_form
-      ON extensions.gcs_gcforms_connections (stream_id, form_id)
+      CREATE UNIQUE INDEX gcs_gcforms_connection_stream_credential
+      ON extensions.gcs_gcforms_connections (stream_id, credential_id)
       WHERE _deleted = false
     `.execute(db)
 

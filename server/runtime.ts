@@ -11,14 +11,13 @@ import {
   DEFAULT_GCFORMS_IDP_URL,
   DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
   GCFORMS_EXTENSION_KEY,
-  GcFormsPrivateApiKeySchema,
+  GcFormsCredentialSecretSchema,
   gcFormsTemplateShapesEqual,
   getMissingGcFormsClaimQuestionIds,
   normalizeGcFormsAnswers,
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
-  resolveGcFormsClaimFormId,
   previewGcFormsMapping,
   type GcsGcFormsStreamConfig,
   type GcFormsDecryptedSubmission,
@@ -54,6 +53,14 @@ type ConnectionRow = {
   project_identifier: string
   contact_email: string | null
   preferred_language: 'en' | 'fr'
+}
+
+type CredentialRow = {
+  id: string | number
+  agency_id: string
+  key_id: string
+  user_id: string
+  form_id: string
 }
 
 type IntegrationRow = {
@@ -133,12 +140,30 @@ export const getGcFormsCredential = async (
   agencyId: string,
   credentialId: string
 ): Promise<GcFormsPrivateApiKey> => {
+  const row = await asGcFormsIntegrationDb(rawDb)
+    .selectFrom('extensions.gcs_gcforms_credentials')
+    .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
+    .where('id', '=', sql<string>`${credentialId}::bigint`)
+    .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
+    .where('_deleted', '=', false)
+    .executeTakeFirst()
+  if (!row) {
+    throw createGcsExtensionUserError({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+      message: {
+        en: 'The selected GC Forms credential is not available on the server.',
+        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+      }
+    })
+  }
+
   const credential = await getEncryptedExtensionSecret(asGcFormsIntegrationDb(rawDb) as never, {
     rootKey: getGcFormsSecretRootKey(),
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
     ownerId: agencyId,
-    secretKey: credentialId
+    secretKey: String(row.id)
   })
   if (!credential) {
     throw createGcsExtensionUserError({
@@ -151,48 +176,52 @@ export const getGcFormsCredential = async (
     })
   }
 
-  return GcFormsPrivateApiKeySchema.parse(credential)
+  const secret = GcFormsCredentialSecretSchema.parse(credential)
+  return {
+    keyId: row.key_id,
+    key: secret.key,
+    userId: row.user_id,
+    formId: row.form_id
+  }
 }
 
-const metadataFormId = (metadata: unknown): string =>
-  typeof metadata === 'object' && metadata !== null && typeof (metadata as { formId?: unknown }).formId === 'string'
-    ? (metadata as { formId: string }).formId
-    : ''
-
-const resolveGcFormsCredentialId = async (
+const getGcFormsCredentialRow = async (
   rawDb: unknown,
   agencyId: string,
-  claimFormId: string,
-  legacyCredentialId?: string
-): Promise<string> => {
-  if (legacyCredentialId) {
-    return legacyCredentialId
-  }
-
-  const credentials = await asGcFormsIntegrationDb(rawDb)
-    .selectFrom('extensions.secret_entry')
-    .select(['secret_key', 'metadata'])
-    .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
-    .where('owner_type', '=', 'agency')
-    .where('owner_id', '=', agencyId)
+  credentialId: string
+): Promise<CredentialRow> => {
+  const row = await asGcFormsIntegrationDb(rawDb)
+    .selectFrom('extensions.gcs_gcforms_credentials')
+    .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
+    .where('id', '=', sql<string>`${credentialId}::bigint`)
+    .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
     .where('_deleted', '=', false)
-    .execute()
-
-  const matchingCredential = credentials.find(credential => metadataFormId(credential.metadata) === claimFormId)
-  if (matchingCredential) {
-    return matchingCredential.secret_key
+    .executeTakeFirst()
+  if (!row) {
+    throw createGcsExtensionUserError({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+      message: {
+        en: 'The selected GC Forms credential is not available on the server.',
+        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+      }
+    })
   }
 
-  if (credentials.length === 1) {
-    return credentials[0]!.secret_key
+  return row
+}
+
+const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
+  if (config.credentialId) {
+    return config.credentialId
   }
 
   throw createGcsExtensionUserError({
     statusCode: 400,
-    code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+    code: 'GCS_GCFORMS_CONFIG_INCOMPLETE',
     message: {
-      en: 'A GC Forms agency credential matching the claim form ID is required before syncing.',
-      fr: 'Un justificatif GC Forms de l organisation correspondant au formulaire de reclamation est requis avant la synchronisation.'
+      en: 'Select a GC Forms agency credential before syncing.',
+      fr: 'Selectionnez un justificatif GC Forms de l organisation avant la synchronisation.'
     }
   })
 }
@@ -328,19 +357,8 @@ export const getStreamConfig = async (
   if (Object.hasOwn(agencyConfigSource, 'confirmSubmissions')) {
     config.confirmSubmissions = agencyConfig.confirmSubmissions
   }
-  const claimFormId = resolveGcFormsClaimFormId(config)
 
-  if (!claimFormId) {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_CONFIG_INCOMPLETE',
-      message: {
-        en: 'A GC Forms claim form ID is required before syncing.',
-        fr: 'L identifiant du formulaire de reclamation GC Forms est requis avant la synchronisation.'
-      }
-    })
-  }
-  config.credentialId = await resolveGcFormsCredentialId(db, streamContext.agencyId, claimFormId, config.credentialId)
+  await getGcFormsCredentialRow(db, streamContext.agencyId, assertConfiguredCredential(config))
 
   return config
 }
@@ -351,16 +369,13 @@ export const getStoredTemplate = async (
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
   const config = await getStreamConfig(rawDb as HostDb, streamId)
-  const claimFormId = resolveGcFormsClaimFormId(config)
-  const connection = claimFormId
-    ? await db
-        .selectFrom('extensions.gcs_gcforms_connections')
-        .select(['id'])
-        .where('stream_id', '=', streamId)
-        .where('form_id', '=', claimFormId)
-        .where('_deleted', '=', false)
-        .executeTakeFirst()
-    : undefined
+  const connection = await db
+    .selectFrom('extensions.gcs_gcforms_connections')
+    .select(['id'])
+    .where('stream_id', '=', streamId)
+    .where('credential_id', '=', assertConfiguredCredential(config))
+    .where('_deleted', '=', false)
+    .executeTakeFirst()
   const stored = connection
     ? await db
         .selectFrom('extensions.gcs_gcforms_templates')
@@ -400,14 +415,14 @@ export const getStoredTemplate = async (
 const updateConnection = async (
   db: GcFormsIntegrationDb,
   id: string | number,
-  config: GcsGcFormsStreamConfig
+  config: GcsGcFormsStreamConfig,
+  credential: CredentialRow
 ) => {
-  const claimFormId = resolveGcFormsClaimFormId(config)
   return await db
     .updateTable('extensions.gcs_gcforms_connections')
     .set({
-      credential_id: config.credentialId!,
-      form_id: claimFormId!,
+      credential_id: assertConfiguredCredential(config),
+      form_id: credential.form_id,
       api_url: config.apiUrl || DEFAULT_GCFORMS_API_URL,
       identity_provider_url: config.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL,
       project_identifier: config.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
@@ -426,7 +441,6 @@ export const ensureConnection = async (
   config: GcsGcFormsStreamConfig
 ): Promise<ConnectionRow> => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const claimFormId = resolveGcFormsClaimFormId(config)
   const streamContext = await resolveExtensionStreamContext(rawDb as never, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
@@ -438,17 +452,18 @@ export const ensureConnection = async (
       }
     })
   }
+  const credential = await getGcFormsCredentialRow(rawDb, streamContext.agencyId, assertConfiguredCredential(config))
 
   const existing = await db
     .selectFrom('extensions.gcs_gcforms_connections')
     .selectAll()
     .where('stream_id', '=', streamId)
-    .where('form_id', '=', claimFormId!)
+    .where('credential_id', '=', String(credential.id))
     .where('_deleted', '=', false)
     .executeTakeFirst()
 
   if (existing) {
-    return await updateConnection(db, existing.id, config) as ConnectionRow
+    return await updateConnection(db, existing.id, config, credential) as ConnectionRow
   }
 
   return await db
@@ -456,8 +471,8 @@ export const ensureConnection = async (
     .values({
       agency_id: streamContext.agencyId,
       stream_id: streamId,
-      credential_id: config.credentialId!,
-      form_id: claimFormId!,
+      credential_id: String(credential.id),
+      form_id: credential.form_id,
       api_url: config.apiUrl || DEFAULT_GCFORMS_API_URL,
       identity_provider_url: config.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL,
       project_identifier: config.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
@@ -557,14 +572,12 @@ export const createConfiguredClient = async (
   }
 
   const credential = await getGcFormsCredential(rawDb, streamContext.agencyId, config.credentialId!)
-  const claimFormId = resolveGcFormsClaimFormId(config)
   return new GcFormsApiClient({
     apiUrl: config.apiUrl,
     identityProviderUrl: config.identityProviderUrl,
     projectIdentifier: config.projectIdentifier,
     privateApiKey: {
-      ...credential,
-      formId: claimFormId || credential.formId
+      ...credential
     }
   })
 }

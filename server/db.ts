@@ -99,6 +99,18 @@ export interface GcFormsIntegrationHostDatabase {
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
+  'extensions.gcs_gcforms_credentials': {
+    id: Generated<string>
+    agency_id: string
+    name_en: string
+    name_fr: string
+    key_id: string
+    user_id: string
+    form_id: string
+    created_at: Generated<Date | string>
+    updated_at: Date | string | null
+    _deleted: Generated<boolean>
+  }
   'extensions.gcs_gcforms_templates': {
     id: Generated<string>
     connection_id: string

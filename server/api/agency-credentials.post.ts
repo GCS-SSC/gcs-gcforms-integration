@@ -1,4 +1,4 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { saveGcFormsCredential } from '../credentials'
+import { createGcFormsCredential } from '../credentials'
 
-export default defineGcsExtensionRouteHandler(async context => await saveGcFormsCredential(context))
+export default defineGcsExtensionRouteHandler(async context => await createGcFormsCredential(context))

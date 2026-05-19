@@ -32,14 +32,48 @@ export const GcFormsPrivateApiKeySchema = z.object({
 
 export type GcFormsPrivateApiKey = z.infer<typeof GcFormsPrivateApiKeySchema>
 
-export const GcFormsCredentialInputSchema = GcFormsPrivateApiKeySchema.extend({
-  credentialId: z.string().min(1).max(120).regex(/^[a-zA-Z0-9_.:-]+$/)
+export const GcFormsCredentialSecretSchema = z.object({
+  key: z.string().min(1)
 })
 
-export type GcFormsCredentialInput = z.infer<typeof GcFormsCredentialInputSchema>
+export const GcFormsCredentialCreateSchema = z.object({
+  name_en: z.string().min(1).max(200),
+  name_fr: z.string().min(1).max(200),
+  keyId: z.string().min(1).max(200),
+  userId: z.string().min(1).max(200),
+  formId: z.string().min(1).max(80),
+  key: z.string().min(1)
+})
+
+export type GcFormsCredentialCreate = z.infer<typeof GcFormsCredentialCreateSchema>
+
+const GcFormsCredentialPatchBaseSchema = z.object({
+  name_en: z.string().min(1).max(200).optional(),
+  name_fr: z.string().min(1).max(200).optional(),
+  keyId: z.string().min(1).max(200).optional(),
+  userId: z.string().min(1).max(200).optional(),
+  formId: z.string().min(1).max(80).optional(),
+  key: z.string().min(1).optional()
+})
+
+export const GcFormsCredentialPatchSchema = GcFormsCredentialPatchBaseSchema.superRefine((value, context) => {
+  if (Object.keys(value).length > 0) {
+    return
+  }
+
+  context.addIssue({
+    code: 'custom',
+    path: [],
+    message: 'At least one credential field is required.'
+  })
+})
+
+export type GcFormsCredentialPatch = z.infer<typeof GcFormsCredentialPatchSchema>
 
 export interface GcFormsCredentialSummary {
-  credentialId: string
+  id: string
+  name_en: string
+  name_fr: string
   keyId: string
   userId: string
   formId: string
@@ -186,10 +220,6 @@ export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema
 
 export const GcsGcFormsStreamConfigSchema = z.object({
   credentialId: OptionalStringSchema,
-  formId: OptionalStringSchema,
-  claim: z.object({
-    formId: OptionalStringSchema
-  }).default({}),
   apiUrl: OptionalStringSchema,
   identityProviderUrl: OptionalStringSchema,
   projectIdentifier: OptionalStringSchema,
@@ -201,9 +231,6 @@ export const GcsGcFormsStreamConfigSchema = z.object({
 })
 
 export type GcsGcFormsStreamConfig = z.infer<typeof GcsGcFormsStreamConfigSchema>
-
-export const resolveGcFormsClaimFormId = (config: GcsGcFormsStreamConfig): string | undefined =>
-  config.claim.formId ?? config.formId
 
 export interface GcsGcFormsMappedValue {
   mappingId: string

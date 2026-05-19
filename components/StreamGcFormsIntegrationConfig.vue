@@ -13,7 +13,6 @@ import {
   ExtensionEntityEditorWorkspace,
   ExtensionFormField,
   ExtensionIcon,
-  ExtensionInput,
   ExtensionModal,
   ExtensionProgress,
   ExtensionResourceLayoutCard,
@@ -31,6 +30,7 @@ import {
 } from '@gcs-ssc/extensions/ui'
 import {
   parseGcFormsStreamConfig,
+  type GcFormsCredentialSummary,
   type GcFormsFieldCatalogItem,
   type GcsGcFormsFieldMapping,
   type GcsGcFormsTransform,
@@ -40,6 +40,7 @@ import {
 const {
   extension,
   streamId,
+  agencyId,
   streamEnabled = false,
   hostLayout = false
 } = defineProps<{
@@ -59,7 +60,9 @@ const hostApi = useHostApi()
 
 const labels = {
   en: {
-    formId: 'Form ID',
+    credential: 'Credential',
+    credentialPlaceholder: 'Select a GC Forms credential',
+    credentialRequired: 'Select a GC Forms credential before refreshing templates or syncing submissions.',
     template: 'Form fields',
     refreshTemplate: 'Refresh template',
     refreshTemplateFailed: 'Template refresh failed',
@@ -153,7 +156,9 @@ const labels = {
     id: 'ID'
   },
   fr: {
-    formId: 'ID du formulaire',
+    credential: 'Justificatif',
+    credentialPlaceholder: 'Selectionner un justificatif GC Forms',
+    credentialRequired: 'Selectionnez un justificatif GC Forms avant d actualiser les modeles ou de synchroniser les soumissions.',
     template: 'Champs du formulaire',
     refreshTemplate: 'Actualiser le modele',
     refreshTemplateFailed: 'Echec de l actualisation du modele',
@@ -253,10 +258,6 @@ const isFrench = computed(() => locale.value === 'fr')
 
 const withoutSyntheticFinalMapping = (value: GcsGcFormsStreamConfig): GcsGcFormsStreamConfig => ({
   ...value,
-  claim: {
-    ...value.claim,
-    formId: value.claim.formId ?? value.formId
-  },
   mappings: value.mappings.filter(mapping =>
     mapping.id !== 'final-for-year'
     && mapping.sourceQuestionId !== '__gcforms_final_for_year'
@@ -265,6 +266,8 @@ const withoutSyntheticFinalMapping = (value: GcsGcFormsStreamConfig): GcsGcForms
 
 const localConfig: Ref<GcsGcFormsStreamConfig> = ref(withoutSyntheticFinalMapping(parseGcFormsStreamConfig(config.value)))
 const fieldCatalog: Ref<GcFormsFieldCatalogItem[]> = ref([])
+const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
+const isLoadingCredentials: Ref<boolean> = ref(false)
 const isRefreshingTemplate: Ref<boolean> = ref(false)
 const isSyncing: Ref<boolean> = ref(false)
 const isSaving: Ref<boolean> = ref(false)
@@ -348,9 +351,7 @@ type MappingFieldTableRow = ClaimMappingFieldTableRow | FormFieldTableRow
 type GroupedMappingFieldRow = GcsGroupedTableRow<MappingFieldTableRow>
 
 const buildHostConfig = (value: GcsGcFormsStreamConfig): GcsExtensionJsonConfig => ({
-  claim: {
-    formId: value.claim.formId ?? null
-  },
+  credentialId: value.credentialId ?? null,
   templateShapeChanged: templateShapeChanged.value,
   mappings: value.mappings as unknown as JsonValue
 })
@@ -688,6 +689,11 @@ const searchedAgreementSelectOptions = computed(() => {
     || agreement.value.toLowerCase().includes(search)
   )
 })
+const credentialOptions = computed(() => credentials.value.map(credential => ({
+  label: `${isFrench.value ? credential.name_fr : credential.name_en} (${credential.formId}, ${credential.keyId})`,
+  value: credential.id
+})))
+const selectedCredentialMissing = computed(() => !localConfig.value.credentialId)
 
 const failedMaterializationPagination: Ref<{ pageIndex: number; pageSize: number }> = ref({
   pageIndex: 0,
@@ -806,7 +812,29 @@ const getJson = async (path: string): Promise<unknown> => {
   return await api.get(path)
 }
 
+const loadCredentials = async () => {
+  if (!agencyId) {
+    credentials.value = []
+    return
+  }
+
+  try {
+    isLoadingCredentials.value = true
+    const response = await getJson(`/agencies/${agencyId}/credentials`) as { items?: GcFormsCredentialSummary[] }
+    credentials.value = response.items ?? []
+  } catch {
+    credentials.value = []
+  } finally {
+    isLoadingCredentials.value = false
+  }
+}
+
 const refreshTemplate = async () => {
+  if (selectedCredentialMissing.value) {
+    statusMessage.value = tLocal('credentialRequired')
+    return
+  }
+
   try {
     isRefreshingTemplate.value = true
     statusMessage.value = tLocal('loading')
@@ -883,6 +911,12 @@ const loadStoredTemplate = async () => {
 }
 
 const syncSubmissions = async () => {
+  if (selectedCredentialMissing.value) {
+    syncError.value = tLocal('credentialRequired')
+    statusMessage.value = tLocal('credentialRequired')
+    return
+  }
+
   try {
     isSyncing.value = true
     syncError.value = ''
@@ -955,6 +989,7 @@ const resolveMaterializationFailure = async () => {
 
 onMounted(async () => {
   await Promise.allSettled([
+    loadCredentials(),
     loadStoredTemplate(),
     refreshMaterializationFailures()
   ])
@@ -1060,6 +1095,7 @@ onMounted(async () => {
             class="cursor-default"
             :label="tLocal('refreshTemplate')"
             :loading="isRefreshingTemplate"
+            :disabled="selectedCredentialMissing"
             @click="refreshTemplate" />
           <ExtensionButton
             icon="i-lucide-download"
@@ -1068,6 +1104,7 @@ onMounted(async () => {
             class="cursor-default"
             :label="tLocal('sync')"
             :loading="isSyncing"
+            :disabled="selectedCredentialMissing"
             @click="openSyncModal" />
           <ExtensionSaveButton
             type="button"
@@ -1078,9 +1115,24 @@ onMounted(async () => {
         </div>
       </div>
 
-      <ExtensionFormField :label="tLocal('formId')" class="max-w-xl">
-        <ExtensionInput v-model="localConfig.claim.formId" />
+      <ExtensionFormField :label="tLocal('credential')" class="max-w-xl">
+        <ExtensionSelectMenu
+          v-model="localConfig.credentialId"
+          :items="credentialOptions"
+          value-key="value"
+          label-key="label"
+          searchable
+          :loading="isLoadingCredentials"
+          :placeholder="tLocal('credentialPlaceholder')" />
       </ExtensionFormField>
+
+      <ExtensionAlert
+        v-if="selectedCredentialMissing"
+        color="warning"
+        variant="soft"
+        icon="i-lucide-key-round"
+        :title="tLocal('credential')"
+        :description="tLocal('credentialRequired')" />
 
       <ExtensionAlert
         v-if="templateShapeChanged"
