@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { createGcsExtensionUserError, defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db'
 

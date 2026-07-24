@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { sql } from 'kysely'
 import {
   createGcsExtensionUserError,
@@ -115,6 +114,7 @@ const jsonbValue = (value: unknown) =>
 
 const DEV_EXTENSION_SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
+/** Returns the configured credential-encryption key, using the fallback when `NODE_ENV` is neither production nor test. */
 export const getGcFormsSecretRootKey = (): string => {
   const key = process.env.GCS_EXTENSION_SECRETS_KEY
   if (key) {
@@ -135,6 +135,7 @@ export const getGcFormsSecretRootKey = (): string => {
   })
 }
 
+/** Loads credential metadata and decrypts its private API key for an agency. */
 export const getGcFormsCredential = async (
   rawDb: unknown,
   agencyId: string,
@@ -185,6 +186,7 @@ export const getGcFormsCredential = async (
   }
 }
 
+/** Loads active credential metadata and rejects credentials outside the requested agency. */
 const getGcFormsCredentialRow = async (
   rawDb: unknown,
   agencyId: string,
@@ -226,6 +228,7 @@ const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
   })
 }
 
+/** Authorizes direct or inherited team access to a stream's GC Forms integration. */
 export const authorizeGcFormsStream = async (
   context: GcsExtensionRouteContext,
   streamId: string,
@@ -277,6 +280,7 @@ export const authorizeGcFormsStream = async (
   }
 }
 
+/** Resolves an enabled stream configuration, merging agency settings and validating its credential. */
 export const getStreamConfig = async (
   db: HostDb,
   streamId: string
@@ -363,6 +367,7 @@ export const getStreamConfig = async (
   return config
 }
 
+/** Returns the most recently stored template catalog and review state for a stream. */
 export const getStoredTemplate = async (
   rawDb: unknown,
   streamId: string
@@ -412,6 +417,7 @@ export const getStoredTemplate = async (
   }
 }
 
+/** Synchronizes an existing connection with the current stream configuration and credential metadata. */
 const updateConnection = async (
   db: GcFormsIntegrationDb,
   id: string | number,
@@ -435,6 +441,7 @@ const updateConnection = async (
     .executeTakeFirstOrThrow()
 }
 
+/** Returns an updated active connection or creates one for the stream's configured credential. */
 export const ensureConnection = async (
   rawDb: unknown,
   streamId: string,
@@ -484,6 +491,7 @@ export const ensureConnection = async (
     .executeTakeFirstOrThrow() as ConnectionRow
 }
 
+/** Upserts the stream integration and replaces its persisted field mappings with the current configuration. */
 export const ensureIntegration = async (
   rawDb: unknown,
   streamId: string,
@@ -554,6 +562,7 @@ export const ensureIntegration = async (
   return integration as IntegrationRow
 }
 
+/** Creates a GC Forms API client from the stream's agency credential and connection settings. */
 export const createConfiguredClient = async (
   rawDb: unknown,
   streamId: string,
@@ -582,6 +591,7 @@ export const createConfiguredClient = async (
   })
 }
 
+/** Fetches, validates, and stores the current form template and normalized field catalog. */
 export const refreshTemplate = async (
   rawDb: unknown,
   streamId: string
@@ -644,6 +654,7 @@ export const refreshTemplate = async (
   }
 }
 
+/** Persists whether the current remote template shape differs from the reviewed stream template. */
 const updateStreamTemplateShapeChanged = async (
   rawDb: unknown,
   streamId: string,
@@ -672,6 +683,7 @@ const updateStreamTemplateShapeChanged = async (
     .execute()
 }
 
+/** Rejects templates that omit any questions required for claim materialization. */
 const assertGcFormsClaimTemplateShape = (template: unknown) => {
   const missingQuestionIds = getMissingGcFormsClaimQuestionIds(template)
   if (missingQuestionIds.length > 0) {
@@ -694,6 +706,7 @@ const assertGcFormsClaimTemplateShape = (template: unknown) => {
   }
 }
 
+/** Blocks synchronization until a stored template exists and still matches the remote template shape. */
 const assertGcFormsTemplateShapeUnchanged = async (
   rawDb: unknown,
   db: GcFormsIntegrationDb,
@@ -751,6 +764,7 @@ const createGcFormsImportRun = async (
     .executeTakeFirstOrThrow()
 }
 
+/** Inserts a newly discovered submission or returns its existing active record after a conflict. */
 const getOrCreateGcFormsSubmission = async (
   db: GcFormsIntegrationDb,
   connection: ConnectionRow,
@@ -788,6 +802,7 @@ const getOrCreateGcFormsSubmission = async (
     .executeTakeFirstOrThrow()
 }
 
+/** Maps preview and materialization outcomes to the persisted submission import status. */
 const resolveGcFormsSubmissionImportStatus = (
   previewIssueCount: number,
   materializationStatus: string
@@ -811,6 +826,7 @@ const resolveGcFormsSubmissionImportStatus = (
   return 'mapped'
 }
 
+/** Soft-deletes previous attachment records and stores the attachments from the latest decrypted submission. */
 const replaceGcFormsSubmissionAttachments = async (
   db: GcFormsIntegrationDb,
   submissionId: string,
@@ -857,6 +873,7 @@ const updateGcFormsSubmissionProblem = async (
     .execute()
 }
 
+/** Decrypts, verifies, maps, materializes, stores, and optionally confirms one discovered submission. */
 const importGcFormsSubmission = async (
   context: SyncSubmissionContext,
   submission: GcFormsNewSubmission
@@ -949,6 +966,7 @@ const finishGcFormsImportRun = async (
     .execute()
 }
 
+/** Marks an import run failed with its final counts and normalized error message. */
 const failGcFormsImportRun = async (
   db: GcFormsIntegrationDb,
   runId: string,
@@ -971,6 +989,7 @@ const failGcFormsImportRun = async (
     .execute()
 }
 
+/** Synchronizes all new submissions for a stream and records aggregate import-run results. */
 export const syncStream = async (
   rawDb: unknown,
   streamId: string

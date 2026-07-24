@@ -234,5 +234,6 @@ export interface GcFormsIntegrationHostDatabase {
 
 export type GcFormsIntegrationDb = Kysely<GcFormsIntegrationHostDatabase>
 
+/** Narrows a host database instance to the tables used by the GC Forms integration. */
 export const asGcFormsIntegrationDb = (db: unknown): GcFormsIntegrationDb =>
   db as GcFormsIntegrationDb

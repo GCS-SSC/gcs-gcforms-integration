@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { normalizeGcFormsAnswers, parseGcFormsStreamConfig, previewGcFormsMapping } from '../../shared/gcforms'
 import { authorizeGcFormsStream } from '../runtime'

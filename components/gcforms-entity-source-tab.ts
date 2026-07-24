@@ -1,5 +1,6 @@
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 
+/** Builds the extension submission endpoint for the active supported host entity context. */
 export const buildGcFormsEntitySourceEndpoint = (
   context: ExtensionEntityTabContext
 ): string => {

@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { generateGcFormsClaimTemplate } from '../claim-template'
 import { authorizeGcFormsStream } from '../runtime'

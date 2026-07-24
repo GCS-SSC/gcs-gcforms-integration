@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { z } from 'zod'
 import { createGcsExtensionUserError } from '@gcs-ssc/extensions/server'
 import type { JsonValue } from '@gcs-ssc/extensions'
@@ -125,6 +124,7 @@ const materializationStatus = (status: ClaimMaterializationStatus): 'mapped' | '
       ? 'mapped'
       : 'imported'
 
+/** Lists active agreement identifiers and numbers available for manual matching within a stream. */
 const streamAgreements = async (
   rawDb: unknown,
   streamId: string
@@ -148,6 +148,7 @@ const streamAgreements = async (
   })
 }
 
+/** Loads active manual agreement selections keyed by submission identifier. */
 const selectedAgreementOverrides = async (
   rawDb: unknown,
   submissionIds: string[]
@@ -185,6 +186,7 @@ const ensureFailureContext = async (
   }
 }
 
+/** Lists failed claim materializations together with mapping issues and agreement matching choices. */
 export const listClaimMaterializationFailures = async (
   rawDb: unknown,
   streamId: string
@@ -233,6 +235,7 @@ export const listClaimMaterializationFailures = async (
   }
 }
 
+/** Rejects a manual match when the selected agreement is not active in the requested stream. */
 const assertAgreementInStream = async (
   rawDb: unknown,
   streamId: string,
@@ -259,6 +262,7 @@ const assertAgreementInStream = async (
   }
 }
 
+/** Creates or updates the manual agreement override for a failed claim submission. */
 const saveAgreementOverride = async (
   rawDb: unknown,
   submissionId: string,
@@ -299,6 +303,7 @@ const saveAgreementOverride = async (
     .execute()
 }
 
+/** Applies a manual agreement match, retries claim materialization, and persists the resulting status. */
 export const resolveClaimMaterializationFailure = async (
   rawDb: unknown,
   streamId: string,

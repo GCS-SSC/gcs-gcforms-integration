@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/* eslint-disable jsdoc/require-jsdoc */
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'

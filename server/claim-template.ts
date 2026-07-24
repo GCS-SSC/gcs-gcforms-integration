@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { readFile } from 'node:fs/promises'
 import { sql } from 'kysely'
 import { asGcFormsIntegrationDb } from './db'
@@ -62,6 +61,7 @@ const loadBaseClaimTemplate = async (): Promise<GcFormsClaimTemplate> => {
   return JSON.parse(source) as GcFormsClaimTemplate
 }
 
+/** Loads the distinct fiscal-year labels used by agreements in a transfer-payment stream. */
 const fetchFiscalYearChoices = async (rawDb: unknown, streamId: string): Promise<BilingualChoice[]> => {
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
@@ -88,6 +88,7 @@ const fetchFiscalYearChoices = async (rawDb: unknown, streamId: string): Promise
   return rows.map(row => ({ en: row.label, fr: row.label }))
 }
 
+/** Loads distinct bilingual cost-category and line-item choices available to a stream. */
 const fetchBudgetLineItemChoices = async (rawDb: unknown, streamId: string) => {
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
@@ -147,6 +148,7 @@ const fetchBudgetLineItemChoices = async (rawDb: unknown, streamId: string) => {
   }
 }
 
+/** Recursively replaces configured question choices and normalizes the cost-subsection question. */
 const updateElementForQuestion = (
   element: GcFormsTemplateElement,
   replacements: Record<string, BilingualChoice[]>
@@ -181,6 +183,7 @@ const updateElementForQuestion = (
   return nextElement
 }
 
+/** Generates a claim form template populated with the stream's fiscal-year and budget choices. */
 export const generateGcFormsClaimTemplate = async (
   rawDb: unknown,
   streamId: string

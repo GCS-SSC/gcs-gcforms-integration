@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { z } from 'zod'
 import type { GcsExtensionJsonConfig, JsonValue } from '@gcs-ssc/extensions'
 
@@ -289,6 +288,7 @@ const childElements = (element: GcFormsTemplateElement): GcFormsTemplateElement[
   return []
 }
 
+/** Normalizes template values recursively, sorting record keys, converting undefined to null, and stringifying remaining value types. */
 const normalizeJsonValue = (value: unknown): JsonValue => {
   if (value === null || value === undefined) {
     return null
@@ -322,10 +322,12 @@ const choicesProperty = (properties: Record<string, unknown> | undefined): JsonV
 
 const stableStringify = (value: unknown): string => JSON.stringify(normalizeJsonValue(value))
 
+/** Flattens a GC Forms template into a normalized catalog of source fields. */
 export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalogItem[] => {
   const parsed = GcFormsFormTemplateSchema.parse(template)
   const fields: GcFormsFieldCatalogItem[] = []
 
+  /** Adds an element and all nested elements to the normalized field catalog. */
   const visit = (element: GcFormsTemplateElement) => {
     const properties = element.properties
     const id = String(element.id)
@@ -356,6 +358,7 @@ export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalog
   return fields
 }
 
+/** Reduces a GC Forms template to the structural attributes that affect mapping compatibility. */
 export const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplateShapeElement[] => {
   const parsed = GcFormsFormTemplateSchema.parse(template)
 
@@ -379,9 +382,11 @@ export const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplat
   return parsed.elements.map(element => visit(element))
 }
 
+/** Compares two templates by their deterministic mapping-relevant shapes. */
 export const gcFormsTemplateShapesEqual = (left: unknown, right: unknown): boolean =>
   stableStringify(normalizeGcFormsTemplateShape(left)) === stableStringify(normalizeGcFormsTemplateShape(right))
 
+/** Returns required claim question identifiers that are absent from a template. */
 export const getMissingGcFormsClaimQuestionIds = (template: unknown): string[] => {
   const found = new Set<string>()
   const visit = (elements: GcFormsTemplateShapeElement[]) => {
@@ -396,12 +401,15 @@ export const getMissingGcFormsClaimQuestionIds = (template: unknown): string[] =
   return GCFORMS_CLAIM_REQUIRED_QUESTION_IDS.filter(questionId => !found.has(questionId))
 }
 
+/** Parses a stream configuration and applies the GC Forms schema defaults. */
 export const parseGcFormsStreamConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsStreamConfig =>
   GcsGcFormsStreamConfigSchema.parse(config ?? {})
 
+/** Parses an agency configuration and applies the GC Forms schema defaults. */
 export const parseGcFormsAgencyConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsAgencyConfig =>
   GcsGcFormsAgencyConfigSchema.parse(config ?? {})
 
+/** Adds stable question-id aliases to submission answers, including nested dynamic-row values. */
 export const normalizeGcFormsAnswers = (
   answers: string | Record<string, unknown>,
   template?: unknown
@@ -422,6 +430,7 @@ export const normalizeGcFormsAnswers = (
   const parsedTemplate = GcFormsFormTemplateSchema.parse(template)
   const aliases = new Map<string, string>()
   const dynamicRowAliases = new Map<string, Map<string, string>>()
+  /** Collects element-id aliases and nested dynamic-row aliases from the template. */
   const visit = (element: GcFormsTemplateElement) => {
     const id = String(element.id)
     const questionId = stringProperty(element.properties, ['questionId', 'apiQuestionId', 'apiId'])
@@ -638,6 +647,7 @@ const collectGcFormsPreviewResult = (
   if (result.issue) issues.push(result.issue)
 }
 
+/** Applies configured transforms and failure modes to preview mapped values and validation issues. */
 export const previewGcFormsMapping = (
   answers: Record<string, unknown>,
   mappings: GcsGcFormsFieldMapping[]

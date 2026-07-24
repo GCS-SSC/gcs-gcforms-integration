@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { createHash, createPrivateKey, createSign, privateDecrypt, createDecipheriv } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -32,6 +31,7 @@ export interface GcFormsProblemReport {
 const base64Url = (value: string | Buffer): string =>
   Buffer.from(value).toString('base64url')
 
+/** Signs the short-lived JWT assertion used to authenticate with the GC Forms identity provider. */
 export const signGcFormsJwt = async (
   identityProviderUrl: string,
   privateApiKey: GcFormsPrivateApiKey,
@@ -55,6 +55,7 @@ export const signGcFormsJwt = async (
   return `${signingInput}.${base64Url(signature)}`
 }
 
+/** Exchanges a signed GC Forms JWT assertion for an OAuth access token. */
 export const generateGcFormsAccessToken = async (
   options: Pick<GcFormsClientOptions, 'identityProviderUrl' | 'projectIdentifier' | 'privateApiKey' | 'fetchImpl'>
 ): Promise<string> => {
@@ -88,6 +89,7 @@ export const generateGcFormsAccessToken = async (
   return payload.access_token
 }
 
+/** Decrypts a GC Forms submission envelope with its RSA-wrapped AES-GCM parameters. */
 export const decryptGcFormsSubmission = (
   encryptedSubmission: GcFormsEncryptedSubmission,
   privateApiKey: GcFormsPrivateApiKey
@@ -112,9 +114,11 @@ export const decryptGcFormsSubmission = (
   return decryptedData.toString('utf8')
 }
 
+/** Checks decrypted submission answers against the checksum supplied by GC Forms. */
 export const verifyGcFormsIntegrity = (answers: string, checksum: string): boolean =>
   createHash('md5').update(answers).digest('hex') === checksum
 
+/** Authenticated client for fetching, decrypting, confirming, and reporting GC Forms submissions. */
 export class GcFormsApiClient {
   private readonly apiUrl: string
   private readonly privateApiKey: GcFormsPrivateApiKey
@@ -144,6 +148,7 @@ export class GcFormsApiClient {
     return this.accessToken
   }
 
+  /** Sends an authenticated API request, refreshing the cached token once after an unauthorized response. */
   private async request<T>(path: string, init: RequestInit, parse: (value: unknown) => T): Promise<T> {
     const response = await this.fetchImpl(`${this.apiUrl}${path}`, {
       ...init,

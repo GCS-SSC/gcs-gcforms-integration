@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'

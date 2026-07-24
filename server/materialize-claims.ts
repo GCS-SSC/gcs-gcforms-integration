@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { sql, type Insertable } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
 import type {
@@ -134,6 +133,7 @@ const FISCAL_YEAR_MONTHS = [
   'march'
 ]
 
+/** Maps each GC Forms destination entity to the host owner type used by destination links. */
 export const getGcFormsDestinationOwnerType = (entity: GcsDestinationEntity): DestinationOwnerType => {
   const ownerTypes: Record<GcsDestinationEntity, DestinationOwnerType> = {
     agreement: 'fundingcaseagreement',
@@ -326,6 +326,7 @@ const claimLineItemFieldValue = (
   return value
 }
 
+/** Resolves a claim fiscal-year value by budget-year identifier or display label for an agreement. */
 const resolveClaimFiscalYearId = async (
   rawDb: unknown,
   agreementId: string,
@@ -357,6 +358,7 @@ const resolveClaimFiscalYearId = async (
   return fiscalYear ? String(fiscalYear.id) : null
 }
 
+/** Reports required claim fields that do not contain a materializable value. */
 const collectMissingClaimIssues = (
   input: ClaimMaterializationInput,
   values: NormalizedMappedValue[]
@@ -425,6 +427,7 @@ const findClaimAgreementOverride = async (
     .executeTakeFirst()
 }
 
+/** Resolves the claim agreement from a manual override or its submitted agreement number. */
 const resolveClaimAgreement = async (
   rawDb: unknown,
   input: ClaimMaterializationInput,
@@ -457,6 +460,7 @@ const resolveClaimAgreement = async (
     : null
 }
 
+/** Validates and resolves mapped claim values into a host-ready claim record. */
 const prepareClaimInput = async (
   rawDb: unknown,
   input: ClaimMaterializationInput,
@@ -592,6 +596,7 @@ const lineItemDescription = (
   submittedLineItem: string
 ): string => description || `${submittedCostCategory} / ${submittedCostSubsection} / ${submittedLineItem}`
 
+/** Finds the agreement budget line matching submitted bilingual category, subsection, and line-item labels. */
 const fetchMatchingClaimLineItemBudgetLineItem = async (
   rawDb: unknown,
   claim: PreparedClaim,
@@ -646,6 +651,7 @@ const fetchMatchingClaimLineItemBudgetLineItem = async (
     .executeTakeFirst()
 }
 
+/** Validates repeated line-item values and optionally associates each valid item with a matching budget line, leaving unmatched associations null. */
 const prepareClaimLineItemInputs = async (
   rawDb: unknown,
   input: ClaimMaterializationInput,
@@ -784,6 +790,7 @@ const lineItemLinkValue = (lineItemId: string, lineItem: PreparedClaimLineItem):
   currency: lineItem.currency
 })
 
+/** Idempotently materializes a mapped submission into a claim, line items, and destination links. */
 export const materializeGcFormsClaimSubmission = async (
   rawDb: unknown,
   input: ClaimMaterializationInput

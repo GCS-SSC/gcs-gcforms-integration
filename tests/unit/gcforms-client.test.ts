@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { GcFormsApiClient, generateGcFormsAccessToken, signGcFormsJwt, verifyGcFormsIntegrity } from '../../server/gcforms-client'

@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { createPrivateKey } from 'node:crypto'
 import { sql } from 'kysely'
 import {
@@ -37,6 +36,7 @@ type CredentialRow = {
   created_at: Date | string
 }
 
+/** Normalizes a route context or legacy test event into a credential route context. */
 const toCredentialContext = (contextOrEvent: CredentialRouteContext | {
   context: {
     $authContext?: unknown
@@ -64,6 +64,7 @@ const toCredentialContext = (contextOrEvent: CredentialRouteContext | {
 
 const getAgencyId = (context: CredentialRouteContext): string => context.params.agencyId ?? ''
 
+/** Verifies that the current user may read or update credentials for the requested agency. */
 const authorizeGcFormsAgencyCredentials = (
   context: CredentialRouteContext,
   agencyId: string,
@@ -137,6 +138,7 @@ const toSummary = (row: CredentialRow): GcFormsCredentialSummary => ({
           : null
 })
 
+/** Lists active GC Forms credential metadata for an authorized agency without exposing private keys. */
 export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
   const context = toCredentialContext(contextOrEvent)
   const agencyId = getAgencyId(context)
@@ -182,6 +184,7 @@ const storePrivateKey = async (
   })
 }
 
+/** Creates credential metadata and stores its validated private key as an encrypted extension secret. */
 export const createGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
   const context = toCredentialContext(contextOrEvent)
   const agencyId = getAgencyId(context)
@@ -229,6 +232,7 @@ const getActiveCredentialRow = async (
   .where('_deleted', '=', false)
   .executeTakeFirst()
 
+/** Maps a credential patch payload to the corresponding database update fields. */
 const patchValues = (body: GcFormsCredentialPatch) => {
   const values: Partial<{
     name_en: string
@@ -260,6 +264,7 @@ const patchValues = (body: GcFormsCredentialPatch) => {
   return values
 }
 
+/** Updates an active credential and replaces its encrypted private key when one is provided. */
 export const patchGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
   const context = toCredentialContext(contextOrEvent)
   const agencyId = getAgencyId(context)
@@ -307,6 +312,7 @@ export const patchGcFormsCredential = async (contextOrEvent: Parameters<typeof t
   }
 }
 
+/** Soft-deletes an agency credential and removes its encrypted private key. */
 export const deleteGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
   const context = toCredentialContext(contextOrEvent)
   const agencyId = getAgencyId(context)

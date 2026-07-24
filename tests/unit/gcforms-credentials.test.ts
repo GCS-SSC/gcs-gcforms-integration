@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
 import { Kysely, sql } from 'kysely'

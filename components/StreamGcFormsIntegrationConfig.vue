@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/* eslint-disable jsdoc/require-jsdoc */
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
@@ -420,6 +419,7 @@ const sourceOption = (sourceQuestionId: string) => ({
   value: sourceQuestionId
 })
 
+/** Normalizes a template field catalog while discarding entries without a question identifier or type. */
 const parseFieldCatalog = (value: unknown): GcFormsFieldCatalogItem[] => Array.isArray(value)
   ? value.flatMap((field): GcFormsFieldCatalogItem[] => {
       if (typeof field !== 'object' || field === null) {
@@ -748,6 +748,7 @@ const openMatchModal = (submission: GcFormsMaterializationFailureItem) => {
   isMatchModalOpen.value = true
 }
 
+/** Updates, creates, or removes the configured source mapping for a claim field. */
 const upsertClaimMapping = (field: ClaimMappingField, sourceQuestionId: unknown) => {
   const rawValue = sourceQuestionId === null || sourceQuestionId === undefined ? '' : String(sourceQuestionId)
   const value = rawValue === NO_SOURCE_FIELD_VALUE ? '' : rawValue
@@ -834,6 +835,7 @@ const loadCredentials = async () => {
   }
 }
 
+/** Refreshes the stored template catalog through the selected credential and reports any failure. */
 const refreshTemplate = async () => {
   if (selectedCredentialMissing.value) {
     statusMessage.value = tLocal('credentialRequired')
@@ -859,6 +861,7 @@ const refreshTemplate = async () => {
   }
 }
 
+/** Persists the current stream extension configuration with a bounded request timeout. */
 const saveConfiguration = async () => {
   if (isSaving.value) {
     return
@@ -945,6 +948,7 @@ const downloadClaimTemplate = async () => {
   }
 }
 
+/** Synchronizes configured GC Forms submissions and refreshes outstanding materialization failures. */
 const syncSubmissions = async () => {
   if (selectedCredentialMissing.value) {
     syncError.value = tLocal('credentialRequired')
@@ -1000,6 +1004,7 @@ const refreshMaterializationFailures = async () => {
   }
 }
 
+/** Assigns the selected agreement to a failed submission and refreshes the failure queue. */
 const resolveMaterializationFailure = async () => {
   const submission = selectedMaterializationFailure.value
   if (!submission || !selectedMatchId.value) {

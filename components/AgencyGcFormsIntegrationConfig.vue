@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/* eslint-disable jsdoc/require-jsdoc */
 import { onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
@@ -155,6 +154,7 @@ const editCredential = (credential: GcFormsCredentialSummary) => {
   }
 }
 
+/** Creates or updates the credential being edited, then refreshes the agency credential list. */
 const saveCredential = async () => {
   const form = credentialForm.value
   if (!form) {
