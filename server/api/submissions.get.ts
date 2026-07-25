@@ -8,7 +8,7 @@ export default defineGcsExtensionRouteHandler(async (context) => {
   await authorizeGcFormsStream(context, streamId, 'read')
 
   const db = asGcFormsIntegrationDb(rawDb)
-  const config = await getStreamConfig(rawDb as never, streamId)
+  const config = await getStreamConfig(db, streamId)
   const connection = await ensureConnection(rawDb, streamId, config)
   await ensureIntegration(rawDb, streamId, String(connection.id), config)
 

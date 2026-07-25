@@ -4,8 +4,15 @@ import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
-import { ensureConnection, ensureIntegration, getStreamConfig, refreshTemplate, syncStream } from '../../server/runtime'
-import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms'
+import {
+  createConfiguredClient,
+  ensureConnection,
+  ensureIntegration,
+  getStreamConfig,
+  refreshTemplate,
+  syncStream
+} from '../../server/runtime'
+import { GCFORMS_EXTENSION_KEY, parseGcFormsStreamConfig } from '../../shared/gcforms'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 
@@ -301,7 +308,7 @@ const seedConfig = async () => {
       _deleted: false
     })
     .execute()
-  await setEncryptedExtensionSecret(db as never, {
+  await setEncryptedExtensionSecret(db, {
     rootKey,
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
@@ -345,8 +352,61 @@ describe('GC Forms template shape guard', () => {
       .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
       .execute()
 
-    await expect(getStreamConfig(db as never, '30')).rejects.toMatchObject({
+    await expect(getStreamConfig(db, '30')).rejects.toMatchObject({
       code: 'GCS_GCFORMS_CONFIG_INCOMPLETE'
+    })
+  })
+
+  it('rejects direct client creation with incomplete config before accessing the database', async () => {
+    let databaseAccessCount = 0
+    const inaccessibleDb = new Proxy({}, {
+      get: () => {
+        databaseAccessCount += 1
+        throw new Error('Database should not be accessed for incomplete configuration.')
+      }
+    })
+
+    await expect(createConfiguredClient(
+      inaccessibleDb,
+      '30',
+      parseGcFormsStreamConfig({})
+    )).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CONFIG_INCOMPLETE'
+    })
+    expect(databaseAccessCount).toBe(0)
+  })
+
+  it('overrides submission confirmation only when agency configuration declares it', async () => {
+    await db
+      .updateTable('extensions.stream_configuration')
+      .set({
+        config: {
+          credentialId: '1',
+          confirmSubmissions: true,
+          mappings: []
+        }
+      })
+      .where('stream_id', '=', '30')
+      .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
+      .execute()
+
+    await expect(getStreamConfig(db, '30')).resolves.toMatchObject({
+      confirmSubmissions: true
+    })
+
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          confirmSubmissions: false
+        }
+      })
+      .where('agency_id', '=', '20')
+      .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
+      .execute()
+
+    await expect(getStreamConfig(db, '30')).resolves.toMatchObject({
+      confirmSubmissions: false
     })
   })
 
@@ -404,7 +464,7 @@ describe('GC Forms template shape guard', () => {
         _deleted: false
       })
       .execute()
-    await setEncryptedExtensionSecret(db as never, {
+    await setEncryptedExtensionSecret(db, {
       rootKey,
       extensionKey: GCFORMS_EXTENSION_KEY,
       ownerType: 'agency',

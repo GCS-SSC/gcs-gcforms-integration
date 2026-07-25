@@ -12,21 +12,6 @@ import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
 import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims'
 import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime'
 
-type HostDb = GcFormsIntegrationDb & {
-  selectFrom: (table: string) => unknown
-  insertInto: (table: string) => unknown
-  updateTable: (table: string) => unknown
-}
-
-type SubmissionFailureRow = {
-  id: string
-  submission_name: string
-  mapped_values: JsonValue | null
-  mapping_issues: JsonValue | null
-  last_error: string | null
-  created_at: Date | string
-}
-
 type ClaimMaterializationStatus = 'not_applicable' | 'created' | 'already_materialized' | 'failed'
 
 export interface GcFormsAgreementOption {
@@ -172,12 +157,12 @@ const selectedAgreementOverrides = async (
 }
 
 const ensureFailureContext = async (
-  rawDb: unknown,
+  db: GcFormsIntegrationDb,
   streamId: string
 ): Promise<{ config: GcsGcFormsStreamConfig; connectionId: string; integrationId: string }> => {
-  const config = await getStreamConfig(rawDb as HostDb, streamId)
-  const connection = await ensureConnection(rawDb, streamId, config)
-  const integration = await ensureIntegration(rawDb, streamId, String(connection.id), config)
+  const config = await getStreamConfig(db, streamId)
+  const connection = await ensureConnection(db, streamId, config)
+  const integration = await ensureIntegration(db, streamId, String(connection.id), config)
 
   return {
     config,
@@ -192,7 +177,7 @@ export const listClaimMaterializationFailures = async (
   streamId: string
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const { connectionId } = await ensureFailureContext(rawDb, streamId)
+  const { connectionId } = await ensureFailureContext(db, streamId)
   const rows = await db
     .selectFrom('extensions.gcs_gcforms_submissions')
     .select(['id', 'submission_name', 'mapped_values', 'mapping_issues', 'last_error', 'created_at'])
@@ -200,7 +185,7 @@ export const listClaimMaterializationFailures = async (
     .where('status', '=', 'materialization_failed')
     .where('_deleted', '=', false)
     .orderBy('updated_at', 'desc')
-    .execute() as SubmissionFailureRow[]
+    .execute()
 
   const failedRows = rows
     .map(row => ({
@@ -311,7 +296,7 @@ export const resolveClaimMaterializationFailure = async (
   agreementId: string
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const { config, connectionId, integrationId } = await ensureFailureContext(rawDb, streamId)
+  const { config, connectionId, integrationId } = await ensureFailureContext(db, streamId)
   await assertAgreementInStream(rawDb, streamId, agreementId)
 
   const submission = await db

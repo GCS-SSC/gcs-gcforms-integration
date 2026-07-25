@@ -1,4 +1,4 @@
-import { sql } from 'kysely'
+import { sql, type Selectable } from 'kysely'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
@@ -24,73 +24,35 @@ import {
   type GcFormsPrivateApiKey
 } from '../shared/gcforms'
 import { GcFormsApiClient, verifyGcFormsIntegrity } from './gcforms-client'
-import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
+import {
+  asGcFormsIntegrationDb,
+  type GcFormsIntegrationDb,
+  type GcFormsIntegrationHostDatabase
+} from './db'
 import { materializeGcFormsClaimSubmission } from './materialize-claims'
 
-type HostDb = GcFormsIntegrationDb & {
-  selectFrom: (table: string) => unknown
-  insertInto: (table: string) => unknown
-  updateTable: (table: string) => unknown
-}
-
-type StreamConfigurationRow = {
-  id?: string | number
-  enabled: boolean
-  config: unknown
-}
-
-type AgencyEnablementRow = {
-  config: unknown
-}
-
-type ConnectionRow = {
-  id: string | number
-  form_id: string
-  credential_id: string
-  api_url: string
-  identity_provider_url: string
-  project_identifier: string
-  contact_email: string | null
-  preferred_language: 'en' | 'fr'
-}
+type ConnectionRow = Selectable<
+  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_connections']
+>
 
 type CredentialRow = {
-  id: string | number
+  id: string
   agency_id: string
   key_id: string
   user_id: string
   form_id: string
 }
 
-type IntegrationRow = {
-  id: string
-  connection_id: string
-  stream_id: string
-  config: unknown
-}
-
-type ExtensionAuthContext = {
-  userId: string
-  userAbilities: {
-    authorize: (subject: 'transfer_payment', action: 'read' | 'update', scope: unknown) => boolean
-    authorizeWithTeam: (
-      subject: 'transfer_payment',
-      action: 'read' | 'update',
-      scope: unknown,
-      userId: string,
-      includeInherited: boolean,
-      db: unknown
-    ) => Promise<boolean>
-  }
-}
+type IntegrationRow = Selectable<
+  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_integrations']
+>
 
 type ImportRunRow = {
-  id: string | number
+  id: string
 }
 
 type SubmissionRow = {
-  id: string | number
-  name?: string
+  id: string
 }
 
 type SyncSubmissionContext = {
@@ -106,6 +68,9 @@ type SyncSubmissionContext = {
 
 const maybeString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
 
 const jsonbValue = (value: unknown) =>
   value === null || value === undefined
@@ -141,7 +106,8 @@ export const getGcFormsCredential = async (
   agencyId: string,
   credentialId: string
 ): Promise<GcFormsPrivateApiKey> => {
-  const row = await asGcFormsIntegrationDb(rawDb)
+  const db = asGcFormsIntegrationDb(rawDb)
+  const row = await db
     .selectFrom('extensions.gcs_gcforms_credentials')
     .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
     .where('id', '=', sql<string>`${credentialId}::bigint`)
@@ -159,7 +125,7 @@ export const getGcFormsCredential = async (
     })
   }
 
-  const credential = await getEncryptedExtensionSecret(asGcFormsIntegrationDb(rawDb) as never, {
+  const credential = await getEncryptedExtensionSecret<GcFormsIntegrationHostDatabase>(db, {
     rootKey: getGcFormsSecretRootKey(),
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
@@ -188,11 +154,11 @@ export const getGcFormsCredential = async (
 
 /** Loads active credential metadata and rejects credentials outside the requested agency. */
 const getGcFormsCredentialRow = async (
-  rawDb: unknown,
+  db: GcFormsIntegrationDb,
   agencyId: string,
   credentialId: string
 ): Promise<CredentialRow> => {
-  const row = await asGcFormsIntegrationDb(rawDb)
+  const row = await db
     .selectFrom('extensions.gcs_gcforms_credentials')
     .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
     .where('id', '=', sql<string>`${credentialId}::bigint`)
@@ -234,7 +200,7 @@ export const authorizeGcFormsStream = async (
   streamId: string,
   action: 'read' | 'update'
 ): Promise<void> => {
-  const authContext = context.auth as ExtensionAuthContext | undefined
+  const authContext = context.auth
   if (!authContext) {
     throw createGcsExtensionUserError({
       statusCode: 401,
@@ -246,7 +212,8 @@ export const authorizeGcFormsStream = async (
     })
   }
 
-  const streamContext = await resolveExtensionStreamContext(context.db as never, streamId)
+  const db = asGcFormsIntegrationDb(context.db)
+  const streamContext = await resolveExtensionStreamContext(db, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
       statusCode: 404,
@@ -282,10 +249,10 @@ export const authorizeGcFormsStream = async (
 
 /** Resolves an enabled stream configuration, merging agency settings and validating its credential. */
 export const getStreamConfig = async (
-  db: HostDb,
+  db: GcFormsIntegrationDb,
   streamId: string
 ): Promise<GcsGcFormsStreamConfig> => {
-  const streamContext = await resolveExtensionStreamContext(db as never, streamId)
+  const streamContext = await resolveExtensionStreamContext(db, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
       statusCode: 404,
@@ -297,19 +264,7 @@ export const getStreamConfig = async (
     })
   }
 
-  const row = await (db as never as {
-    selectFrom: (table: 'extensions.stream_configuration') => {
-      select: (columns: string[]) => {
-        where: (...args: unknown[]) => {
-          where: (...args: unknown[]) => {
-              where: (...args: unknown[]) => {
-                executeTakeFirst: () => Promise<StreamConfigurationRow | undefined>
-              }
-          }
-        }
-      }
-    }
-  })
+  const row = await db
     .selectFrom('extensions.stream_configuration')
     .select(['enabled', 'config'])
     .where('stream_id', '=', streamId)
@@ -317,21 +272,7 @@ export const getStreamConfig = async (
     .where('_deleted', '=', false)
     .executeTakeFirst()
 
-  const agencyRow = await (db as never as {
-    selectFrom: (table: 'extensions.agency_enablement') => {
-      select: (columns: string[]) => {
-        where: (...args: unknown[]) => {
-          where: (...args: unknown[]) => {
-            where: (...args: unknown[]) => {
-              where: (...args: unknown[]) => {
-                executeTakeFirst: () => Promise<AgencyEnablementRow | undefined>
-              }
-            }
-          }
-        }
-      }
-    }
-  })
+  const agencyRow = await db
     .selectFrom('extensions.agency_enablement')
     .select(['config'])
     .where('agency_id', '=', streamContext.agencyId)
@@ -351,8 +292,8 @@ export const getStreamConfig = async (
     })
   }
 
-  const agencyConfigSource = typeof agencyRow?.config === 'object' && agencyRow.config !== null
-    ? agencyRow.config as Record<string, unknown>
+  const agencyConfigSource = isRecord(agencyRow?.config)
+    ? agencyRow.config
     : {}
   const agencyConfig = parseGcFormsAgencyConfig(agencyRow?.config)
   const config = parseGcFormsStreamConfig(row.config)
@@ -373,7 +314,7 @@ export const getStoredTemplate = async (
   streamId: string
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const config = await getStreamConfig(rawDb as HostDb, streamId)
+  const config = await getStreamConfig(db, streamId)
   const connection = await db
     .selectFrom('extensions.gcs_gcforms_connections')
     .select(['id'])
@@ -420,7 +361,7 @@ export const getStoredTemplate = async (
 /** Synchronizes an existing connection with the current stream configuration and credential metadata. */
 const updateConnection = async (
   db: GcFormsIntegrationDb,
-  id: string | number,
+  id: string,
   config: GcsGcFormsStreamConfig,
   credential: CredentialRow
 ) => {
@@ -448,7 +389,7 @@ export const ensureConnection = async (
   config: GcsGcFormsStreamConfig
 ): Promise<ConnectionRow> => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const streamContext = await resolveExtensionStreamContext(rawDb as never, streamId)
+  const streamContext = await resolveExtensionStreamContext(db, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
       statusCode: 404,
@@ -459,7 +400,7 @@ export const ensureConnection = async (
       }
     })
   }
-  const credential = await getGcFormsCredentialRow(rawDb, streamContext.agencyId, assertConfiguredCredential(config))
+  const credential = await getGcFormsCredentialRow(db, streamContext.agencyId, assertConfiguredCredential(config))
 
   const existing = await db
     .selectFrom('extensions.gcs_gcforms_connections')
@@ -470,7 +411,7 @@ export const ensureConnection = async (
     .executeTakeFirst()
 
   if (existing) {
-    return await updateConnection(db, existing.id, config, credential) as ConnectionRow
+    return await updateConnection(db, existing.id, config, credential)
   }
 
   return await db
@@ -488,7 +429,7 @@ export const ensureConnection = async (
       status: 'active'
     })
     .returningAll()
-    .executeTakeFirstOrThrow() as ConnectionRow
+    .executeTakeFirstOrThrow()
 }
 
 /** Upserts the stream integration and replaces its persisted field mappings with the current configuration. */
@@ -559,7 +500,7 @@ export const ensureIntegration = async (
       .execute()
   }
 
-  return integration as IntegrationRow
+  return integration
 }
 
 /** Creates a GC Forms API client from the stream's agency credential and connection settings. */
@@ -568,7 +509,9 @@ export const createConfiguredClient = async (
   streamId: string,
   config: GcsGcFormsStreamConfig
 ): Promise<GcFormsApiClient> => {
-  const streamContext = await resolveExtensionStreamContext(rawDb as never, streamId)
+  const credentialId = assertConfiguredCredential(config)
+  const db = asGcFormsIntegrationDb(rawDb)
+  const streamContext = await resolveExtensionStreamContext(db, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
       statusCode: 404,
@@ -580,7 +523,7 @@ export const createConfiguredClient = async (
     })
   }
 
-  const credential = await getGcFormsCredential(rawDb, streamContext.agencyId, config.credentialId!)
+  const credential = await getGcFormsCredential(db, streamContext.agencyId, credentialId)
   return new GcFormsApiClient({
     apiUrl: config.apiUrl,
     identityProviderUrl: config.identityProviderUrl,
@@ -597,7 +540,7 @@ export const refreshTemplate = async (
   streamId: string
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const config = await getStreamConfig(rawDb as HostDb, streamId)
+  const config = await getStreamConfig(db, streamId)
   const connection = await ensureConnection(rawDb, streamId, config)
   await ensureIntegration(rawDb, streamId, String(connection.id), config)
   const client = await createConfiguredClient(rawDb, streamId, config)
@@ -645,7 +588,7 @@ export const refreshTemplate = async (
     .where('id', '=', String(connection.id))
     .execute()
 
-  await updateStreamTemplateShapeChanged(rawDb, streamId, false)
+  await updateStreamTemplateShapeChanged(db, streamId, false)
 
   return {
     connection,
@@ -656,23 +599,11 @@ export const refreshTemplate = async (
 
 /** Persists whether the current remote template shape differs from the reviewed stream template. */
 const updateStreamTemplateShapeChanged = async (
-  rawDb: unknown,
+  db: GcFormsIntegrationDb,
   streamId: string,
   templateShapeChanged: boolean
 ) => {
-  await (rawDb as {
-    updateTable: (table: 'extensions.stream_configuration') => {
-      set: (values: Record<string, unknown>) => {
-        where: (...args: unknown[]) => {
-          where: (...args: unknown[]) => {
-            where: (...args: unknown[]) => {
-              execute: () => Promise<unknown>
-            }
-          }
-        }
-      }
-    }
-  })
+  await db
     .updateTable('extensions.stream_configuration')
     .set({
       config: sql`jsonb_set(config, '{templateShapeChanged}', ${sql.raw(templateShapeChanged ? "'true'" : "'false'")}::jsonb, true)` as never
@@ -708,7 +639,6 @@ const assertGcFormsClaimTemplateShape = (template: unknown) => {
 
 /** Blocks synchronization until a stored template exists and still matches the remote template shape. */
 const assertGcFormsTemplateShapeUnchanged = async (
-  rawDb: unknown,
   db: GcFormsIntegrationDb,
   streamId: string,
   connectionId: string,
@@ -733,7 +663,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
   }
 
   if (!gcFormsTemplateShapesEqual(stored.template, currentTemplate)) {
-    await updateStreamTemplateShapeChanged(rawDb, streamId, true)
+    await updateStreamTemplateShapeChanged(db, streamId, true)
     throw createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
@@ -995,12 +925,12 @@ export const syncStream = async (
   streamId: string
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const config = await getStreamConfig(rawDb as HostDb, streamId)
+  const config = await getStreamConfig(db, streamId)
   const connection = await ensureConnection(rawDb, streamId, config)
   const client = await createConfiguredClient(rawDb, streamId, config)
   const currentTemplate = await client.getFormTemplate()
   assertGcFormsClaimTemplateShape(currentTemplate)
-  await assertGcFormsTemplateShapeUnchanged(rawDb, db, streamId, String(connection.id), currentTemplate)
+  await assertGcFormsTemplateShapeUnchanged(db, streamId, String(connection.id), currentTemplate)
   const integration = await ensureIntegration(rawDb, streamId, String(connection.id), config)
   const run = await createGcFormsImportRun(db, String(connection.id), String(integration.id))
   let importedCount = 0

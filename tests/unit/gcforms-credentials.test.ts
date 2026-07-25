@@ -3,6 +3,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { getEncryptedExtensionSecret, setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
+import type { GcsExtensionAuthContext, GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
 import {
   createGcFormsCredential,
@@ -67,34 +68,43 @@ const createSchema = async () => {
   `.execute(db)
 }
 
-const auth = (canAccess = true) => ({
+const auth = (canAccess = true): GcsExtensionAuthContext => ({
+  userId: 'user-1',
   userAbilities: {
-    authorize: () => canAccess
+    authorize: () => canAccess,
+    authorizeWithTeam: () => canAccess
   }
 })
 
-const contextFor = (agencyId: string, canAccess = true, credentialId?: string, body?: unknown) => ({
-  db,
-  params: {
+const contextFor = (
+  agencyId: string,
+  canAccess = true,
+  credentialId?: string,
+  body?: unknown
+): GcsExtensionRouteContext => {
+  const params = {
     agencyId,
     credentialId
-  },
-  auth: auth(canAccess),
-  config: {},
-  readBody: async () => body,
-  getHeader: () => undefined
-})
-
-const eventFor = (agencyId: string, canAccess = true, credentialId?: string) => ({
-  context: {
-    $db: db,
-    params: {
-      agencyId,
-      credentialId
-    },
-    $authContext: auth(canAccess)
   }
-})
+  const authContext = auth(canAccess)
+  const event = {
+    context: {
+      $db: db,
+      params,
+      $authContext: authContext
+    }
+  }
+
+  return {
+    event,
+    db,
+    params,
+    auth: authContext,
+    config: {},
+    readBody: async <T = unknown>() => body as T,
+    getHeader: () => undefined
+  }
+}
 
 const seedCredential = async (agencyId = '10', name = 'Local claims') => {
   const row = await db
@@ -110,7 +120,7 @@ const seedCredential = async (agencyId = '10', name = 'Local claims') => {
     .returningAll()
     .executeTakeFirstOrThrow()
   const key = privateKeyPem()
-  await setEncryptedExtensionSecret(db as never, {
+  await setEncryptedExtensionSecret(db, {
     rootKey,
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
@@ -151,7 +161,7 @@ describe('GC Forms encrypted credentials', () => {
     const first = await seedCredential('10', 'Local claims')
     const second = await seedCredential('10', 'Rotated claims')
 
-    const listed = await listGcFormsCredentials(eventFor('10') as never)
+    const listed = await listGcFormsCredentials(contextFor('10'))
 
     expect(listed.items).toEqual([
       expect.objectContaining({
@@ -183,10 +193,10 @@ describe('GC Forms encrypted credentials', () => {
   it('requires agency read/update authorization', async () => {
     await seedCredential()
 
-    await expect(listGcFormsCredentials(eventFor('10', false) as never)).rejects.toMatchObject({
+    await expect(listGcFormsCredentials(contextFor('10', false))).rejects.toMatchObject({
       code: 'GCS_GCFORMS_FORBIDDEN'
     })
-    await expect(createGcFormsCredential(contextFor('10', false, undefined, {}) as never)).rejects.toMatchObject({
+    await expect(createGcFormsCredential(contextFor('10', false, undefined, {}))).rejects.toMatchObject({
       code: 'GCS_GCFORMS_FORBIDDEN'
     })
   })
@@ -200,7 +210,7 @@ describe('GC Forms encrypted credentials', () => {
       userId: 'user-1',
       formId: 'form-1',
       key
-    }) as never)).resolves.toMatchObject({
+    }))).resolves.toMatchObject({
       ok: true,
       item: {
         id: expect.any(String),
@@ -227,7 +237,7 @@ describe('GC Forms encrypted credentials', () => {
     await expect(patchGcFormsCredential(contextFor('10', true, credential.id, {
       name_en: 'Updated claims',
       formId: 'form-2'
-    }) as never)).resolves.toMatchObject({
+    }))).resolves.toMatchObject({
       item: {
         id: credential.id,
         name_en: 'Updated claims',
@@ -247,9 +257,9 @@ describe('GC Forms encrypted credentials', () => {
     const credential = await seedCredential()
     const nextKey = privateKeyPem()
 
-    await patchGcFormsCredential(contextFor('10', true, credential.id, { key: nextKey }) as never)
+    await patchGcFormsCredential(contextFor('10', true, credential.id, { key: nextKey }))
 
-    await expect(getEncryptedExtensionSecret(db as never, {
+    await expect(getEncryptedExtensionSecret(db, {
       rootKey,
       extensionKey: GCFORMS_EXTENSION_KEY,
       ownerType: 'agency',
@@ -261,7 +271,7 @@ describe('GC Forms encrypted credentials', () => {
   it('soft-deletes credential row and encrypted secret', async () => {
     const credential = await seedCredential()
 
-    await expect(deleteGcFormsCredential(eventFor('10', true, credential.id) as never)).resolves.toEqual({ ok: true })
+    await expect(deleteGcFormsCredential(contextFor('10', true, credential.id))).resolves.toEqual({ ok: true })
     await expect(getGcFormsCredential(db, '10', credential.id)).rejects.toMatchObject({
       code: 'GCS_GCFORMS_CREDENTIAL_MISSING'
     })

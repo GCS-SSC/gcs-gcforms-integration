@@ -1,5 +1,9 @@
-import type { Generated, Kysely } from 'kysely'
+import type { Generated, Kysely, Transaction } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
+import type {
+  ExtensionSecretDatabase,
+  ExtensionStreamContextDatabaseClient
+} from '@gcs-ssc/extensions/server'
 
 export type GcFormsSubmissionStatus =
   | 'discovered'
@@ -13,7 +17,17 @@ export type GcFormsSubmissionStatus =
   | 'problem'
   | 'mapping_failed'
 
-export interface GcFormsIntegrationHostDatabase {
+export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase {
+  'Transfer_Payment_Profile': {
+    id: Generated<string>
+    egcs_tp_agency: string
+    _deleted: Generated<boolean>
+  }
+  'Transfer_Payment_Stream': {
+    id: Generated<string>
+    egcs_tp_transferpaymentprofile: string
+    _deleted: Generated<boolean>
+  }
   'Funding_Case_Agreement_Profile': {
     id: Generated<string>
     egcs_fc_agreementnumber: string
@@ -56,6 +70,22 @@ export interface GcFormsIntegrationHostDatabase {
     id: Generated<string>
     egcs_ay_name_en: string
     egcs_ay_name_fr: string
+    _deleted: Generated<boolean>
+  }
+  'extensions.agency_enablement': {
+    id: Generated<string>
+    extension_key: string
+    agency_id: string
+    enabled: boolean
+    config: Generated<JsonValue>
+    _deleted: Generated<boolean>
+  }
+  'extensions.stream_configuration': {
+    id: Generated<string>
+    extension_key: string
+    stream_id: string
+    enabled: boolean
+    config: Generated<JsonValue>
     _deleted: Generated<boolean>
   }
   'Funding_Case_Agreement_Claim': {
@@ -214,25 +244,14 @@ export interface GcFormsIntegrationHostDatabase {
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.secret_entry': {
-    id: Generated<string>
-    extension_key: string
-    owner_type: string
-    owner_id: string
-    secret_key: string
-    ciphertext: string
-    iv: string
-    auth_tag: string
-    algorithm: string
-    key_version: number
-    metadata: Generated<JsonValue>
-    created_at: Generated<Date | string>
-    updated_at: Date | string | null
-    _deleted: Generated<boolean>
-  }
 }
 
 export type GcFormsIntegrationDb = Kysely<GcFormsIntegrationHostDatabase>
+  & ExtensionStreamContextDatabaseClient
+
+export type GcFormsIntegrationDatabaseClient =
+  | Kysely<GcFormsIntegrationHostDatabase>
+  | Transaction<GcFormsIntegrationHostDatabase>
 
 /** Narrows a host database instance to the tables used by the GC Forms integration. */
 export const asGcFormsIntegrationDb = (db: unknown): GcFormsIntegrationDb =>

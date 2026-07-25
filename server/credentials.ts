@@ -14,19 +14,16 @@ import {
   type GcFormsCredentialPatch,
   type GcFormsCredentialSummary
 } from '../shared/gcforms'
-import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
+import {
+  asGcFormsIntegrationDb,
+  type GcFormsIntegrationDatabaseClient,
+  type GcFormsIntegrationDb,
+  type GcFormsIntegrationHostDatabase
+} from './db'
 import { getGcFormsSecretRootKey } from './runtime'
 
-type ExtensionAuthContext = {
-  userAbilities: {
-    authorize: (subject: 'agency', action: 'read' | 'update', scope: unknown) => boolean
-  }
-}
-
-type CredentialRouteContext = GcsExtensionRouteContext
-
 type CredentialRow = {
-  id: string | number
+  id: string
   name_en: string
   name_fr: string
   key_id: string
@@ -36,37 +33,11 @@ type CredentialRow = {
   created_at: Date | string
 }
 
-/** Normalizes a route context or legacy test event into a credential route context. */
-const toCredentialContext = (contextOrEvent: CredentialRouteContext | {
-  context: {
-    $authContext?: unknown
-    $db: unknown
-    params?: Record<string, string | undefined>
-  }
-}): CredentialRouteContext => {
-  if ('params' in contextOrEvent && 'db' in contextOrEvent) {
-    return contextOrEvent
-  }
-
-  const event = contextOrEvent
-  return {
-    event,
-    db: event.context.$db,
-    params: event.context.params ?? {},
-    auth: event.context.$authContext as never,
-    config: {},
-    readBody: async () => {
-      throw new Error('Request body is not available on this test credential context.')
-    },
-    getHeader: () => undefined
-  } as CredentialRouteContext
-}
-
-const getAgencyId = (context: CredentialRouteContext): string => context.params.agencyId ?? ''
+const getAgencyId = (context: GcsExtensionRouteContext): string => context.params.agencyId ?? ''
 
 /** Verifies that the current user may read or update credentials for the requested agency. */
 const authorizeGcFormsAgencyCredentials = (
-  context: CredentialRouteContext,
+  context: GcsExtensionRouteContext,
   agencyId: string,
   action: 'read' | 'update'
 ) => {
@@ -81,7 +52,7 @@ const authorizeGcFormsAgencyCredentials = (
     })
   }
 
-  const authContext = context.auth as ExtensionAuthContext | undefined
+  const authContext = context.auth
   if (!authContext) {
     throw createGcsExtensionUserError({
       statusCode: 401,
@@ -139,8 +110,7 @@ const toSummary = (row: CredentialRow): GcFormsCredentialSummary => ({
 })
 
 /** Lists active GC Forms credential metadata for an authorized agency without exposing private keys. */
-export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
-  const context = toCredentialContext(contextOrEvent)
+export const listGcFormsCredentials = async (context: GcsExtensionRouteContext) => {
   const agencyId = getAgencyId(context)
   authorizeGcFormsAgencyCredentials(context, agencyId, 'read')
 
@@ -168,12 +138,12 @@ export const listGcFormsCredentials = async (contextOrEvent: Parameters<typeof t
 }
 
 const storePrivateKey = async (
-  db: GcFormsIntegrationDb,
+  db: GcFormsIntegrationDatabaseClient,
   agencyId: string,
   credentialId: string,
   key: string
 ) => {
-  await setEncryptedExtensionSecret(db as never, {
+  await setEncryptedExtensionSecret<GcFormsIntegrationHostDatabase>(db, {
     rootKey: getGcFormsSecretRootKey(),
     extensionKey: GCFORMS_EXTENSION_KEY,
     ownerType: 'agency',
@@ -185,8 +155,7 @@ const storePrivateKey = async (
 }
 
 /** Creates credential metadata and stores its validated private key as an encrypted extension secret. */
-export const createGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
-  const context = toCredentialContext(contextOrEvent)
+export const createGcFormsCredential = async (context: GcsExtensionRouteContext) => {
   const agencyId = getAgencyId(context)
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
@@ -265,8 +234,7 @@ const patchValues = (body: GcFormsCredentialPatch) => {
 }
 
 /** Updates an active credential and replaces its encrypted private key when one is provided. */
-export const patchGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
-  const context = toCredentialContext(contextOrEvent)
+export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) => {
   const agencyId = getAgencyId(context)
   const credentialId = context.params.credentialId ?? ''
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
@@ -313,8 +281,7 @@ export const patchGcFormsCredential = async (contextOrEvent: Parameters<typeof t
 }
 
 /** Soft-deletes an agency credential and removes its encrypted private key. */
-export const deleteGcFormsCredential = async (contextOrEvent: Parameters<typeof toCredentialContext>[0]) => {
-  const context = toCredentialContext(contextOrEvent)
+export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext) => {
   const agencyId = getAgencyId(context)
   const credentialId = context.params.credentialId ?? ''
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
@@ -332,8 +299,8 @@ export const deleteGcFormsCredential = async (contextOrEvent: Parameters<typeof 
       .where('_deleted', '=', false)
       .execute()
 
-    await deleteEncryptedExtensionSecret(
-      trx as never,
+    await deleteEncryptedExtensionSecret<GcFormsIntegrationHostDatabase>(
+      trx,
       GCFORMS_EXTENSION_KEY,
       'agency',
       agencyId,
