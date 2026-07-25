@@ -9,6 +9,7 @@ import {
   parseGcFormsStreamConfig
 } from '../shared/gcforms'
 import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
+import { gcFormsJsonbValue } from './jsonb'
 import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims'
 import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime'
 
@@ -336,7 +337,7 @@ export const resolveClaimMaterializationFailure = async (
     .set({
       integration_id: integrationId,
       status,
-      mapping_issues: result.issues as never,
+      mapping_issues: gcFormsJsonbValue(result.issues),
       last_error: result.issues[0]?.message ?? null,
       updated_at: new Date()
     })

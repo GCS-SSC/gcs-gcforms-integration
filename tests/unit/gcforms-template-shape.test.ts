@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
-import { Kysely, sql } from 'kysely'
+import { Kysely, PostgresDialect, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
+import { gcFormsJsonbValue } from '../../server/jsonb'
 import {
   createConfiguredClient,
   ensureConnection,
@@ -340,6 +341,76 @@ afterEach(async () => {
 })
 
 describe('GC Forms template shape guard', () => {
+  it('serializes JSONB values as Postgres parameters without changing array or object shape', async () => {
+    const postgresDb: Kysely<Record<string, never>> = new Kysely({
+      dialect: new PostgresDialect({
+        pool: {
+          connect: async () => {
+            throw new Error('Compile-only PostgreSQL pool cannot execute queries.')
+          },
+          end: async () => {}
+        }
+      })
+    })
+
+    try {
+      const values = [
+        [],
+        [{ mappingId: 'mapping-1', value: true }],
+        { answers: ['one', 'two'] }
+      ]
+
+      for (const value of values) {
+        const compiled = sql`select ${gcFormsJsonbValue(value)}`.compile(postgresDb)
+        expect(compiled.sql).toBe('select $1::jsonb')
+        expect(compiled.parameters).toEqual([JSON.stringify(value)])
+        expect(JSON.parse(String(compiled.parameters[0]))).toEqual(value)
+      }
+
+      const normalizedSpecialValues = sql`select ${gcFormsJsonbValue({
+        bigint: 9007199254740993n,
+        date: new Date('2026-01-02T03:04:05.000Z'),
+        invalidDate: new Date(Number.NaN),
+        nested: [undefined, Number.NaN, Number.POSITIVE_INFINITY]
+      })}`.compile(postgresDb)
+      expect(normalizedSpecialValues).toMatchObject({
+        sql: 'select $1::jsonb',
+        parameters: [JSON.stringify({
+          bigint: '9007199254740993',
+          date: '2026-01-02T03:04:05.000Z',
+          invalidDate: null,
+          nested: [null, null, null]
+        })]
+      })
+
+      const sqlNull = sql`select ${gcFormsJsonbValue(undefined)}`.compile(postgresDb)
+      expect(sqlNull).toMatchObject({
+        sql: 'select $1',
+        parameters: [null]
+      })
+
+      const jsonNull = sql`select ${gcFormsJsonbValue(null)}`.compile(postgresDb)
+      expect(jsonNull).toMatchObject({
+        sql: 'select $1::jsonb',
+        parameters: ['null']
+      })
+
+      const roundTrip = await sql<{
+        empty_value: unknown
+        populated_value: unknown
+      }>`select
+        ${gcFormsJsonbValue([])} as empty_value,
+        ${gcFormsJsonbValue([{ mappingId: 'mapping-1', value: true }])} as populated_value
+      `.execute(db)
+      expect(roundTrip.rows[0]).toEqual({
+        empty_value: [],
+        populated_value: [{ mappingId: 'mapping-1', value: true }]
+      })
+    } finally {
+      await postgresDb.destroy()
+    }
+  })
+
   it('fails with incomplete config when no credential id is selected', async () => {
     await db
       .updateTable('extensions.stream_configuration')
@@ -513,27 +584,61 @@ describe('GC Forms template shape guard', () => {
       ...config,
       mappings: [
         {
-          ...config.mappings[0],
-          sourceQuestionId: 'agreement_number_updated'
+          id: 'agreement-number',
+          sourceQuestionId: 'agreement_number_updated',
+          destinationEntity: 'claim',
+          destinationPath: 'egcs_fc_fundingagreement',
+          transform: 'string',
+          required: true,
+          onMissing: 'block',
+          onInvalid: 'block'
         }
       ]
     })
 
     await expect(db
       .selectFrom('extensions.gcs_gcforms_field_mappings')
-      .select(['source_question_id', '_deleted'])
+      .select([
+        'source_question_id',
+        'default_value',
+        sql<boolean>`default_value IS NULL`.as('default_value_is_sql_null'),
+        sql<string | null>`jsonb_typeof(default_value)`.as('default_value_json_type'),
+        '_deleted'
+      ])
       .where('integration_id', '=', String(first.id))
       .orderBy('id')
       .execute()).resolves.toEqual([
       expect.objectContaining({
         source_question_id: 'agreement_number',
+        default_value: null,
+        default_value_is_sql_null: false,
+        default_value_json_type: 'null',
         _deleted: true
       }),
       expect.objectContaining({
         source_question_id: 'agreement_number_updated',
+        default_value: null,
+        default_value_is_sql_null: true,
+        default_value_json_type: null,
         _deleted: false
       })
     ])
+
+    const storedIntegration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('config')
+      .where('id', '=', String(first.id))
+      .executeTakeFirstOrThrow()
+    expect(storedIntegration).toEqual({
+      config: expect.objectContaining({
+        credentialId: '1',
+        mappings: [expect.objectContaining({
+          sourceQuestionId: 'agreement_number_updated'
+        })]
+      })
+    })
+    expect(parseGcFormsStreamConfig(storedIntegration.config).mappings[0])
+      .not.toHaveProperty('defaultValue')
   })
 
   it('blocks sync when the remote template shape changed until the user refreshes the stored baseline', async () => {
@@ -570,6 +675,15 @@ describe('GC Forms template shape guard', () => {
     await expect(syncStream(db, '30')).rejects.toMatchObject({
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED'
     })
+    await expect(db
+      .selectFrom('extensions.stream_configuration')
+      .select('config')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      config: expect.objectContaining({
+        templateShapeChanged: true
+      })
+    })
 
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('/forms/form-1/submission/new'),
@@ -581,6 +695,15 @@ describe('GC Forms template shape guard', () => {
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
 
     await refreshTemplate(db, '30')
+    await expect(db
+      .selectFrom('extensions.stream_configuration')
+      .select('config')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      config: expect.objectContaining({
+        templateShapeChanged: false
+      })
+    })
     await expect(syncStream(db, '30')).resolves.toMatchObject({
       discovered: 0,
       imported: 0,

@@ -1,4 +1,5 @@
 import { sql, type Selectable } from 'kysely'
+import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
@@ -29,6 +30,7 @@ import {
   type GcFormsIntegrationDb,
   type GcFormsIntegrationHostDatabase
 } from './db'
+import { gcFormsJsonbValue } from './jsonb'
 import { materializeGcFormsClaimSubmission } from './materialize-claims'
 
 type ConnectionRow = Selectable<
@@ -71,11 +73,6 @@ const maybeString = (value: unknown): string | null =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
-
-const jsonbValue = (value: unknown) =>
-  value === null || value === undefined
-    ? null
-    : sql`${JSON.stringify(value)}::jsonb`
 
 const DEV_EXTENSION_SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
@@ -451,7 +448,7 @@ export const ensureIntegration = async (
     name_en: 'GC Forms integration',
     name_fr: 'Integration GC Forms',
     enabled: true,
-    config: config as never,
+    config: gcFormsJsonbValue(config),
     updated_at: new Date()
   }
 
@@ -470,7 +467,7 @@ export const ensureIntegration = async (
           name_en: values.name_en,
           name_fr: values.name_fr,
           enabled: true,
-          config: config as never
+          config: gcFormsJsonbValue(config)
         })
         .returningAll()
         .executeTakeFirstOrThrow()
@@ -493,7 +490,7 @@ export const ensureIntegration = async (
         destination_path: mapping.destinationPath,
         transform: mapping.transform,
         required: mapping.required,
-        default_value: jsonbValue(mapping.defaultValue) as never,
+        default_value: gcFormsJsonbValue(mapping.defaultValue),
         on_missing: mapping.onMissing,
         on_invalid: mapping.onInvalid
       })))
@@ -562,8 +559,8 @@ export const refreshTemplate = async (
         form_id: connection.form_id,
         title_en: maybeString(template.titleEn),
         title_fr: maybeString(template.titleFr),
-        template: template as never,
-        field_catalog: fieldCatalog as never,
+        template: gcFormsJsonbValue(template),
+        field_catalog: gcFormsJsonbValue(fieldCatalog),
         refreshed_at: new Date()
       })
       .where('id', '=', String(existing.id))
@@ -576,8 +573,8 @@ export const refreshTemplate = async (
         form_id: connection.form_id,
         title_en: maybeString(template.titleEn),
         title_fr: maybeString(template.titleFr),
-        template: template as never,
-        field_catalog: fieldCatalog as never
+        template: gcFormsJsonbValue(template),
+        field_catalog: gcFormsJsonbValue(fieldCatalog)
       })
       .execute()
   }
@@ -606,7 +603,12 @@ const updateStreamTemplateShapeChanged = async (
   await db
     .updateTable('extensions.stream_configuration')
     .set({
-      config: sql`jsonb_set(config, '{templateShapeChanged}', ${sql.raw(templateShapeChanged ? "'true'" : "'false'")}::jsonb, true)` as never
+      config: sql<JsonValue>`jsonb_set(
+        config,
+        '{templateShapeChanged}',
+        ${JSON.stringify(templateShapeChanged)}::jsonb,
+        true
+      )`
     })
     .where('stream_id', '=', streamId)
     .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
@@ -848,10 +850,10 @@ const importGcFormsSubmission = async (
         integration_id: String(context.integration.id),
         status,
         confirmation_code: decrypted.confirmationCode,
-        answers: answers as never,
+        answers: gcFormsJsonbValue(answers),
         answers_checksum: decrypted.checksum,
-        mapped_values: preview.values as never,
-        mapping_issues: issues as never,
+        mapped_values: gcFormsJsonbValue(preview.values),
+        mapping_issues: gcFormsJsonbValue(issues),
         last_error: issues[0]?.message ?? null,
         updated_at: new Date()
       })

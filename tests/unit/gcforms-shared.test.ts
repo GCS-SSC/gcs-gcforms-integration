@@ -111,10 +111,16 @@ describe('GC Forms shared mapping utilities', () => {
     expect(normalizeGcFormsJsonValue({
       z: undefined,
       a: ['value', undefined, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      bigint: 9007199254740993n,
+      date: new Date('2026-01-02T03:04:05.000Z'),
+      invalidDate: new Date(Number.NaN),
       callback: () => 'ignored'
     })).toEqual({
       a: ['value', null, null, null, null],
+      bigint: '9007199254740993',
       callback: expect.any(String),
+      date: '2026-01-02T03:04:05.000Z',
+      invalidDate: null,
       z: null
     })
   })

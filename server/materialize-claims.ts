@@ -7,6 +7,7 @@ import type {
   GcsGcFormsMappingIssue
 } from '../shared/gcforms'
 import { asGcFormsIntegrationDb, type GcFormsIntegrationHostDatabase } from './db'
+import { gcFormsJsonbValue } from './jsonb'
 
 type ClaimInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim']>
 type ClaimLineItemInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim_Line_Item']>
@@ -92,13 +93,7 @@ const CLAIM_REQUIRED_PATHS = [
   'egcs_fc_periodend',
   'egcs_fc_receiveddate'
 ] as const
-const CLAIM_OPTIONAL_PATHS = [
-  'egcs_fc_isfinalforyear'
-] as const
-const CLAIM_PATHS = [
-  ...CLAIM_REQUIRED_PATHS,
-  ...CLAIM_OPTIONAL_PATHS
-] as const
+type ClaimPath = typeof CLAIM_REQUIRED_PATHS[number] | 'egcs_fc_isfinalforyear'
 
 const CLAIM_LINE_ITEM_REQUIRED_PATHS = [
   'egcs_fc_submittedcostcategory',
@@ -310,7 +305,7 @@ const requiredDate = (value: JsonValue | undefined): Date | null => {
 
 const claimFieldValue = (
   values: NormalizedMappedValue[],
-  path: typeof CLAIM_PATHS[number]
+  path: ClaimPath
 ): JsonValue | undefined => mappedValueForPath(values, CLAIM_ENTITY, path)?.value
 
 const claimLineItemFieldValue = (
@@ -877,7 +872,7 @@ export const materializeGcFormsClaimSubmission = async (
         owner_id: claimId,
         destination_entity: CLAIM_ENTITY,
         destination_path: CLAIM_ENTITY,
-        value: claimLinkValue(claimId, claimInput) as never
+        value: gcFormsJsonbValue(claimLinkValue(claimId, claimInput))
       })
       .execute()
 
@@ -911,7 +906,7 @@ export const materializeGcFormsClaimSubmission = async (
           owner_id: lineItemId,
           destination_entity: CLAIM_LINE_ITEM_ENTITY,
           destination_path: CLAIM_LINE_ITEM_ENTITY,
-          value: lineItemLinkValue(lineItemId, preparedLineItem) as never
+          value: gcFormsJsonbValue(lineItemLinkValue(lineItemId, preparedLineItem))
         })
         .execute()
     }

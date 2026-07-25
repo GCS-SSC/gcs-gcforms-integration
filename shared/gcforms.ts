@@ -305,6 +305,10 @@ export const normalizeGcFormsJsonValue = (value: unknown): JsonValue => {
     return value
   }
 
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null
+  }
+
   if (Array.isArray(value)) {
     return value.map(item => normalizeGcFormsJsonValue(item))
   }
