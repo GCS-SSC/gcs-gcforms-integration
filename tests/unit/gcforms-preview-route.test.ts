@@ -4,6 +4,7 @@ const readBodyMock = vi.fn()
 const authorizeGcFormsStreamMock = vi.fn()
 
 vi.mock('h3', () => ({
+  isEvent: () => true,
   readBody: (...args: unknown[]) => readBodyMock(...args)
 }))
 

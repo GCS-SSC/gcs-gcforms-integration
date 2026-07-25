@@ -116,19 +116,19 @@ export const GcFormsDecryptedSubmissionSchema = z.object({
 
 export type GcFormsDecryptedSubmission = z.infer<typeof GcFormsDecryptedSubmissionSchema>
 
-export const GcFormsTemplateElementSchema: z.ZodType<GcFormsTemplateElement> = z.lazy(() => z.object({
-  id: z.union([z.string(), z.number()]),
-  type: z.string(),
-  properties: z.record(z.string(), z.unknown()).optional(),
-  elements: z.array(GcFormsTemplateElementSchema).optional()
-})) as unknown as z.ZodType<GcFormsTemplateElement>
-
 export interface GcFormsTemplateElement {
   id: string | number
   type: string
   properties?: Record<string, unknown>
   elements?: GcFormsTemplateElement[]
 }
+
+export const GcFormsTemplateElementSchema: z.ZodType<GcFormsTemplateElement> = z.lazy(() => z.object({
+  id: z.union([z.string(), z.number()]),
+  type: z.string(),
+  properties: z.record(z.string(), z.unknown()).optional(),
+  elements: z.array(GcFormsTemplateElementSchema).optional()
+}))
 
 export const GcFormsFormTemplateSchema = z.object({
   layout: z.array(z.union([z.string(), z.number()])).optional(),
@@ -250,6 +250,9 @@ export interface GcsGcFormsMappingIssue {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
+const isGcFormsTemplateElement = (value: unknown): value is GcFormsTemplateElement =>
+  GcFormsTemplateElementSchema.safeParse(value).success
+
 const stringProperty = (source: Record<string, unknown> | undefined, keys: string[]): string => {
   if (!source) {
     return ''
@@ -282,30 +285,35 @@ const childElements = (element: GcFormsTemplateElement): GcFormsTemplateElement[
   }
 
   if (Array.isArray(subElements)) {
-    return subElements.filter(isRecord) as unknown as GcFormsTemplateElement[]
+    return subElements.filter(isGcFormsTemplateElement)
   }
 
   return []
 }
 
-/** Normalizes template values recursively, sorting record keys, converting undefined to null, and stringifying remaining value types. */
-const normalizeJsonValue = (value: unknown): JsonValue => {
+/** Projects an unknown value into a deterministic JSON-compatible representation. */
+export const normalizeGcFormsJsonValue = (value: unknown): JsonValue => {
   if (value === null || value === undefined) {
     return null
   }
 
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value === 'string' || typeof value === 'boolean') {
     return value
   }
 
   if (Array.isArray(value)) {
-    return value.map(item => normalizeJsonValue(item))
+    return value.map(item => normalizeGcFormsJsonValue(item))
   }
 
   if (isRecord(value)) {
-    return Object.fromEntries(Object.keys(value)
+    const entries: Array<[string, JsonValue]> = Object.keys(value)
       .sort()
-      .map(key => [key, normalizeJsonValue(value[key])])) as JsonValue
+      .map(key => [key, normalizeGcFormsJsonValue(value[key])])
+    return Object.fromEntries(entries)
   }
 
   return String(value)
@@ -317,10 +325,10 @@ const choicesProperty = (properties: Record<string, unknown> | undefined): JsonV
     return []
   }
 
-  return rawChoices.map(choice => normalizeJsonValue(choice))
+  return rawChoices.map(choice => normalizeGcFormsJsonValue(choice))
 }
 
-const stableStringify = (value: unknown): string => JSON.stringify(normalizeJsonValue(value))
+const stableStringify = (value: unknown): string => JSON.stringify(normalizeGcFormsJsonValue(value))
 
 /** Flattens a GC Forms template into a normalized catalog of source fields. */
 export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalogItem[] => {
@@ -409,6 +417,19 @@ export const parseGcFormsStreamConfig = (config: GcsExtensionJsonConfig | unknow
 export const parseGcFormsAgencyConfig = (config: GcsExtensionJsonConfig | unknown): GcsGcFormsAgencyConfig =>
   GcsGcFormsAgencyConfigSchema.parse(config ?? {})
 
+/** Returns mappings with the matching entry replaced or the new entry appended. */
+export const upsertGcFormsFieldMapping = (
+  mappings: GcsGcFormsFieldMapping[],
+  nextMapping: GcsGcFormsFieldMapping
+): GcsGcFormsFieldMapping[] => {
+  const existingIndex = mappings.findIndex(mapping => mapping.id === nextMapping.id)
+  if (existingIndex < 0) {
+    return [...mappings, nextMapping]
+  }
+
+  return mappings.map((mapping, index) => index === existingIndex ? nextMapping : mapping)
+}
+
 /** Adds stable question-id aliases to submission answers, including nested dynamic-row values. */
 export const normalizeGcFormsAnswers = (
   answers: string | Record<string, unknown>,
@@ -419,7 +440,7 @@ export const normalizeGcFormsAnswers = (
       return answers
     }
 
-    const parsed = JSON.parse(answers) as unknown
+    const parsed = JSON.parse(answers)
     return isRecord(parsed) ? parsed : {}
   })()
 
@@ -535,7 +556,7 @@ const MAPPED_VALUE_COERCERS: Record<GcsGcFormsTransform, (value: unknown) => Jso
   enum: (value: unknown) => String(value),
   bilingual_text: (value: unknown) => String(value),
   attachment: (value: unknown) => String(value),
-  json: (value: unknown) => JSON.parse(JSON.stringify(value)) as JsonValue
+  json: (value: unknown) => normalizeGcFormsJsonValue(JSON.parse(JSON.stringify(value)))
 }
 
 const coerceMappedValue = (value: unknown, transform: GcsGcFormsTransform): JsonValue => {
@@ -563,7 +584,7 @@ const dynamicRowAnswerValues = (
   answers: Record<string, unknown>,
   sourceQuestionId: string
 ): unknown[] | undefined => {
-  if (!GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS.includes(sourceQuestionId as typeof GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS[number])) {
+  if (!GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS.some(questionId => questionId === sourceQuestionId)) {
     return undefined
   }
 
@@ -606,7 +627,7 @@ const createMappingIssue = (
 })
 
 const getMappingDefaultValue = (mapping: GcsGcFormsFieldMapping): JsonValue =>
-  mapping.defaultValue === undefined ? null : mapping.defaultValue as JsonValue
+  mapping.defaultValue === undefined ? null : normalizeGcFormsJsonValue(mapping.defaultValue)
 
 const previewMissingGcFormsValue = (
   mapping: GcsGcFormsFieldMapping

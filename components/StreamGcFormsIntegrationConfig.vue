@@ -28,7 +28,9 @@ import {
   type GcsGroupedTableRow
 } from '@gcs-ssc/extensions/ui'
 import {
+  normalizeGcFormsJsonValue,
   parseGcFormsStreamConfig,
+  upsertGcFormsFieldMapping,
   type GcFormsCredentialSummary,
   type GcFormsFieldCatalogItem,
   type GcsGcFormsFieldMapping,
@@ -357,7 +359,7 @@ type GroupedMappingFieldRow = GcsGroupedTableRow<MappingFieldTableRow>
 const buildHostConfig = (value: GcsGcFormsStreamConfig): GcsExtensionJsonConfig => ({
   credentialId: value.credentialId ?? null,
   templateShapeChanged: templateShapeChanged.value,
-  mappings: value.mappings as unknown as JsonValue
+  mappings: normalizeGcFormsJsonValue(value.mappings)
 })
 
 const configsEqual = (left: unknown, right: unknown): boolean =>
@@ -381,14 +383,14 @@ watch(config, value => {
 })
 
 watch(templateShapeChanged, value => {
-  if ((config.value as { templateShapeChanged?: unknown }).templateShapeChanged === value) {
+  if (config.value.templateShapeChanged === value) {
     return
   }
 
-  const nextConfig = {
-    ...(config.value as Record<string, unknown>),
+  const nextConfig: GcsExtensionJsonConfig = {
+    ...config.value,
     templateShapeChanged: value
-  } as GcsExtensionJsonConfig
+  }
   if (!configsEqual(config.value, nextConfig)) {
     config.value = nextConfig
   }
@@ -752,9 +754,9 @@ const openMatchModal = (submission: GcFormsMaterializationFailureItem) => {
 const upsertClaimMapping = (field: ClaimMappingField, sourceQuestionId: unknown) => {
   const rawValue = sourceQuestionId === null || sourceQuestionId === undefined ? '' : String(sourceQuestionId)
   const value = rawValue === NO_SOURCE_FIELD_VALUE ? '' : rawValue
-  const existing = localConfig.value.mappings.find(mapping => mapping.id === field.id)
+  const existingIndex = localConfig.value.mappings.findIndex(mapping => mapping.id === field.id)
   if (!value && !field.sourceQuestionId) {
-    if (existing) {
+    if (existingIndex >= 0) {
       localConfig.value.mappings = localConfig.value.mappings.filter(mapping => mapping.id !== field.id)
     }
     return
@@ -767,19 +769,15 @@ const upsertClaimMapping = (field: ClaimMappingField, sourceQuestionId: unknown)
     destinationPath: field.destinationPath,
     transform: field.transform,
     required: field.required,
-    defaultValue: field.defaultValue,
     onMissing: field.onMissing ?? (field.required ? 'block' : 'skip'),
     onInvalid: field.onInvalid ?? 'block'
   }
-
-  nextMapping.destinationEntity = field.repeat ? 'claim_line_item' : 'claim'
-
-  if (existing) {
-    Object.assign(existing, nextMapping)
-    return
+  if (field.defaultValue !== undefined) {
+    nextMapping.defaultValue = field.defaultValue
   }
 
-  localConfig.value.mappings.push(nextMapping)
+  nextMapping.destinationEntity = field.repeat ? 'claim_line_item' : 'claim'
+  localConfig.value.mappings = upsertGcFormsFieldMapping(localConfig.value.mappings, nextMapping)
 }
 
 const mappingForField = (field: ClaimMappingField) => localConfig.value.mappings.find(mapping => mapping.id === field.id)

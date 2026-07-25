@@ -1,14 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import {
+  GcFormsTemplateElementSchema,
   gcFormsTemplateShapesEqual,
   normalizeGcFormsAnswers,
+  normalizeGcFormsJsonValue,
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
-  previewGcFormsMapping
+  previewGcFormsMapping,
+  upsertGcFormsFieldMapping
 } from '../../shared/gcforms'
 
 describe('GC Forms shared mapping utilities', () => {
+  it('validates recursively nested template elements', () => {
+    expect(GcFormsTemplateElementSchema.safeParse({
+      id: 'parent',
+      type: 'dynamicRow',
+      elements: [{
+        id: 'child',
+        type: 'textField',
+        elements: [{ id: 'missing-type' }]
+      }]
+    }).success).toBe(false)
+  })
+
   it('normalizes form template elements into a field catalog', () => {
     const catalog = normalizeGcFormsTemplate({
       titleEn: 'Claim form',
@@ -68,6 +83,51 @@ describe('GC Forms shared mapping utilities', () => {
         label_fr: 'Montant'
       })
     ])
+  })
+
+  it('ignores malformed property-based child elements', () => {
+    const catalog = normalizeGcFormsTemplate({
+      elements: [{
+        id: 'parent',
+        type: 'dynamicRow',
+        properties: {
+          subElements: [
+            null,
+            { id: 'missing-type' },
+            {
+              id: 'valid-child',
+              type: 'textField',
+              properties: { questionId: 'valid_question' }
+            }
+          ]
+        }
+      }]
+    })
+
+    expect(catalog.map(field => field.questionId)).toEqual(['parent', 'valid_question'])
+  })
+
+  it('projects unknown nested values into JSON-compatible data', () => {
+    expect(normalizeGcFormsJsonValue({
+      z: undefined,
+      a: ['value', undefined, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      callback: () => 'ignored'
+    })).toEqual({
+      a: ['value', null, null, null, null],
+      callback: expect.any(String),
+      z: null
+    })
+  })
+
+  it('preserves __proto__ as a JSON data property', () => {
+    const normalized = normalizeGcFormsJsonValue(JSON.parse(
+      '{"__proto__":{"polluted":true},"safe":1}'
+    ))
+
+    expect(JSON.stringify(normalized)).toBe(
+      '{"__proto__":{"polluted":true},"safe":1}'
+    )
+    expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype)
   })
 
   it('compares the stored form shape independently of non-shape labels', () => {
@@ -159,6 +219,121 @@ describe('GC Forms shared mapping utilities', () => {
         code: 'missing_required_value'
       })
     ])
+  })
+
+  it('preserves __proto__ JSON answers without changing the result prototype', () => {
+    const config = parseGcFormsStreamConfig({
+      mappings: [{
+        id: 'map-json',
+        sourceQuestionId: 'metadata',
+        destinationEntity: 'claim',
+        destinationPath: 'egcs_fc_metadata',
+        transform: 'json'
+      }]
+    })
+    const metadata = JSON.parse('{"__proto__":{"polluted":true},"safe":1}')
+    const value = previewGcFormsMapping({ metadata }, config.mappings).values[0]?.value
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Expected mapped JSON object.')
+    }
+
+    expect(JSON.stringify(value)).toBe('{"__proto__":{"polluted":true},"safe":1}')
+    expect(Object.hasOwn(value, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype)
+    expect(Reflect.get(value, 'polluted')).toBeUndefined()
+  })
+
+  it('normalizes configured defaults before returning mapped JSON values', () => {
+    const config = parseGcFormsStreamConfig({
+      mappings: [{
+        id: 'map-default',
+        sourceQuestionId: 'missing',
+        destinationEntity: 'claim',
+        destinationPath: 'egcs_fc_metadata',
+        transform: 'json',
+        required: false,
+        defaultValue: {
+          present: true,
+          omitted: undefined
+        },
+        onMissing: 'default',
+        onInvalid: 'default'
+      }]
+    })
+
+    expect(previewGcFormsMapping({}, config.mappings).values[0]?.value).toEqual({
+      omitted: null,
+      present: true
+    })
+  })
+
+  it('replaces stale mapping defaults and appends new mappings', () => {
+    const existing = parseGcFormsStreamConfig({
+      mappings: [
+        {
+          id: 'map-before',
+          sourceQuestionId: 'before-source',
+          destinationEntity: 'claim',
+          destinationPath: 'egcs_fc_before',
+          transform: 'string'
+        },
+        {
+          id: 'map-default',
+          sourceQuestionId: 'old-source',
+          destinationEntity: 'claim',
+          destinationPath: 'egcs_fc_metadata',
+          transform: 'json',
+          defaultValue: { stale: true }
+        },
+        {
+          id: 'map-after',
+          sourceQuestionId: 'after-source',
+          destinationEntity: 'claim',
+          destinationPath: 'egcs_fc_after',
+          transform: 'string'
+        }
+      ]
+    }).mappings
+    const nextMapping = parseGcFormsStreamConfig({
+      mappings: [{
+        id: 'map-default',
+        sourceQuestionId: 'new-source',
+        destinationEntity: 'claim',
+        destinationPath: 'egcs_fc_metadata',
+        transform: 'json'
+      }]
+    }).mappings[0]
+    if (!nextMapping) {
+      throw new Error('Expected parsed mapping.')
+    }
+    const [beforeMapping, staleMapping, afterMapping] = existing
+    if (!beforeMapping || !staleMapping || !afterMapping) {
+      throw new Error('Expected existing mapping fixtures.')
+    }
+
+    const replaced = upsertGcFormsFieldMapping(existing, nextMapping)
+    const appendedMapping = {
+      ...nextMapping,
+      id: 'map-appended'
+    }
+    const appended = upsertGcFormsFieldMapping(existing, appendedMapping)
+
+    expect(replaced.map(mapping => mapping.id)).toEqual(['map-before', 'map-default', 'map-after'])
+    expect(replaced[0]).toBe(beforeMapping)
+    expect(replaced[1]).toBe(nextMapping)
+    expect(replaced[2]).toBe(afterMapping)
+    expect(replaced[1]).not.toHaveProperty('defaultValue')
+    expect(staleMapping).toHaveProperty('defaultValue')
+    expect(appended.map(mapping => mapping.id)).toEqual([
+      'map-before',
+      'map-default',
+      'map-after',
+      'map-appended'
+    ])
+    expect(appended[0]).toBe(beforeMapping)
+    expect(appended[1]).toBe(staleMapping)
+    expect(appended[2]).toBe(afterMapping)
+    expect(appended[3]).toBe(appendedMapping)
   })
 
   it('previews dynamic row claim line items as aligned mapped arrays', () => {
