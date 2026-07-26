@@ -558,7 +558,7 @@ afterEach(async () => {
 })
 
 describe('GC Forms claim materialization', () => {
-  it('skips materialization when no claim-related mappings are configured', async () => {
+  it('fails materialization when configured mappings target unsupported destinations', async () => {
     const result = await materialize([
       {
         id: 'source-only',
@@ -573,11 +573,50 @@ describe('GC Forms claim materialization', () => {
     ], [])
 
     expect(result).toEqual({
+      status: 'failed',
+      lineItemIds: [],
+      issues: [{
+        mappingId: 'source-only',
+        sourceQuestionId: 'payload',
+        destinationPath: 'payload',
+        code: 'unsupported_destination',
+        message: 'Configured destination entity "source_record" is not supported by claim materialization.'
+      }]
+    })
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+  })
+
+  it('returns not applicable only when no mappings are configured', async () => {
+    await expect(materialize([], [])).resolves.toEqual({
       status: 'not_applicable',
       lineItemIds: [],
       issues: []
     })
-    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+  })
+
+  it('reports unsupported destinations before an existing destination-link short circuit', async () => {
+    await seedMappings(claimMappings)
+    await materialize(claimMappings, claimValues)
+
+    const result = await materialize([{
+      id: 'unsupported-existing',
+      sourceQuestionId: 'payload',
+      destinationEntity: 'source_record',
+      destinationPath: 'payload',
+      transform: 'json',
+      required: false,
+      onMissing: 'skip',
+      onInvalid: 'block'
+    }], [], '901', '05-09-09f4')
+
+    expect(result).toEqual({
+      status: 'failed',
+      lineItemIds: [],
+      issues: [expect.objectContaining({
+        mappingId: 'unsupported-existing',
+        code: 'unsupported_destination'
+      })]
+    })
   })
 
   it('creates a submitted claim and destination link for claim mappings', async () => {

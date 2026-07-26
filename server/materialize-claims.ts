@@ -79,6 +79,10 @@ export interface ClaimMaterializationResult {
 
 const CLAIM_ENTITY: GcsDestinationEntity = 'claim'
 const CLAIM_LINE_ITEM_ENTITY: GcsDestinationEntity = 'claim_line_item'
+const MATERIALIZED_DESTINATION_ENTITIES = new Set<GcsDestinationEntity>([
+  CLAIM_ENTITY,
+  CLAIM_LINE_ITEM_ENTITY
+])
 
 const AGREEMENT_OWNER_TYPE: DestinationOwnerType = 'fundingcaseagreement'
 const CLAIM_OWNER_TYPE: DestinationOwnerType = 'fundingcaseagreementclaim'
@@ -219,6 +223,19 @@ const createIssue = (
     message
   }
 }
+
+/** Returns stable issues for configured destinations this materializer cannot persist. */
+export const getUnsupportedGcFormsMaterializationIssues = (
+  mappings: GcsGcFormsFieldMapping[]
+): GcsGcFormsMappingIssue[] => mappings
+  .filter(mapping => !MATERIALIZED_DESTINATION_ENTITIES.has(mapping.destinationEntity))
+  .map(mapping => ({
+    mappingId: mapping.id,
+    sourceQuestionId: mapping.sourceQuestionId,
+    destinationPath: mapping.destinationPath,
+    code: 'unsupported_destination',
+    message: `Configured destination entity "${mapping.destinationEntity}" is not supported by claim materialization.`
+  }))
 
 const requiredString = (
   value: JsonValue | undefined
@@ -790,6 +807,15 @@ export const materializeGcFormsClaimSubmission = async (
   rawDb: unknown,
   input: ClaimMaterializationInput
 ): Promise<ClaimMaterializationResult> => {
+  const unsupportedDestinationIssues = getUnsupportedGcFormsMaterializationIssues(input.mappings)
+  if (unsupportedDestinationIssues.length > 0) {
+    return {
+      status: 'failed',
+      lineItemIds: [],
+      issues: unsupportedDestinationIssues
+    }
+  }
+
   const hasClaimMappings = hasMaterializationMapping(input.mappings, CLAIM_ENTITY)
   const hasLineItemMappings = hasMaterializationMapping(input.mappings, CLAIM_LINE_ITEM_ENTITY)
   const existing = await existingClaimLink(rawDb, input.submissionId)

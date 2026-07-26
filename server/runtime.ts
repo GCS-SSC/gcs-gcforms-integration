@@ -18,7 +18,6 @@ import {
   normalizeGcFormsTemplate,
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
-  previewGcFormsMapping,
   type GcsGcFormsStreamConfig,
   type GcFormsDecryptedSubmission,
   type GcFormsNewSubmission,
@@ -32,6 +31,8 @@ import {
 } from './db.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
 import { materializeGcFormsClaimSubmission } from './materialize-claims.ts'
+import { shouldConfirmGcFormsSubmission } from './submission-confirmation.ts'
+import { prepareGcFormsSubmissionMaterialization } from './submission-materialization.ts'
 
 type ConnectionRow = Selectable<
   GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_connections']
@@ -826,23 +827,29 @@ const importGcFormsSubmission = async (
 
     const answers = normalizeGcFormsAnswers(decrypted.answers, context.currentTemplate)
     answers.__gcforms_created_at = new Date(decrypted.createdAt).toISOString()
-    const preview = previewGcFormsMapping(answers, context.config.mappings)
-    const materialization = preview.issues.length === 0
+    const preparedMaterialization = prepareGcFormsSubmissionMaterialization(answers, context.config.mappings)
+    const materialization = preparedMaterialization.materializationIssues.length > 0
+      ? {
+          status: 'failed' as const,
+          lineItemIds: [],
+          issues: preparedMaterialization.materializationIssues
+        }
+      : preparedMaterialization.previewIssues.length === 0
       ? await materializeGcFormsClaimSubmission(context.rawDb, {
           streamId: context.streamId,
           integrationId: String(context.integration.id),
           submissionId,
           submissionUuid: submission.name,
           mappings: context.config.mappings,
-          mappedValues: preview.values
+          mappedValues: preparedMaterialization.values
         })
       : {
           status: 'failed' as const,
           lineItemIds: [],
           issues: []
         }
-    const issues = [...preview.issues, ...materialization.issues]
-    const status = resolveGcFormsSubmissionImportStatus(preview.issues.length, materialization.status)
+    const issues = [...preparedMaterialization.previewIssues, ...materialization.issues]
+    const status = resolveGcFormsSubmissionImportStatus(preparedMaterialization.previewIssues.length, materialization.status)
 
     await context.db
       .updateTable('extensions.gcs_gcforms_submissions')
@@ -852,7 +859,7 @@ const importGcFormsSubmission = async (
         confirmation_code: decrypted.confirmationCode,
         answers: gcFormsJsonbValue(answers),
         answers_checksum: decrypted.checksum,
-        mapped_values: gcFormsJsonbValue(preview.values),
+        mapped_values: gcFormsJsonbValue(preparedMaterialization.values),
         mapping_issues: gcFormsJsonbValue(issues),
         last_error: issues[0]?.message ?? null,
         updated_at: new Date()
@@ -867,7 +874,7 @@ const importGcFormsSubmission = async (
     }
 
     const importResult = materialization.status === 'already_materialized' ? 'skipped' : 'imported'
-    if (importResult === 'imported' && context.config.confirmSubmissions) {
+    if (shouldConfirmGcFormsSubmission(context.config.confirmSubmissions, materialization.status, issues)) {
       await context.client.confirmSubmission(submission.name, decrypted.confirmationCode)
     }
 

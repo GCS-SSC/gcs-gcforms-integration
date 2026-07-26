@@ -20,6 +20,10 @@ Stream configuration includes a `confirmSubmissions` switch. It defaults to `fal
 
 When `confirmSubmissions` is `true`, sync confirms a GC Forms submission only after mapping and materialization complete without issues. Confirmation may remove the submission from the GC Forms "new submissions" queue depending on the GC Forms deployment.
 
+Configured mappings must include a supported `claim` or `claim_line_item` destination. A submission
+whose configured mappings target only unsupported destinations is stored with a stable
+`unsupported_destination` materialization issue and is never confirmed.
+
 ## Current Materializer
 
 The supported host materializer is claims-first:
