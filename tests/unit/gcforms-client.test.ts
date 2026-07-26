@@ -1,8 +1,20 @@
-import { generateKeyPairSync } from 'node:crypto'
+import {
+  createCipheriv,
+  generateKeyPairSync,
+  publicEncrypt,
+  randomBytes
+} from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { GcFormsApiClient, generateGcFormsAccessToken, signGcFormsJwt, verifyGcFormsIntegrity } from '../../server/gcforms-client'
+import {
+  decryptGcFormsSubmission,
+  GcFormsApiClient,
+  generateGcFormsAccessToken,
+  signGcFormsJwt,
+  verifyGcFormsIntegrity
+} from '../../server/gcforms-client'
+import type { GcFormsEncryptedSubmission, GcFormsPrivateApiKey } from '../../shared/gcforms'
 
-const privateKeyPem = () => generateKeyPairSync('rsa', {
+const generateRsaKeys = () => generateKeyPairSync('rsa', {
   modulusLength: 2048,
   privateKeyEncoding: {
     type: 'pkcs8',
@@ -12,7 +24,45 @@ const privateKeyPem = () => generateKeyPairSync('rsa', {
     type: 'spki',
     format: 'pem'
   }
-}).privateKey
+})
+
+const privateKeyPem = () => generateRsaKeys().privateKey
+
+const createEncryptedSubmission = (
+  answers: string,
+  authTagLength = 16
+): {
+  encryptedSubmission: GcFormsEncryptedSubmission
+  privateApiKey: GcFormsPrivateApiKey
+} => {
+  const { privateKey, publicKey } = generateRsaKeys()
+  const encryptionKey = randomBytes(32)
+  const nonce = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce, { authTagLength: 16 })
+  const encryptedResponses = Buffer.concat([
+    cipher.update(answers, 'utf8'),
+    cipher.final()
+  ])
+  const wrap = (value: Buffer) => publicEncrypt(
+    { key: publicKey, oaepHash: 'sha256' },
+    value
+  ).toString('base64')
+
+  return {
+    encryptedSubmission: {
+      encryptedKey: wrap(encryptionKey),
+      encryptedNonce: wrap(nonce),
+      encryptedAuthTag: wrap(cipher.getAuthTag().subarray(0, authTagLength)),
+      encryptedResponses: encryptedResponses.toString('base64')
+    },
+    privateApiKey: {
+      keyId: 'key-1',
+      key: privateKey,
+      userId: 'user-1',
+      formId: 'c123456789012345678901234'
+    }
+  }
+}
 
 describe('GC Forms API client', () => {
   it('signs JWT bearer assertions with the expected claims', async () => {
@@ -85,5 +135,20 @@ describe('GC Forms API client', () => {
   it('verifies checksums over the exact GC Forms answers string', () => {
     expect(verifyGcFormsIntegrity('{"a":"b"}', '92eff9dda44cb8003ee13990782580ff')).toBe(true)
     expect(verifyGcFormsIntegrity('{"a":"b"}', 'bad')).toBe(false)
+  })
+
+  it('requires a full-length authentication tag when decrypting submissions', () => {
+    const answers = '{"answer":"value"}'
+    const valid = createEncryptedSubmission(answers)
+    const truncated = createEncryptedSubmission(answers, 12)
+
+    expect(decryptGcFormsSubmission(
+      valid.encryptedSubmission,
+      valid.privateApiKey
+    )).toBe(answers)
+    expect(() => decryptGcFormsSubmission(
+      truncated.encryptedSubmission,
+      truncated.privateApiKey
+    )).toThrow()
   })
 })

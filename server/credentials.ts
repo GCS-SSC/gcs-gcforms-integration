@@ -10,7 +10,6 @@ import {
   GCFORMS_EXTENSION_KEY,
   GcFormsCredentialCreateSchema,
   GcFormsCredentialPatchSchema,
-  type GcFormsCredentialCreate,
   type GcFormsCredentialPatch,
   type GcFormsCredentialSummary
 } from '../shared/gcforms'
@@ -310,5 +309,3 @@ export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext)
 
   return { ok: true }
 }
-
-export type { GcFormsCredentialCreate, GcFormsCredentialPatch }

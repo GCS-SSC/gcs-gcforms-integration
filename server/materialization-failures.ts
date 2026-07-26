@@ -15,13 +15,13 @@ import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime'
 
 type ClaimMaterializationStatus = 'not_applicable' | 'created' | 'already_materialized' | 'failed'
 
-export interface GcFormsAgreementOption {
+interface GcFormsAgreementOption {
   id: string
   agreementNumber: string
   label: string
 }
 
-export interface GcFormsMaterializationFailureItem {
+interface GcFormsMaterializationFailureItem {
   submissionId: string
   submissionName: string
   agreementNumber: string | null

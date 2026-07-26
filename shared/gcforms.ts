@@ -6,14 +6,14 @@ export const GCFORMS_EXTENSION_KEY = 'gcs-gcforms-integration'
 export const DEFAULT_GCFORMS_API_URL = 'https://api.forms-formulaires.alpha.canada.ca/v1'
 export const DEFAULT_GCFORMS_IDP_URL = 'https://auth.forms-formulaires.alpha.canada.ca'
 export const DEFAULT_GCFORMS_PROJECT_IDENTIFIER = '284778202772022819'
-export const GCFORMS_CLAIM_LINE_ITEMS_QUESTION_ID = 'submitted_line_items'
-export const GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS = [
+const GCFORMS_CLAIM_LINE_ITEMS_QUESTION_ID = 'submitted_line_items'
+const GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS = [
   'submitted_cost_category',
   'submitted_cost_subsection',
   'submitted_line_item',
   'submitted_amount'
 ] as const
-export const GCFORMS_CLAIM_REQUIRED_QUESTION_IDS = [
+const GCFORMS_CLAIM_REQUIRED_QUESTION_IDS = [
   'agreement_number',
   'fiscal_year',
   'claim_period_start_month',
@@ -22,7 +22,7 @@ export const GCFORMS_CLAIM_REQUIRED_QUESTION_IDS = [
   ...GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS
 ] as const
 
-export const GcFormsPrivateApiKeySchema = z.object({
+const GcFormsPrivateApiKeySchema = z.object({
   keyId: z.string().min(1),
   key: z.string().min(1),
   userId: z.string().min(1),
@@ -43,8 +43,6 @@ export const GcFormsCredentialCreateSchema = z.object({
   formId: z.string().min(1).max(80),
   key: z.string().min(1)
 })
-
-export type GcFormsCredentialCreate = z.infer<typeof GcFormsCredentialCreateSchema>
 
 const GcFormsCredentialPatchBaseSchema = z.object({
   name_en: z.string().min(1).max(200).optional(),
@@ -95,7 +93,7 @@ export const GcFormsEncryptedSubmissionSchema = z.object({
 
 export type GcFormsEncryptedSubmission = z.infer<typeof GcFormsEncryptedSubmissionSchema>
 
-export const GcFormsAttachmentSchema = z.object({
+const GcFormsAttachmentSchema = z.object({
   id: z.string().optional(),
   name: z.string(),
   downloadLink: z.string(),
@@ -103,9 +101,7 @@ export const GcFormsAttachmentSchema = z.object({
   md5: z.string().optional()
 })
 
-export type GcFormsAttachment = z.infer<typeof GcFormsAttachmentSchema>
-
-export const GcFormsDecryptedSubmissionSchema = z.object({
+const GcFormsDecryptedSubmissionSchema = z.object({
   createdAt: z.coerce.number(),
   status: z.string(),
   confirmationCode: z.string(),
@@ -162,7 +158,7 @@ export interface GcFormsTemplateShapeElement {
   children: GcFormsTemplateShapeElement[]
 }
 
-export const GcsDestinationEntitySchema = z.enum([
+const GcsDestinationEntitySchema = z.enum([
   'agreement',
   'proponent',
   'claim',
@@ -173,7 +169,7 @@ export const GcsDestinationEntitySchema = z.enum([
 
 export type GcsDestinationEntity = z.infer<typeof GcsDestinationEntitySchema>
 
-export const GcsGcFormsTransformSchema = z.enum([
+const GcsGcFormsTransformSchema = z.enum([
   'string',
   'number',
   'money',
@@ -187,15 +183,14 @@ export const GcsGcFormsTransformSchema = z.enum([
 
 export type GcsGcFormsTransform = z.infer<typeof GcsGcFormsTransformSchema>
 
-export const GcsGcFormsFailureModeSchema = z.enum(['block', 'skip', 'default'])
-export type GcsGcFormsFailureMode = z.infer<typeof GcsGcFormsFailureModeSchema>
+const GcsGcFormsFailureModeSchema = z.enum(['block', 'skip', 'default'])
 
 const OptionalStringSchema = z.preprocess(
   value => typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined,
   z.string().optional()
 )
 
-export const GcsGcFormsFieldMappingSchema = z.object({
+const GcsGcFormsFieldMappingSchema = z.object({
   id: z.string().min(1),
   sourceQuestionId: z.string().min(1),
   destinationEntity: GcsDestinationEntitySchema,
@@ -209,7 +204,7 @@ export const GcsGcFormsFieldMappingSchema = z.object({
 
 export type GcsGcFormsFieldMapping = z.infer<typeof GcsGcFormsFieldMappingSchema>
 
-export const GcsGcFormsAgencyConfigSchema = z.object({
+const GcsGcFormsAgencyConfigSchema = z.object({
   apiUrl: OptionalStringSchema,
   identityProviderUrl: OptionalStringSchema,
   confirmSubmissions: z.boolean().default(false)
@@ -217,7 +212,7 @@ export const GcsGcFormsAgencyConfigSchema = z.object({
 
 export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema>
 
-export const GcsGcFormsStreamConfigSchema = z.object({
+const GcsGcFormsStreamConfigSchema = z.object({
   credentialId: OptionalStringSchema,
   apiUrl: OptionalStringSchema,
   identityProviderUrl: OptionalStringSchema,
@@ -371,7 +366,7 @@ export const normalizeGcFormsTemplate = (template: unknown): GcFormsFieldCatalog
 }
 
 /** Reduces a GC Forms template to the structural attributes that affect mapping compatibility. */
-export const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplateShapeElement[] => {
+const normalizeGcFormsTemplateShape = (template: unknown): GcFormsTemplateShapeElement[] => {
   const parsed = GcFormsFormTemplateSchema.parse(template)
 
   const visit = (element: GcFormsTemplateElement): GcFormsTemplateShapeElement => {

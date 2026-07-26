@@ -31,6 +31,8 @@ export interface GcFormsProblemReport {
 const base64Url = (value: string | Buffer): string =>
   Buffer.from(value).toString('base64url')
 
+const GCM_AUTH_TAG_LENGTH = 16
+
 /** Signs the short-lived JWT assertion used to authenticate with the GC Forms identity provider. */
 export const signGcFormsJwt = async (
   identityProviderUrl: string,
@@ -102,7 +104,9 @@ export const decryptGcFormsSubmission = (
   const decryptedKey = privateDecrypt(privateKey, Buffer.from(encryptedSubmission.encryptedKey, 'base64'))
   const decryptedNonce = privateDecrypt(privateKey, Buffer.from(encryptedSubmission.encryptedNonce, 'base64'))
   const decryptedAuthTag = privateDecrypt(privateKey, Buffer.from(encryptedSubmission.encryptedAuthTag, 'base64'))
-  const decipher = createDecipheriv('aes-256-gcm', decryptedKey, decryptedNonce)
+  const decipher = createDecipheriv('aes-256-gcm', decryptedKey, decryptedNonce, {
+    authTagLength: GCM_AUTH_TAG_LENGTH
+  })
   decipher.setAuthTag(decryptedAuthTag)
 
   const encryptedData = Buffer.from(encryptedSubmission.encryptedResponses, 'base64')

@@ -129,7 +129,7 @@ const FISCAL_YEAR_MONTHS = [
 ]
 
 /** Maps each GC Forms destination entity to the host owner type used by destination links. */
-export const getGcFormsDestinationOwnerType = (entity: GcsDestinationEntity): DestinationOwnerType => {
+const getGcFormsDestinationOwnerType = (entity: GcsDestinationEntity): DestinationOwnerType => {
   const ownerTypes: Record<GcsDestinationEntity, DestinationOwnerType> = {
     agreement: 'fundingcaseagreement',
     proponent: 'applicantrecipient',
