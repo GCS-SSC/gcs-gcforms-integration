@@ -7,11 +7,11 @@ import {
   type GcsGcFormsMappingIssue,
   type GcsGcFormsStreamConfig,
   parseGcFormsStreamConfig
-} from '../shared/gcforms'
-import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db'
-import { gcFormsJsonbValue } from './jsonb'
-import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims'
-import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime'
+} from '../shared/gcforms.ts'
+import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db.ts'
+import { gcFormsJsonbValue } from './jsonb.ts'
+import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims.ts'
+import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime.ts'
 
 type ClaimMaterializationStatus = 'not_applicable' | 'created' | 'already_materialized' | 'failed'
 

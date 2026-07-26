@@ -1,6 +1,6 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { generateGcFormsClaimTemplate } from '../claim-template'
-import { authorizeGcFormsStream } from '../runtime'
+import { generateGcFormsClaimTemplate } from '../claim-template.ts'
+import { authorizeGcFormsStream } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db } = context

@@ -1,6 +1,6 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { asGcFormsIntegrationDb } from '../db'
-import { authorizeGcFormsStream, ensureConnection, ensureIntegration, getStreamConfig } from '../runtime'
+import { asGcFormsIntegrationDb } from '../db.ts'
+import { authorizeGcFormsStream, ensureConnection, ensureIntegration, getStreamConfig } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db: rawDb } = context

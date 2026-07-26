@@ -12,14 +12,14 @@ import {
   GcFormsCredentialPatchSchema,
   type GcFormsCredentialPatch,
   type GcFormsCredentialSummary
-} from '../shared/gcforms'
+} from '../shared/gcforms.ts'
 import {
   asGcFormsIntegrationDb,
   type GcFormsIntegrationDatabaseClient,
   type GcFormsIntegrationDb,
   type GcFormsIntegrationHostDatabase
-} from './db'
-import { getGcFormsSecretRootKey } from './runtime'
+} from './db.ts'
+import { getGcFormsSecretRootKey } from './runtime.ts'
 
 type CredentialRow = {
   id: string

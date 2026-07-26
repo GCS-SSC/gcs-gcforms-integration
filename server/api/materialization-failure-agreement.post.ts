@@ -1,6 +1,6 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { authorizeGcFormsStream } from '../runtime'
-import { ResolveClaimMaterializationFailureSchema, resolveClaimMaterializationFailure } from '../materialization-failures'
+import { authorizeGcFormsStream } from '../runtime.ts'
+import { ResolveClaimMaterializationFailureSchema, resolveClaimMaterializationFailure } from '../materialization-failures.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db, readBody } = context

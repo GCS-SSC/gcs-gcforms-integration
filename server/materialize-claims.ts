@@ -5,9 +5,9 @@ import type {
   GcsGcFormsFieldMapping,
   GcsGcFormsMappedValue,
   GcsGcFormsMappingIssue
-} from '../shared/gcforms'
-import { asGcFormsIntegrationDb, type GcFormsIntegrationHostDatabase } from './db'
-import { gcFormsJsonbValue } from './jsonb'
+} from '../shared/gcforms.ts'
+import { asGcFormsIntegrationDb, type GcFormsIntegrationHostDatabase } from './db.ts'
+import { gcFormsJsonbValue } from './jsonb.ts'
 
 type ClaimInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim']>
 type ClaimLineItemInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim_Line_Item']>

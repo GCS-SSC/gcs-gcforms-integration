@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { sql } from 'kysely'
-import { asGcFormsIntegrationDb } from './db'
+import { asGcFormsIntegrationDb } from './db.ts'
 
 type BilingualChoice = {
   en: string

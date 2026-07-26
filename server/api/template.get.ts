@@ -1,5 +1,5 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { authorizeGcFormsStream, getStoredTemplate } from '../runtime'
+import { authorizeGcFormsStream, getStoredTemplate } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db } = context

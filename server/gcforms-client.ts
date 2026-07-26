@@ -12,7 +12,7 @@ import {
   type GcFormsFormTemplate,
   type GcFormsNewSubmission,
   type GcFormsPrivateApiKey
-} from '../shared/gcforms'
+} from '../shared/gcforms.ts'
 
 export interface GcFormsClientOptions {
   apiUrl?: string

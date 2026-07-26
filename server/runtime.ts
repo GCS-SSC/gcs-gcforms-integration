@@ -23,15 +23,15 @@ import {
   type GcFormsDecryptedSubmission,
   type GcFormsNewSubmission,
   type GcFormsPrivateApiKey
-} from '../shared/gcforms'
-import { GcFormsApiClient, verifyGcFormsIntegrity } from './gcforms-client'
+} from '../shared/gcforms.ts'
+import { GcFormsApiClient, verifyGcFormsIntegrity } from './gcforms-client.ts'
 import {
   asGcFormsIntegrationDb,
   type GcFormsIntegrationDb,
   type GcFormsIntegrationHostDatabase
-} from './db'
-import { gcFormsJsonbValue } from './jsonb'
-import { materializeGcFormsClaimSubmission } from './materialize-claims'
+} from './db.ts'
+import { gcFormsJsonbValue } from './jsonb.ts'
+import { materializeGcFormsClaimSubmission } from './materialize-claims.ts'
 
 type ConnectionRow = Selectable<
   GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_connections']

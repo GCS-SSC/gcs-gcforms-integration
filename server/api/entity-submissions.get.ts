@@ -1,5 +1,5 @@
 import { createGcsExtensionUserError, defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
-import { asGcFormsIntegrationDb } from '../db'
+import { asGcFormsIntegrationDb } from '../db.ts'
 
 export default defineGcsExtensionRouteHandler(async ({ entity, db: rawDb }) => {
   const ownerType = entity?.ownerType
