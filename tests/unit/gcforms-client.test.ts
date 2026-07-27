@@ -89,7 +89,8 @@ describe('GC Forms API client', () => {
   })
 
   it('generates access tokens and retrieves typed API responses', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
       if (url.endsWith('/oauth/v2/token')) {
         return new Response(JSON.stringify({ access_token: 'token-1' }), {
           status: 200,
@@ -116,7 +117,8 @@ describe('GC Forms API client', () => {
       identityProviderUrl: 'https://idp.example.test',
       projectIdentifier: 'project-1',
       privateApiKey,
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      requestTimeoutMs: 1234
     })).resolves.toBe('token-1')
 
     const client = new GcFormsApiClient({
@@ -124,7 +126,8 @@ describe('GC Forms API client', () => {
       identityProviderUrl: 'https://idp.example.test',
       projectIdentifier: 'project-1',
       privateApiKey,
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      requestTimeoutMs: 1234
     })
 
     await expect(client.getNewSubmissions()).resolves.toEqual([

@@ -4,12 +4,18 @@ import { Kysely, PostgresDialect, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
+import { deleteGcFormsCredential, patchGcFormsCredential } from '../../server/credentials'
+import { GcFormsApiClient } from '../../server/gcforms-client'
+import { guardGcFormsLifecycleChange } from '../../server/plugins/lifecycle-guards'
 import { gcFormsJsonbValue } from '../../server/jsonb'
 import {
   createConfiguredClient,
   ensureConnection,
   ensureIntegration,
+  getGcFormsCredential,
   getStreamConfig,
+  persistGcFormsTemplateShapeChangedForSession,
+  reconcileGcFormsSubmissionConfirmation,
   refreshTemplate,
   syncStream
 } from '../../server/runtime'
@@ -20,6 +26,54 @@ type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 let db: TestDb
 let previousRootKey: string | undefined
 const rootKey = Buffer.from(Uint8Array.from({ length: 32 }, (_, index) => index + 1)).toString('base64')
+
+const createSyncContext = () => ({
+  db,
+  stream: { agencyId: '20' },
+  writeAuthorization: {
+    lockAuthState: async () => undefined,
+    authorizeCurrentScope: async () => undefined,
+    authorizeCurrentEntity: async () => undefined,
+    lockAndAuthorizeAgreement: async () => true
+  }
+}) as any
+
+const createRouteSyncEvent = () => {
+  const auth = {
+    userId: 'user-1',
+    userAbilities: {
+      authorize: () => true,
+      authorizeWithTeam: async () => true
+    }
+  }
+  const syncContext = createSyncContext()
+  return {
+    context: {
+      $db: db,
+      params: { streamId: '30' },
+      $authContext: auth,
+      gcsExtension: {
+        extensionKey: GCFORMS_EXTENSION_KEY,
+        stream: syncContext.stream,
+        writeAuthorization: syncContext.writeAuthorization
+      }
+    }
+  } as any
+}
+
+const createCredentialContext = (credentialId: string, body: unknown = {}) => ({
+  ...createSyncContext(),
+  params: { agencyId: '20', credentialId },
+  agency: { agencyId: '20' },
+  auth: {
+    userId: 'user-1',
+    userAbilities: {
+      authorize: () => true,
+      authorizeWithTeam: () => true
+    }
+  },
+  readBody: async () => body
+}) as any
 
 const privateKeyPem = () => generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -110,6 +164,12 @@ const changedTemplate = {
 const createSchema = async () => {
   await sql`CREATE SCHEMA extensions`.execute(db)
   await sql`
+    CREATE TABLE "Agency_Profile" (
+      id bigserial PRIMARY KEY,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
     CREATE TABLE "Transfer_Payment_Profile" (
       id bigserial PRIMARY KEY,
       egcs_tp_agency bigint NOT NULL,
@@ -152,6 +212,7 @@ const createSchema = async () => {
       key_id varchar(200) NOT NULL,
       user_id varchar(200) NOT NULL,
       form_id varchar(80) NOT NULL,
+      revision integer DEFAULT 1 NOT NULL,
       created_at timestamptz DEFAULT now() NOT NULL,
       updated_at timestamptz,
       _deleted boolean DEFAULT false NOT NULL
@@ -181,6 +242,9 @@ const createSchema = async () => {
       agency_id bigint NOT NULL,
       stream_id bigint NOT NULL,
       credential_id varchar(120) NOT NULL,
+      credential_revision integer NOT NULL,
+      secret_entry_id bigint NOT NULL,
+      secret_updated_at timestamptz NOT NULL,
       form_id varchar(80) NOT NULL,
       api_url text NOT NULL,
       identity_provider_url text NOT NULL,
@@ -193,6 +257,21 @@ const createSchema = async () => {
       updated_at timestamptz,
       _deleted boolean DEFAULT false NOT NULL
     )
+  `.execute(db)
+  await sql`
+    CREATE UNIQUE INDEX gcs_gcforms_connection_remote_identity
+    ON extensions.gcs_gcforms_connections (
+      stream_id,
+      credential_id,
+      credential_revision,
+      secret_entry_id,
+      secret_updated_at,
+      form_id,
+      api_url,
+      identity_provider_url,
+      project_identifier
+    )
+    WHERE _deleted = false
   `.execute(db)
   await sql`
     CREATE TABLE extensions.gcs_gcforms_templates (
@@ -215,11 +294,17 @@ const createSchema = async () => {
       name_en varchar(200) NOT NULL,
       name_fr varchar(200) NOT NULL,
       enabled boolean DEFAULT true NOT NULL,
+      config_fingerprint varchar(64) NOT NULL,
       config jsonb NOT NULL,
       created_at timestamptz DEFAULT now() NOT NULL,
       updated_at timestamptz,
       _deleted boolean DEFAULT false NOT NULL
     )
+  `.execute(db)
+  await sql`
+    CREATE UNIQUE INDEX gcs_gcforms_integration_identity
+    ON extensions.gcs_gcforms_integrations (connection_id, config_fingerprint)
+    WHERE _deleted = false
   `.execute(db)
   await sql`
     CREATE TABLE extensions.gcs_gcforms_field_mappings (
@@ -252,9 +337,39 @@ const createSchema = async () => {
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_submissions (
+      id bigserial PRIMARY KEY,
+      connection_id bigint NOT NULL,
+      integration_id bigint,
+      form_id varchar(200) NOT NULL,
+      submission_name varchar(200) NOT NULL,
+      gcforms_created_at timestamptz,
+      status varchar(40) NOT NULL,
+      confirmation_code varchar(200),
+      answers jsonb,
+      answers_checksum varchar(200),
+      mapped_values jsonb,
+      mapping_issues jsonb,
+      last_error text,
+      confirmed_at timestamptz,
+      created_at timestamptz DEFAULT now() NOT NULL,
+      updated_at timestamptz,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE UNIQUE INDEX gcs_gcforms_submission_unique
+    ON extensions.gcs_gcforms_submissions (connection_id, submission_name)
+    WHERE _deleted = false
+  `.execute(db)
 }
 
 const seedConfig = async () => {
+  await db
+    .insertInto('Agency_Profile')
+    .values({ id: '20', _deleted: false })
+    .execute()
   await db
     .insertInto('Transfer_Payment_Profile')
     .values({
@@ -321,6 +436,40 @@ const seedConfig = async () => {
   })
 }
 
+const rotateCredential = async () => {
+  await db
+    .insertInto('extensions.gcs_gcforms_credentials')
+    .values({
+      id: '2',
+      agency_id: '20',
+      name_en: 'Claims rotated',
+      name_fr: 'Reclamations renouvelees',
+      key_id: 'key-2',
+      user_id: 'user-2',
+      form_id: 'form-2',
+      _deleted: false
+    })
+    .execute()
+  await setEncryptedExtensionSecret(db, {
+    rootKey,
+    extensionKey: GCFORMS_EXTENSION_KEY,
+    ownerType: 'agency',
+    ownerId: '20',
+    secretKey: '2',
+    value: { key: privateKeyPem() }
+  })
+  await db
+    .updateTable('extensions.stream_configuration')
+    .set({
+      config: {
+        credentialId: '2',
+        mappings: []
+      }
+    })
+    .where('stream_id', '=', '30')
+    .execute()
+}
+
 beforeEach(async () => {
   previousRootKey = process.env.GCS_EXTENSION_SECRETS_KEY
   process.env.GCS_EXTENSION_SECRETS_KEY = rootKey
@@ -331,6 +480,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   if (previousRootKey === undefined) {
     delete process.env.GCS_EXTENSION_SECRETS_KEY
@@ -481,13 +631,43 @@ describe('GC Forms template shape guard', () => {
     })
   })
 
-  it('updates an existing connection using the generated bigint id', async () => {
+  it('keeps repeated submission reads empty and strictly free of setup mutations', async () => {
+    const submissionsRoute = (await import('../../server/api/submissions.get')).default as any
+    const before = await Promise.all([
+      db.selectFrom('extensions.gcs_gcforms_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
+    ])
+
+    await expect(submissionsRoute(createRouteSyncEvent())).resolves.toMatchObject({
+      items: [],
+      total: 0,
+      stats: { total: 0, active: 0 },
+      page: 1,
+      limit: 10
+    })
+    await expect(submissionsRoute(createRouteSyncEvent())).resolves.toMatchObject({
+      items: [],
+      total: 0
+    })
+    const after = await Promise.all([
+      db.selectFrom('extensions.gcs_gcforms_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
+    ])
+    expect(after).toEqual(before)
+  })
+
+  it('creates an immutable connection version when the remote identity changes', async () => {
     await db
       .insertInto('extensions.gcs_gcforms_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
         credential_id: '1',
+        credential_revision: 1,
+        secret_entry_id: '1',
+        secret_updated_at: new Date(0),
         form_id: 'form-1',
         api_url: 'https://old.example.test/v1',
         identity_provider_url: 'https://old-idp.example.test',
@@ -517,6 +697,39 @@ describe('GC Forms template shape guard', () => {
       .select(db.fn.countAll().as('count'))
       .where('stream_id', '=', '30')
       .where('form_id', '=', 'form-1')
+      .where('_deleted', '=', false)
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 2 })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['api_url', 'identity_provider_url', 'project_identifier'])
+      .where('api_url', '=', 'https://old.example.test/v1')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      api_url: 'https://old.example.test/v1',
+      identity_provider_url: 'https://old-idp.example.test',
+      project_identifier: 'old-project'
+    })
+  })
+
+  it('idempotently resolves concurrent creation of the same remote identity', async () => {
+    const config = {
+      credentialId: '1',
+      apiUrl: 'https://race.example.test/v1',
+      identityProviderUrl: 'https://race-idp.example.test',
+      projectIdentifier: 'race-project',
+      preferredLanguage: 'en' as const,
+      mappings: []
+    }
+    const connections = await Promise.all([
+      ensureConnection(db, '30', config),
+      ensureConnection(db, '30', config)
+    ])
+
+    expect(String(connections[0]?.id)).toBe(String(connections[1]?.id))
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(db.fn.countAll().as('count'))
+      .where('stream_id', '=', '30')
+      .where('api_url', '=', config.apiUrl)
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 1 })
   })
@@ -556,7 +769,7 @@ describe('GC Forms template shape guard', () => {
     })
   })
 
-  it('replaces existing mappings when ensuring the same integration again', async () => {
+  it('versions integration mappings without mutating the earlier context', async () => {
     const connection = await ensureConnection(db, '30', {
       credentialId: '1',
       preferredLanguage: 'en',
@@ -580,7 +793,7 @@ describe('GC Forms template shape guard', () => {
     }
 
     const first = await ensureIntegration(db, '30', String(connection.id), config)
-    await ensureIntegration(db, '30', String(connection.id), {
+    const second = await ensureIntegration(db, '30', String(connection.id), {
       ...config,
       mappings: [
         {
@@ -605,7 +818,7 @@ describe('GC Forms template shape guard', () => {
         sql<string | null>`jsonb_typeof(default_value)`.as('default_value_json_type'),
         '_deleted'
       ])
-      .where('integration_id', '=', String(first.id))
+      .where('integration_id', 'in', [String(first.id), String(second.id)])
       .orderBy('id')
       .execute()).resolves.toEqual([
       expect.objectContaining({
@@ -613,7 +826,7 @@ describe('GC Forms template shape guard', () => {
         default_value: null,
         default_value_is_sql_null: false,
         default_value_json_type: 'null',
-        _deleted: true
+        _deleted: false
       }),
       expect.objectContaining({
         source_question_id: 'agreement_number_updated',
@@ -624,20 +837,21 @@ describe('GC Forms template shape guard', () => {
       })
     ])
 
-    const storedIntegration = await db
+    const storedIntegrations = await db
       .selectFrom('extensions.gcs_gcforms_integrations')
-      .select('config')
-      .where('id', '=', String(first.id))
-      .executeTakeFirstOrThrow()
-    expect(storedIntegration).toEqual({
-      config: expect.objectContaining({
-        credentialId: '1',
-        mappings: [expect.objectContaining({
-          sourceQuestionId: 'agreement_number_updated'
-        })]
-      })
+      .select(['id', 'config'])
+      .where('id', 'in', [String(first.id), String(second.id)])
+      .orderBy('id')
+      .execute()
+    expect(storedIntegrations).toHaveLength(2)
+    expect(parseGcFormsStreamConfig(storedIntegrations[0]?.config).mappings[0]).toMatchObject({
+      sourceQuestionId: 'agreement_number',
+      defaultValue: null
     })
-    expect(parseGcFormsStreamConfig(storedIntegration.config).mappings[0])
+    expect(parseGcFormsStreamConfig(storedIntegrations[1]?.config).mappings[0]).toMatchObject({
+      sourceQuestionId: 'agreement_number_updated'
+    })
+    expect(parseGcFormsStreamConfig(storedIntegrations[1]?.config).mappings[0])
       .not.toHaveProperty('defaultValue')
   })
 
@@ -672,19 +886,22 @@ describe('GC Forms template shape guard', () => {
     await refreshTemplate(db, '30')
 
     currentTemplate = changedTemplate
-    await expect(syncStream(db, '30')).rejects.toMatchObject({
+    const templateChanged = await syncStream(createSyncContext(), '30').catch((error: unknown) => error)
+    expect(templateChanged).toMatchObject({
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED'
     })
+    await expect(persistGcFormsTemplateShapeChangedForSession(
+      createSyncContext(),
+      '30',
+      templateChanged
+    )).resolves.toBeUndefined()
     await expect(db
       .selectFrom('extensions.stream_configuration')
       .select('config')
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()).resolves.toEqual({
-      config: expect.objectContaining({
-        templateShapeChanged: true
-      })
+      config: expect.objectContaining({ templateShapeChanged: true })
     })
-
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('/forms/form-1/submission/new'),
       expect.anything()
@@ -704,10 +921,743 @@ describe('GC Forms template shape guard', () => {
         templateShapeChanged: false
       })
     })
-    await expect(syncStream(db, '30')).resolves.toMatchObject({
+    await expect(syncStream(createSyncContext(), '30')).resolves.toMatchObject({
       discovered: 0,
       imported: 0,
       problems: 0
     })
+  })
+
+  it('does not mark a replacement configuration when template drift belongs to the previous sync session', async () => {
+    let currentTemplate = initialTemplate
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(currentTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+    await refreshTemplate(db, '30')
+    currentTemplate = changedTemplate
+
+    const templateChanged = await syncStream(createSyncContext(), '30').catch((error: unknown) => error)
+    expect(templateChanged).toMatchObject({
+      code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
+      gcFormsSyncSession: {
+        configFingerprint: expect.any(String),
+        connectionId: expect.any(String),
+        credentialId: '1'
+      }
+    })
+
+    await rotateCredential()
+    const replacementBefore = await db
+      .selectFrom('extensions.stream_configuration')
+      .select('config')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    await expect(persistGcFormsTemplateShapeChangedForSession(
+      createSyncContext(),
+      '30',
+      templateChanged
+    )).rejects.toMatchObject({ code: 'GCS_GCFORMS_CONFIG_CHANGED' })
+    await expect(db
+      .selectFrom('extensions.stream_configuration')
+      .select('config')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()).resolves.toEqual(replacementBefore)
+  })
+
+  it('rejects prepared submissions when credential authentication changes before the local import batch', async () => {
+    const replacementKey = privateKeyPem()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/new')) {
+        return new Response(JSON.stringify([
+          { name: 'prepared-before-patch', createdAt: 1725553403512 }
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', fetchMock)
+    await refreshTemplate(db, '30')
+
+    const decryptSpy = vi
+      .spyOn(GcFormsApiClient.prototype, 'getDecryptedSubmission')
+      .mockImplementationOnce(async () => {
+        await patchGcFormsCredential(createCredentialContext('1', { key: replacementKey }))
+        return {
+          createdAt: 1725553403512,
+          status: 'New',
+          confirmationCode: 'confirmation-1',
+          answers: '{}',
+          checksum: '99914b932bd37a50b983c5e7c90ae93b'
+        }
+      })
+
+    await expect(syncStream(createSyncContext(), '30')).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_CONFIG_CHANGED',
+      localizedMessage: {
+        en: expect.stringContaining('configuration changed'),
+        fr: expect.stringContaining('configuration de GC Forms a change')
+      }
+    })
+    expect(decryptSpy).toHaveBeenCalledWith('prepared-before-patch')
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .select(db.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(db.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
+    await expect(getGcFormsCredential(db, '20', '1')).resolves.toMatchObject({ key: replacementKey })
+  })
+
+  it('preserves and reconciles a same-connection pending marker instead of retrying failed content', async () => {
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://api.example.test/v1',
+          confirmSubmissions: true
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    let confirmationAttempts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/new')) {
+        return new Response(JSON.stringify([
+          { name: 'durable-pending', createdAt: 1725553403512 }
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.includes('/forms/form-1/submission/durable-pending/confirm/confirmation-1')) {
+        confirmationAttempts += 1
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: connection.form_id,
+        submission_name: 'durable-pending',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'confirmation-1'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const decryptSpy = vi
+      .spyOn(GcFormsApiClient.prototype, 'getDecryptedSubmission')
+      .mockResolvedValueOnce({
+        createdAt: 1725553403512,
+        status: 'New',
+        confirmationCode: 'replacement-code-that-must-not-persist',
+        answers: '{not valid json',
+        checksum: 'invalid-checksum',
+        attachments: [{
+          id: 'malicious-attachment',
+          name: 'unsafe.bin',
+          downloadLink: 'https://example.test/unsafe.bin',
+          isPotentiallyMalicious: true
+        }]
+      })
+
+    const context = createSyncContext()
+    const result = await syncStream(context, '30')
+    expect(result).toMatchObject({ skipped: 1, problems: 0 })
+    const reconciliation = result.pendingConfirmations.find(
+      item => item.submissionId === String(pending.id)
+    )
+    if (!reconciliation) {
+      throw new Error('Expected same-connection pending reconciliation.')
+    }
+    expect(decryptSpy).not.toHaveBeenCalled()
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['status', 'confirmation_code'])
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      status: 'imported_pending_confirm',
+      confirmation_code: 'confirmation-1'
+    })
+    await expect(patchGcFormsCredential(createCredentialContext('1', {
+      keyId: 'blocked-while-pending'
+    }))).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CREDENTIAL_UPDATE_RECOVERABLE_SUBMISSIONS'
+    })
+    await expect(deleteGcFormsCredential(createCredentialContext('1'))).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CREDENTIAL_RECOVERABLE_SUBMISSIONS'
+    })
+
+    await reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)
+    expect(confirmationAttempts).toBe(1)
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['status', 'confirmation_code'])
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      status: 'imported',
+      confirmation_code: 'confirmation-1'
+    })
+  })
+
+  it('versions changed remote identity while pending recovery keeps the original route', async () => {
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://old-api.example.test/v1',
+          identityProviderUrl: 'https://old-idp.example.test',
+          confirmSubmissions: true
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    await db
+      .updateTable('extensions.stream_configuration')
+      .set({
+        config: {
+          credentialId: '1',
+          projectIdentifier: 'old-project',
+          mappings: []
+        }
+      })
+      .where('stream_id', '=', '30')
+      .execute()
+
+    const requestedUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url === 'https://old-api.example.test/v1/forms/form-1/submission/new') {
+        return new Response(JSON.stringify([
+          { name: 'old-route-pending', createdAt: 1725553403512 }
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/submission/new')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url === 'https://old-api.example.test/v1/forms/form-1/submission/old-route-pending/confirm/old-confirmation') {
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+
+    const originalRefresh = await refreshTemplate(db, '30')
+    const originalConnectionId = String(originalRefresh.connection.id)
+    const originalIntegration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('connection_id', '=', originalConnectionId)
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: originalConnectionId,
+        integration_id: String(originalIntegration.id),
+        form_id: 'form-1',
+        submission_name: 'old-route-pending',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'old-confirmation'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://new-api.example.test/v2',
+          identityProviderUrl: 'https://new-idp.example.test',
+          confirmSubmissions: true
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    await db
+      .updateTable('extensions.stream_configuration')
+      .set({
+        config: {
+          credentialId: '1',
+          projectIdentifier: 'new-project',
+          mappings: []
+        }
+      })
+      .where('stream_id', '=', '30')
+      .execute()
+    await db
+      .updateTable('extensions.gcs_gcforms_credentials')
+      .set({ form_id: 'form-2' })
+      .where('id', '=', '1')
+      .execute()
+
+    const replacementRefresh = await refreshTemplate(db, '30')
+    const replacementConnectionId = String(replacementRefresh.connection.id)
+    expect(replacementConnectionId).not.toBe(originalConnectionId)
+    const originalConnection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select([
+        'form_id',
+        'api_url',
+        'identity_provider_url',
+        'project_identifier',
+        'credential_revision',
+        'secret_entry_id'
+      ])
+      .where('id', '=', originalConnectionId)
+      .executeTakeFirstOrThrow()
+    expect(originalConnection).toMatchObject({
+      form_id: 'form-1',
+      api_url: 'https://old-api.example.test/v1',
+      identity_provider_url: 'https://old-idp.example.test',
+      project_identifier: 'old-project',
+      credential_revision: 1
+    })
+    expect(String(originalConnection.secret_entry_id)).toBe('1')
+
+    const invokeLifecycleGuard = async () => await db.transaction().execute(async trx => {
+      await guardGcFormsLifecycleChange({
+        extensionKey: GCFORMS_EXTENSION_KEY,
+        scope: 'stream',
+        event: {},
+        db: trx as any,
+        agencyId: '20',
+        streamId: '30'
+      })
+    })
+    await expect(invokeLifecycleGuard()).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS'
+    })
+
+    requestedUrls.length = 0
+    const context = createSyncContext()
+    const result = await syncStream(context, '30')
+    const reconciliation = result.pendingConfirmations.find(
+      item => item.submissionId === String(pending.id)
+    )
+    if (!reconciliation) {
+      throw new Error('Expected old-route pending confirmation recovery.')
+    }
+    expect(reconciliation.remotelyPending).toBe(true)
+    expect(requestedUrls).toContain('https://new-api.example.test/v2/forms/form-2/submission/new')
+    expect(requestedUrls).toContain('https://old-api.example.test/v1/forms/form-1/submission/new')
+
+    requestedUrls.length = 0
+    await reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)
+    expect(requestedUrls).toContain(
+      'https://old-api.example.test/v1/forms/form-1/submission/old-route-pending/confirm/old-confirmation'
+    )
+    expect(requestedUrls.some(url => url.includes('new-api.example.test') && url.includes('/confirm/'))).toBe(false)
+    await expect(invokeLifecycleGuard()).resolves.toBeUndefined()
+  })
+
+  it('finalizes disabled-confirmation pending rows before unavailable credentials or endpoints', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', fetchMock)
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: String(connection.id),
+        integration_id: null,
+        form_id: connection.form_id,
+        submission_name: 'disabled-confirmation-pending',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'confirmation-1'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://unavailable.invalid',
+          confirmSubmissions: false
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    await db
+      .updateTable('extensions.secret_entry')
+      .set({ _deleted: true })
+      .where('secret_key', '=', '1')
+      .execute()
+
+    const invokeLifecycleGuard = async () => await db.transaction().execute(async trx => {
+      await guardGcFormsLifecycleChange({
+        extensionKey: GCFORMS_EXTENSION_KEY,
+        scope: 'stream',
+        event: {},
+        db: trx as any,
+        agencyId: '20',
+        streamId: '30'
+      })
+    })
+    await expect(invokeLifecycleGuard()).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS'
+    })
+    fetchMock.mockClear()
+
+    const syncRoute = (await import('../../server/api/sync.post')).default as any
+    await expect(syncRoute(createRouteSyncEvent())).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CREDENTIAL_MISSING'
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
+    await expect(invokeLifecycleGuard()).resolves.toBeUndefined()
+  })
+
+  it('recovers remote-success/local-fail pending state through its historical credential after rotation', async () => {
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://api.example.test/v1',
+          confirmSubmissions: true
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/new')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: connection.form_id,
+        submission_name: 'already-confirmed',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'confirmation-1'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+
+    await rotateCredential()
+    await expect(deleteGcFormsCredential(createCredentialContext('1'))).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CREDENTIAL_RECOVERABLE_SUBMISSIONS'
+    })
+    await expect(getGcFormsCredential(db, '20', '1')).resolves.toMatchObject({ formId: 'form-1' })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-rotated' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-2/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/submission/new')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+    await refreshTemplate(db, '30')
+
+    const context = createSyncContext()
+    const result = await syncStream(context, '30')
+    expect(result.pendingConfirmations).toHaveLength(1)
+    const reconciliation = result.pendingConfirmations[0]
+    if (!reconciliation) {
+      throw new Error('Expected a pending confirmation reconciliation.')
+    }
+    expect(reconciliation).toEqual({
+      submissionId: String(pending.id),
+      remotelyPending: false
+    })
+    await reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
+    await expect(deleteGcFormsCredential(createCredentialContext('1'))).resolves.toEqual({ ok: true })
+    await expect(getGcFormsCredential(db, '20', '1')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CREDENTIAL_MISSING'
+    })
+  })
+
+  it('keeps a rotated historical pending marker durable when remote confirmation fails, then retries it', async () => {
+    let confirmationAttempts = 0
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://api.example.test/v1',
+          confirmSubmissions: true
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/new')) {
+        return new Response(JSON.stringify([
+          { name: 'retry-confirmation', createdAt: 1725553403512 }
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-2/submission/new')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.includes('/forms/form-1/submission/retry-confirmation/confirm/')) {
+        confirmationAttempts += 1
+        if (confirmationAttempts === 1) {
+          return new Response('{}', { status: 503 })
+        }
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch)
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: connection.form_id,
+        submission_name: 'retry-confirmation',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'confirmation-1'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await rotateCredential()
+    await refreshTemplate(db, '30')
+
+    const context = createSyncContext()
+    const result = await syncStream(context, '30')
+    const reconciliation = result.pendingConfirmations.find(item => item.submissionId === String(pending.id))
+    if (!reconciliation) {
+      throw new Error('Expected the historical pending confirmation.')
+    }
+    expect(reconciliation.remotelyPending).toBe(true)
+    await expect(reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation))
+      .rejects.toThrow('status 503')
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported_pending_confirm' })
+
+    await expect(reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)).resolves.toBeUndefined()
+    expect(confirmationAttempts).toBe(2)
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
+  })
+
+  it('finalizes under the renewed current contract without a remote call when confirmation is disabled', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', fetchMock)
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const pending = await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: connection.form_id,
+        submission_name: 'do-not-confirm',
+        status: 'imported_pending_confirm',
+        confirmation_code: 'confirmation-1'
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+
+    await reconcileGcFormsSubmissionConfirmation(createSyncContext(), '30', {
+      submissionId: String(pending.id),
+      remotelyPending: true
+    })
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/confirm/'),
+      expect.anything()
+    )
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', String(pending.id))
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
   })
 })

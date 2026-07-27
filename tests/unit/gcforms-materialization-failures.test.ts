@@ -4,17 +4,6 @@ import { KyselyPGlite } from 'kysely-pglite'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
 import { listClaimMaterializationFailures } from '../../server/materialization-failures'
 
-vi.mock('../../server/runtime', () => ({
-  ensureConnection: vi.fn(async () => ({ id: '801' })),
-  ensureIntegration: vi.fn(async () => ({ id: '601' })),
-  getStreamConfig: vi.fn(async () => ({
-    credentialId: 'credential',
-    formId: 'form-1',
-    preferredLanguage: 'en',
-    mappings: []
-  }))
-}))
-
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 
 let db: TestDb
@@ -27,6 +16,12 @@ const createSchema = async () => {
       egcs_fc_agreementnumber varchar(15) NOT NULL,
       egcs_fc_transferpaymentstream bigint NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_connections (
+      id bigserial PRIMARY KEY,
+      stream_id bigint NOT NULL
     )
   `.execute(db)
   await sql`
@@ -77,6 +72,10 @@ afterEach(async () => {
 
 describe('GC Forms materialization failure queue', () => {
   it('lists unresolved failures with stream agreement options and selected overrides', async () => {
+    await sql`
+      INSERT INTO extensions.gcs_gcforms_connections (id, stream_id)
+      VALUES (801, 31)
+    `.execute(db)
     await db
       .insertInto('Funding_Case_Agreement_Profile')
       .values([
@@ -89,6 +88,11 @@ describe('GC Forms materialization failure queue', () => {
           id: '102',
           egcs_fc_agreementnumber: 'AGR-002',
           egcs_fc_transferpaymentstream: '32'
+        },
+        {
+          id: '103',
+          egcs_fc_agreementnumber: 'AGR-HIDDEN',
+          egcs_fc_transferpaymentstream: '31'
         }
       ])
       .execute()
@@ -150,18 +154,26 @@ describe('GC Forms materialization failure queue', () => {
         destination_entity: 'claim',
         destination_path: 'egcs_fc_fundingagreement',
         owner_type: 'fundingcaseagreement',
-        owner_id: '101'
+        owner_id: '103'
       })
       .execute()
 
-    const result = await listClaimMaterializationFailures(db, '31')
+    const listVisibleOptions = vi.fn(async () => [{
+      id: '101',
+      agreementNumber: 'AGR-001',
+      label: 'AGR-001'
+    }])
+    const result = await listClaimMaterializationFailures({
+      db,
+      agreementAccess: { listVisibleOptions }
+    } as any, '31')
 
     expect(result.items).toHaveLength(2)
     expect(result.items).toContainEqual(expect.objectContaining({
       submissionId: '901',
       submissionName: 'submission-1',
       agreementNumber: 'AGR-MISSING',
-      selectedAgreementId: '101'
+      selectedAgreementId: null
     }))
     expect(result.items).toContainEqual(expect.objectContaining({
       submissionId: '902',
@@ -177,5 +189,6 @@ describe('GC Forms materialization failure queue', () => {
         label: 'AGR-001'
       }
     ])
+    expect(listVisibleOptions).toHaveBeenCalledWith(db, { streamId: '31', action: 'read' })
   })
 })

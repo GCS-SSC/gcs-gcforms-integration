@@ -3,6 +3,7 @@ import { sql } from 'kysely'
 import {
   createGcsExtensionUserError,
   deleteEncryptedExtensionSecret,
+  getEncryptedExtensionSecret,
   setEncryptedExtensionSecret,
   type GcsExtensionRouteContext
 } from '@gcs-ssc/extensions/server'
@@ -10,6 +11,7 @@ import {
   GCFORMS_EXTENSION_KEY,
   GcFormsCredentialCreateSchema,
   GcFormsCredentialPatchSchema,
+  GcFormsCredentialSecretSchema,
   type GcFormsCredentialPatch,
   type GcFormsCredentialSummary
 } from '../shared/gcforms.ts'
@@ -19,7 +21,7 @@ import {
   type GcFormsIntegrationDb,
   type GcFormsIntegrationHostDatabase
 } from './db.ts'
-import { getGcFormsSecretRootKey } from './runtime.ts'
+import { getGcFormsSecretRootKey, runAuthorizedGcFormsWrite } from './runtime.ts'
 
 type CredentialRow = {
   id: string
@@ -28,6 +30,7 @@ type CredentialRow = {
   key_id: string
   user_id: string
   form_id: string
+  revision: number
   updated_at: Date | string | null
   created_at: Date | string
 }
@@ -114,12 +117,24 @@ export const listGcFormsCredentials = async (context: GcsExtensionRouteContext) 
   authorizeGcFormsAgencyCredentials(context, agencyId, 'read')
 
   const rows = await asGcFormsIntegrationDb(context.db)
-    .selectFrom('extensions.gcs_gcforms_credentials')
-    .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
-    .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
-    .where('_deleted', '=', false)
-    .orderBy('name_en', 'asc')
-    .orderBy('id', 'asc')
+    .selectFrom('extensions.gcs_gcforms_credentials as credential')
+    .innerJoin('Agency_Profile as agency', 'agency.id', 'credential.agency_id')
+    .select([
+      'credential.id',
+      'credential.name_en',
+      'credential.name_fr',
+      'credential.key_id',
+      'credential.user_id',
+      'credential.form_id',
+      'credential.revision',
+      'credential.updated_at',
+      'credential.created_at'
+    ])
+    .where('credential.agency_id', '=', sql<string>`${agencyId}::bigint`)
+    .where('credential._deleted', '=', false)
+    .where('agency._deleted', '=', false)
+    .orderBy('credential.name_en', 'asc')
+    .orderBy('credential.id', 'asc')
     .execute()
 
   const items = rows.map(row => toSummary(row))
@@ -161,9 +176,7 @@ export const createGcFormsCredential = async (context: GcsExtensionRouteContext)
   const body = GcFormsCredentialCreateSchema.parse(await context.readBody())
   assertValidPrivateKey(body.key)
 
-  const item = await asGcFormsIntegrationDb(context.db)
-    .transaction()
-    .execute(async trx => {
+  const item = await runAuthorizedGcFormsWrite(context, async trx => {
       const row = await trx
         .insertInto('extensions.gcs_gcforms_credentials')
         .values({
@@ -174,13 +187,13 @@ export const createGcFormsCredential = async (context: GcsExtensionRouteContext)
           user_id: body.userId,
           form_id: body.formId
         })
-        .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+        .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'revision', 'updated_at', 'created_at'])
         .executeTakeFirstOrThrow()
 
       await storePrivateKey(trx, agencyId, String(row.id), body.key)
 
       return toSummary(row)
-    })
+  })
 
   return {
     ok: true,
@@ -194,10 +207,11 @@ const getActiveCredentialRow = async (
   credentialId: string
 ) => await db
   .selectFrom('extensions.gcs_gcforms_credentials')
-  .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+  .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'revision', 'updated_at', 'created_at'])
   .where('id', '=', sql<string>`${credentialId}::bigint`)
   .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
   .where('_deleted', '=', false)
+  .forUpdate()
   .executeTakeFirst()
 
 /** Maps a credential patch payload to the corresponding database update fields. */
@@ -243,30 +257,75 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
     assertValidPrivateKey(body.key)
   }
 
-  const db = asGcFormsIntegrationDb(context.db)
-  const existing = await getActiveCredentialRow(db, agencyId, credentialId)
-  if (!existing) {
-    throw createGcsExtensionUserError({
-      statusCode: 404,
-      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-      message: {
-        en: 'The selected GC Forms credential is not available on the server.',
-        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
-      }
-    })
-  }
+  const item = await runAuthorizedGcFormsWrite(context, async trx => {
+    const existing = await getActiveCredentialRow(trx, agencyId, credentialId)
+    if (!existing) {
+      throw createGcsExtensionUserError({
+        statusCode: 404,
+        code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+        message: {
+          en: 'The selected GC Forms credential is not available on the server.',
+          fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+        }
+      })
+    }
 
-  const item = await db.transaction().execute(async trx => {
+    const currentSecret = body.key === undefined
+      ? null
+      : await getEncryptedExtensionSecret<GcFormsIntegrationHostDatabase>(trx, {
+          rootKey: getGcFormsSecretRootKey(),
+          extensionKey: GCFORMS_EXTENSION_KEY,
+          ownerType: 'agency',
+          ownerId: agencyId,
+          secretKey: credentialId
+        })
+    const currentPrivateKey = currentSecret === null
+      ? null
+      : GcFormsCredentialSecretSchema.parse(currentSecret).key
+    const privateKeyChanged = body.key !== undefined && currentPrivateKey !== body.key
+    const authenticationChanged = privateKeyChanged
+      || (body.keyId !== undefined && body.keyId !== existing.key_id)
+      || (body.userId !== undefined && body.userId !== existing.user_id)
+      || (body.formId !== undefined && body.formId !== existing.form_id)
+    if (authenticationChanged) {
+      const pendingConfirmation = await trx
+        .selectFrom('extensions.gcs_gcforms_submissions as submission')
+        .innerJoin(
+          'extensions.gcs_gcforms_connections as connection',
+          'connection.id',
+          'submission.connection_id'
+        )
+        .select('submission.id')
+        .where('connection.agency_id', '=', sql<string>`${agencyId}::bigint`)
+        .where('connection.credential_id', '=', String(existing.id))
+        .where('submission.status', 'in', ['imported_pending_confirm', 'materialization_failed'])
+        .where('submission._deleted', '=', false)
+        .executeTakeFirst()
+      if (pendingConfirmation) {
+        throw createGcsExtensionUserError({
+          statusCode: 409,
+          code: 'GCS_GCFORMS_CREDENTIAL_UPDATE_RECOVERABLE_SUBMISSIONS',
+          message: {
+            en: 'This GC Forms credential authentication cannot be changed until all recoverable submissions using it are resolved.',
+            fr: 'L authentification de ce justificatif GC Forms ne peut pas etre modifiee tant que toutes les soumissions recuperables qui l utilisent ne sont pas reglees.'
+          }
+        })
+      }
+    }
+
     const row = await trx
       .updateTable('extensions.gcs_gcforms_credentials')
-      .set(patchValues(body))
+      .set({
+        ...patchValues(body),
+        ...(authenticationChanged ? { revision: sql<number>`revision + 1` } : {})
+      })
       .where('id', '=', sql<string>`${credentialId}::bigint`)
       .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
       .where('_deleted', '=', false)
-      .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'updated_at', 'created_at'])
+      .returning(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'revision', 'updated_at', 'created_at'])
       .executeTakeFirstOrThrow()
 
-    if (body.key !== undefined) {
+    if (privateKeyChanged && body.key !== undefined) {
       await storePrivateKey(trx, agencyId, credentialId, body.key)
     }
 
@@ -279,14 +338,49 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
   }
 }
 
-/** Soft-deletes an agency credential and removes its encrypted private key. */
+/** Soft-deletes an unused agency credential and removes its encrypted private key. */
 export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext) => {
   const agencyId = getAgencyId(context)
   const credentialId = context.params.credentialId ?? ''
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
-  const db = asGcFormsIntegrationDb(context.db)
-  await db.transaction().execute(async trx => {
+  await runAuthorizedGcFormsWrite(context, async trx => {
+    const credential = await trx
+      .selectFrom('extensions.gcs_gcforms_credentials')
+      .select('id')
+      .where('id', '=', sql<string>`${credentialId}::bigint`)
+      .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
+      .where('_deleted', '=', false)
+      .forUpdate()
+      .executeTakeFirst()
+    if (!credential) {
+      return
+    }
+
+    const pendingConfirmation = await trx
+      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .innerJoin(
+        'extensions.gcs_gcforms_connections as connection',
+        'connection.id',
+        'submission.connection_id'
+      )
+      .select('submission.id')
+      .where('connection.agency_id', '=', sql<string>`${agencyId}::bigint`)
+      .where('connection.credential_id', '=', String(credential.id))
+      .where('submission.status', 'in', ['imported_pending_confirm', 'materialization_failed'])
+      .where('submission._deleted', '=', false)
+      .executeTakeFirst()
+    if (pendingConfirmation) {
+      throw createGcsExtensionUserError({
+        statusCode: 409,
+        code: 'GCS_GCFORMS_CREDENTIAL_RECOVERABLE_SUBMISSIONS',
+        message: {
+          en: 'This GC Forms credential cannot be deleted until all recoverable submissions using it are resolved.',
+          fr: 'Ce justificatif GC Forms ne peut pas etre supprime tant que toutes les soumissions recuperables qui l utilisent ne sont pas reglees.'
+        }
+      })
+    }
+
     await trx
       .updateTable('extensions.gcs_gcforms_credentials')
       .set({

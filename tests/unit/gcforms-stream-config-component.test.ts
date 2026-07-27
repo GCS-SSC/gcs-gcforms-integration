@@ -9,6 +9,7 @@ import type {
   JsonValue
 } from '@gcs-ssc/extensions'
 import { installExtensionTestUiRuntime } from '@gcs-ssc/extensions/testing'
+import AgencyGcFormsIntegrationConfig from '../../components/AgencyGcFormsIntegrationConfig.vue'
 import StreamGcFormsIntegrationConfig from '../../components/StreamGcFormsIntegrationConfig.vue'
 import { parseGcFormsStreamConfig } from '../../shared/gcforms'
 
@@ -97,6 +98,67 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   installExtensionTestUiRuntime()
+})
+
+describe('AgencyGcFormsIntegrationConfig', () => {
+  it('submits unchanged authentication fields during a name-only edit without resending the private key', async () => {
+    installExtensionTestUiRuntime()
+    let patchBody: Record<string, unknown> | null = null
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        patchBody = JSON.parse(String(init.body)) as Record<string, unknown>
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({
+        items: [{
+          id: 'credential-1',
+          name_en: 'Original credential',
+          name_fr: 'Justificatif original',
+          keyId: 'key-id-1',
+          userId: 'user-id-1',
+          formId: 'form-id-1',
+          revision: 1,
+          updatedAt: null
+        }]
+      })
+    }))
+
+    const wrapper = mount(AgencyGcFormsIntegrationConfig, {
+      props: {
+        agencyId: 'agency-1',
+        extension,
+        modelValue: {}
+      }
+    })
+    await flushPromises()
+    const editButton = wrapper.findAll('button').find(button => button.text() === 'i-lucide-pencil')
+    if (!editButton) {
+      throw new Error('Expected the credential edit button.')
+    }
+    await editButton.trigger('click')
+    await flushPromises()
+    const nameInput = wrapper.findAll('input')
+      .find(input => (input.element as HTMLInputElement).value === 'Original credential')
+    if (!nameInput) {
+      throw new Error('Expected the credential English name input.')
+    }
+    await nameInput.setValue('Renamed credential')
+    const saveButton = wrapper.findAll('button').find(button => button.text() === 'Save credential')
+    if (!saveButton) {
+      throw new Error('Expected the credential save button.')
+    }
+    await saveButton.trigger('click')
+    await flushPromises()
+
+    expect(patchBody).toMatchObject({
+      name_en: 'Renamed credential',
+      keyId: 'key-id-1',
+      userId: 'user-id-1',
+      formId: 'form-id-1'
+    })
+    expect(patchBody).not.toHaveProperty('key')
+    wrapper.unmount()
+  })
 })
 
 describe('StreamGcFormsIntegrationConfig', () => {

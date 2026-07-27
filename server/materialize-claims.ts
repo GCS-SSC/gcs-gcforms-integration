@@ -6,7 +6,7 @@ import type {
   GcsGcFormsMappedValue,
   GcsGcFormsMappingIssue
 } from '../shared/gcforms.ts'
-import { asGcFormsIntegrationDb, type GcFormsIntegrationHostDatabase } from './db.ts'
+import { asGcFormsIntegrationDb, executeGcFormsTransaction, type GcFormsIntegrationHostDatabase } from './db.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
 
 type ClaimInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim']>
@@ -31,6 +31,7 @@ interface ClaimMaterializationInput {
   submissionUuid: string
   mappings: GcsGcFormsFieldMapping[]
   mappedValues: GcsGcFormsMappedValue[]
+  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
 }
 
 interface PreparedClaim {
@@ -75,6 +76,19 @@ export interface ClaimMaterializationResult {
   claimId?: string
   lineItemIds: string[]
   issues: GcsGcFormsMappingIssue[]
+}
+
+/** Authorizes each distinct agreement target in a stable lock order. */
+export const authorizeGcFormsAgreementUpdates = async (
+  agreementIds: string[],
+  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
+): Promise<void> => {
+  const orderedAgreementIds = [...new Set(agreementIds)].sort((left, right) => left.localeCompare(right, undefined, {
+    numeric: true
+  }))
+  for (const agreementId of orderedAgreementIds) {
+    await authorizeAgreementUpdate(agreementId)
+  }
 }
 
 const CLAIM_ENTITY: GcsDestinationEntity = 'claim'
@@ -867,10 +881,12 @@ export const materializeGcFormsClaimSubmission = async (
     }
   }
 
+  await authorizeGcFormsAgreementUpdates([claimInput.agreementId], input.authorizeAgreementUpdate)
+
   const db = asGcFormsIntegrationDb(rawDb)
   const mappingIdsByKey = await fieldMappingIdsByKey(rawDb, input.integrationId)
 
-  return await db.transaction().execute(async trx => {
+  return await executeGcFormsTransaction(db, async trx => {
     const claimValues: ClaimInsert = {
       egcs_fc_fundingagreement: claimInput.agreementId,
       egcs_fc_fiscalyear: claimInput.fiscalYearId,

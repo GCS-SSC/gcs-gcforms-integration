@@ -1,8 +1,10 @@
-import { sql, type Selectable } from 'kysely'
+import { createHash } from 'node:crypto'
+import { sql, type Selectable, type Transaction } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
+  lockGcsExtensionLifecycleScope,
   type GcsExtensionRouteContext,
   resolveExtensionStreamContext
 } from '@gcs-ssc/extensions/server'
@@ -26,8 +28,10 @@ import {
 import { GcFormsApiClient, verifyGcFormsIntegrity } from './gcforms-client.ts'
 import {
   asGcFormsIntegrationDb,
+  executeGcFormsTransaction,
   type GcFormsIntegrationDb,
-  type GcFormsIntegrationHostDatabase
+  type GcFormsIntegrationHostDatabase,
+  type GcFormsSubmissionStatus
 } from './db.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
 import { materializeGcFormsClaimSubmission } from './materialize-claims.ts'
@@ -44,6 +48,13 @@ type CredentialRow = {
   key_id: string
   user_id: string
   form_id: string
+  revision: number
+}
+
+type GcFormsCredentialSessionIdentity = {
+  credentialRevision: number
+  secretEntryId: string
+  secretUpdatedAt: string
 }
 
 type IntegrationRow = Selectable<
@@ -56,17 +67,31 @@ type ImportRunRow = {
 
 type SubmissionRow = {
   id: string
+  status: GcFormsSubmissionStatus
 }
 
 type SyncSubmissionContext = {
-  rawDb: unknown
   db: GcFormsIntegrationDb
-  client: Pick<GcFormsApiClient, 'getDecryptedSubmission' | 'confirmSubmission'>
   streamId: string
   connection: ConnectionRow
   integration: IntegrationRow
   config: GcsGcFormsStreamConfig
   currentTemplate: unknown
+  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
+}
+
+export type GcFormsSyncSessionIdentity = {
+  configFingerprint: string
+  connectionId: string
+  credentialId: string
+  credentialRevision: number
+  secretEntryId: string
+  secretUpdatedAt: string
+}
+
+type GcFormsTemplateChangedError = Error & {
+  code: string
+  gcFormsSyncSession: GcFormsSyncSessionIdentity
 }
 
 const maybeString = (value: unknown): string | null =>
@@ -74,6 +99,60 @@ const maybeString = (value: unknown): string | null =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const configFingerprint = (config: GcsGcFormsStreamConfig): string => JSON.stringify(config)
+
+const createSyncSessionIdentity = (
+  config: GcsGcFormsStreamConfig,
+  connectionId: string,
+  credentialIdentity: GcFormsCredentialSessionIdentity
+): GcFormsSyncSessionIdentity => ({
+  configFingerprint: configFingerprint(config),
+  connectionId,
+  credentialId: assertConfiguredCredential(config),
+  ...credentialIdentity
+})
+
+const createGcFormsConfigChangedError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_CONFIG_CHANGED',
+  message: {
+    en: 'The GC Forms configuration changed while synchronization was running. Start the synchronization again.',
+    fr: 'La configuration de GC Forms a change pendant la synchronisation. Relancez la synchronisation.'
+  }
+})
+
+const getTemplateChangedSession = (error: unknown): GcFormsSyncSessionIdentity | null => {
+  if (!isRecord(error) || !isRecord(error.gcFormsSyncSession)) {
+    return null
+  }
+  const {
+    configFingerprint: fingerprint,
+    connectionId,
+    credentialId,
+    credentialRevision,
+    secretEntryId,
+    secretUpdatedAt
+  } = error.gcFormsSyncSession
+  if (
+    typeof fingerprint !== 'string'
+    || typeof connectionId !== 'string'
+    || typeof credentialId !== 'string'
+    || typeof credentialRevision !== 'number'
+    || typeof secretEntryId !== 'string'
+    || typeof secretUpdatedAt !== 'string'
+  ) {
+    return null
+  }
+  return {
+    configFingerprint: fingerprint,
+    connectionId,
+    credentialId,
+    credentialRevision,
+    secretEntryId,
+    secretUpdatedAt
+  }
+}
 
 const DEV_EXTENSION_SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
@@ -98,30 +177,120 @@ export const getGcFormsSecretRootKey = (): string => {
   })
 }
 
-/** Loads credential metadata and decrypts its private API key for an agency. */
-export const getGcFormsCredential = async (
+/** Runs a GC Forms mutation under the host's ordered auth and extension lifecycle locks. */
+export const runAuthorizedGcFormsWrite = async <T>(
+  context: GcsExtensionRouteContext,
+  operation: (trx: GcFormsIntegrationDb) => Promise<T>,
+  streamId?: string
+): Promise<T> => {
+  const writeAuthorization = context.writeAuthorization
+  if (!writeAuthorization) {
+    throw new Error('GC Forms writes require host-provided transaction authorization.')
+  }
+  const scopedAgencyId = context.agency?.agencyId ?? context.stream?.agencyId
+  if (typeof scopedAgencyId !== 'string' || !scopedAgencyId) {
+    throw new Error('GC Forms writes require a resolved agency scope.')
+  }
+
+  return await executeGcFormsTransaction(context.db, async trx => {
+    await writeAuthorization.lockAuthState(trx)
+    await lockGcsExtensionLifecycleScope(
+      trx as unknown as Transaction<unknown>,
+      GCFORMS_EXTENSION_KEY,
+      scopedAgencyId,
+      streamId
+    )
+    const authorizeCurrentScope = writeAuthorization.authorizeCurrentScope === undefined
+      ? writeAuthorization.authorizeCurrentEntity
+      : writeAuthorization.authorizeCurrentScope
+    await authorizeCurrentScope(trx)
+    return await operation(trx)
+  })
+}
+
+const createGcFormsCredentialMissingError = () => createGcsExtensionUserError({
+  statusCode: 400,
+  code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
+  message: {
+    en: 'The selected GC Forms credential is not available on the server.',
+    fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+  }
+})
+
+const timestampIdentity = (value: Date | string): string => value instanceof Date
+  ? value.toISOString()
+  : value
+
+/** Loads active credential metadata and secret identity from one database snapshot. */
+const getGcFormsCredentialMetadataState = async (
+  db: GcFormsIntegrationDb,
+  agencyId: string,
+  credentialId: string
+): Promise<{ credential: CredentialRow; identity: GcFormsCredentialSessionIdentity }> => {
+  const row = await db
+    .selectFrom('extensions.gcs_gcforms_credentials as credential')
+    .innerJoin('extensions.secret_entry as secret', join => join
+      .on('secret.extension_key', '=', GCFORMS_EXTENSION_KEY)
+      .on('secret.owner_type', '=', 'agency')
+      .on('secret.owner_id', '=', sql<string>`credential.agency_id::text`)
+      .on('secret.secret_key', '=', sql<string>`credential.id::text`)
+      .on('secret._deleted', '=', false))
+    .select([
+      'credential.revision as credential_revision',
+      'credential.id as credential_id',
+      'credential.agency_id as credential_agency_id',
+      'credential.key_id as credential_key_id',
+      'credential.user_id as credential_user_id',
+      'credential.form_id as credential_form_id',
+      'secret.id as secret_entry_id',
+      'secret.created_at as secret_created_at',
+      'secret.updated_at as secret_updated_at'
+    ])
+    .where('credential.id', '=', sql<string>`${credentialId}::bigint`)
+    .where('credential.agency_id', '=', sql<string>`${agencyId}::bigint`)
+    .where('credential._deleted', '=', false)
+    .executeTakeFirst()
+  if (!row) {
+    throw createGcFormsCredentialMissingError()
+  }
+  return {
+    credential: {
+      id: String(row.credential_id),
+      agency_id: String(row.credential_agency_id),
+      key_id: row.credential_key_id,
+      user_id: row.credential_user_id,
+      form_id: row.credential_form_id,
+      revision: row.credential_revision
+    },
+    identity: {
+      credentialRevision: row.credential_revision,
+      secretEntryId: String(row.secret_entry_id),
+      secretUpdatedAt: timestampIdentity(row.secret_updated_at ?? row.secret_created_at)
+    }
+  }
+}
+
+/** Loads immutable authentication identity markers for an active agency credential. */
+const getGcFormsCredentialSessionIdentity = async (
+  db: GcFormsIntegrationDb,
+  agencyId: string,
+  credentialId: string
+): Promise<GcFormsCredentialSessionIdentity> => (
+  await getGcFormsCredentialMetadataState(db, agencyId, credentialId)
+).identity
+
+/** Loads credential metadata, identity markers, and its decrypted private API key for an agency. */
+const getGcFormsCredentialState = async (
   rawDb: unknown,
   agencyId: string,
   credentialId: string
-): Promise<GcFormsPrivateApiKey> => {
+): Promise<{ credential: GcFormsPrivateApiKey; identity: GcFormsCredentialSessionIdentity }> => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const row = await db
-    .selectFrom('extensions.gcs_gcforms_credentials')
-    .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
-    .where('id', '=', sql<string>`${credentialId}::bigint`)
-    .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
-  if (!row) {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-      message: {
-        en: 'The selected GC Forms credential is not available on the server.',
-        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
-      }
-    })
-  }
+  const { credential: row, identity } = await getGcFormsCredentialMetadataState(
+    db,
+    agencyId,
+    credentialId
+  )
 
   const credential = await getEncryptedExtensionSecret<GcFormsIntegrationHostDatabase>(db, {
     rootKey: getGcFormsSecretRootKey(),
@@ -131,24 +300,27 @@ export const getGcFormsCredential = async (
     secretKey: String(row.id)
   })
   if (!credential) {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-      message: {
-        en: 'The selected GC Forms credential is not available on the server.',
-        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
-      }
-    })
+    throw createGcFormsCredentialMissingError()
   }
 
   const secret = GcFormsCredentialSecretSchema.parse(credential)
   return {
-    keyId: row.key_id,
-    key: secret.key,
-    userId: row.user_id,
-    formId: row.form_id
+    credential: {
+      keyId: row.key_id,
+      key: secret.key,
+      userId: row.user_id,
+      formId: row.form_id
+    },
+    identity
   }
 }
+
+/** Loads credential metadata and decrypts its private API key for an agency. */
+export const getGcFormsCredential = async (
+  rawDb: unknown,
+  agencyId: string,
+  credentialId: string
+): Promise<GcFormsPrivateApiKey> => (await getGcFormsCredentialState(rawDb, agencyId, credentialId)).credential
 
 /** Loads active credential metadata and rejects credentials outside the requested agency. */
 const getGcFormsCredentialRow = async (
@@ -158,7 +330,7 @@ const getGcFormsCredentialRow = async (
 ): Promise<CredentialRow> => {
   const row = await db
     .selectFrom('extensions.gcs_gcforms_credentials')
-    .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id'])
+    .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id', 'revision'])
     .where('id', '=', sql<string>`${credentialId}::bigint`)
     .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
     .where('_deleted', '=', false)
@@ -245,11 +417,11 @@ export const authorizeGcFormsStream = async (
   }
 }
 
-/** Resolves an enabled stream configuration, merging agency settings and validating its credential. */
-export const getStreamConfig = async (
+/** Resolves enabled stream and agency settings without requiring remote credential material. */
+const resolveStreamConfig = async (
   db: GcFormsIntegrationDb,
   streamId: string
-): Promise<GcsGcFormsStreamConfig> => {
+): Promise<{ agencyId: string; config: GcsGcFormsStreamConfig }> => {
   const streamContext = await resolveExtensionStreamContext(db, streamId)
   if (!streamContext) {
     throw createGcsExtensionUserError({
@@ -301,10 +473,97 @@ export const getStreamConfig = async (
     config.confirmSubmissions = agencyConfig.confirmSubmissions
   }
 
-  await getGcFormsCredentialRow(db, streamContext.agencyId, assertConfiguredCredential(config))
+  return {
+    agencyId: streamContext.agencyId,
+    config
+  }
+}
 
+/** Resolves an enabled stream configuration, merging agency settings and validating its credential. */
+export const getStreamConfig = async (
+  db: GcFormsIntegrationDb,
+  streamId: string
+): Promise<GcsGcFormsStreamConfig> => {
+  const { agencyId, config } = await resolveStreamConfig(db, streamId)
+  await getGcFormsCredentialRow(db, agencyId, assertConfiguredCredential(config))
   return config
 }
+
+type GcFormsConnectionIdentity = {
+  agencyId: string
+  credentialId: string
+  credentialRevision: number
+  secretEntryId: string
+  secretUpdatedAt: string
+  formId: string
+  apiUrl: string
+  identityProviderUrl: string
+  projectIdentifier: string
+}
+
+const resolveConnectionIdentity = async (
+  db: GcFormsIntegrationDb,
+  streamId: string,
+  config: GcsGcFormsStreamConfig
+): Promise<GcFormsConnectionIdentity> => {
+  const streamContext = await resolveExtensionStreamContext(db, streamId)
+  if (!streamContext) {
+    throw createGcsExtensionUserError({
+      statusCode: 404,
+      code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
+      message: {
+        en: 'Transfer payment stream was not found.',
+        fr: 'Le volet de paiements de transfert est introuvable.'
+      }
+    })
+  }
+  const credentialId = assertConfiguredCredential(config)
+  const { credential, identity: credentialIdentity } = await getGcFormsCredentialMetadataState(
+    db,
+    streamContext.agencyId,
+    credentialId
+  )
+  return {
+    agencyId: streamContext.agencyId,
+    credentialId: String(credential.id),
+    credentialRevision: credentialIdentity.credentialRevision,
+    secretEntryId: credentialIdentity.secretEntryId,
+    secretUpdatedAt: credentialIdentity.secretUpdatedAt,
+    formId: credential.form_id,
+    apiUrl: config.apiUrl || DEFAULT_GCFORMS_API_URL,
+    identityProviderUrl: config.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL,
+    projectIdentifier: config.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER
+  }
+}
+
+const findConnectionByIdentity = async (
+  db: GcFormsIntegrationDb,
+  streamId: string,
+  identity: GcFormsConnectionIdentity
+): Promise<ConnectionRow | undefined> => await db
+  .selectFrom('extensions.gcs_gcforms_connections')
+  .selectAll()
+  .where('stream_id', '=', streamId)
+  .where('credential_id', '=', identity.credentialId)
+  .where('credential_revision', '=', identity.credentialRevision)
+  .where('secret_entry_id', '=', identity.secretEntryId)
+  .where('secret_updated_at', '=', identity.secretUpdatedAt)
+  .where('form_id', '=', identity.formId)
+  .where('api_url', '=', identity.apiUrl)
+  .where('identity_provider_url', '=', identity.identityProviderUrl)
+  .where('project_identifier', '=', identity.projectIdentifier)
+  .where('_deleted', '=', false)
+  .executeTakeFirst()
+
+export const findCurrentGcFormsConnection = async (
+  db: GcFormsIntegrationDb,
+  streamId: string,
+  config: GcsGcFormsStreamConfig
+): Promise<ConnectionRow | undefined> => await findConnectionByIdentity(
+  db,
+  streamId,
+  await resolveConnectionIdentity(db, streamId, config)
+)
 
 /** Returns the most recently stored template catalog and review state for a stream. */
 export const getStoredTemplate = async (
@@ -313,13 +572,7 @@ export const getStoredTemplate = async (
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
   const config = await getStreamConfig(db, streamId)
-  const connection = await db
-    .selectFrom('extensions.gcs_gcforms_connections')
-    .select(['id'])
-    .where('stream_id', '=', streamId)
-    .where('credential_id', '=', assertConfiguredCredential(config))
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
+  const connection = await findCurrentGcFormsConnection(db, streamId, config)
   const stored = connection
     ? await db
         .selectFrom('extensions.gcs_gcforms_templates')
@@ -356,21 +609,15 @@ export const getStoredTemplate = async (
   }
 }
 
-/** Synchronizes an existing connection with the current stream configuration and credential metadata. */
+/** Updates identity-neutral presentation settings on an exact connection version. */
 const updateConnection = async (
   db: GcFormsIntegrationDb,
   id: string,
-  config: GcsGcFormsStreamConfig,
-  credential: CredentialRow
+  config: GcsGcFormsStreamConfig
 ) => {
   return await db
     .updateTable('extensions.gcs_gcforms_connections')
     .set({
-      credential_id: assertConfiguredCredential(config),
-      form_id: credential.form_id,
-      api_url: config.apiUrl || DEFAULT_GCFORMS_API_URL,
-      identity_provider_url: config.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL,
-      project_identifier: config.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
       contact_email: config.contactEmail || null,
       preferred_language: config.preferredLanguage,
       updated_at: new Date()
@@ -380,133 +627,132 @@ const updateConnection = async (
     .executeTakeFirstOrThrow()
 }
 
-/** Returns an updated active connection or creates one for the stream's configured credential. */
+/** Returns or idempotently creates the immutable remote-identity version for the current configuration. */
 export const ensureConnection = async (
   rawDb: unknown,
   streamId: string,
   config: GcsGcFormsStreamConfig
 ): Promise<ConnectionRow> => {
   const db = asGcFormsIntegrationDb(rawDb)
-  const streamContext = await resolveExtensionStreamContext(db, streamId)
-  if (!streamContext) {
-    throw createGcsExtensionUserError({
-      statusCode: 404,
-      code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
-      message: {
-        en: 'Transfer payment stream was not found.',
-        fr: 'Le volet de paiements de transfert est introuvable.'
-      }
-    })
-  }
-  const credential = await getGcFormsCredentialRow(db, streamContext.agencyId, assertConfiguredCredential(config))
-
-  const existing = await db
-    .selectFrom('extensions.gcs_gcforms_connections')
-    .selectAll()
-    .where('stream_id', '=', streamId)
-    .where('credential_id', '=', String(credential.id))
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
+  const identity = await resolveConnectionIdentity(db, streamId, config)
+  const existing = await findConnectionByIdentity(db, streamId, identity)
 
   if (existing) {
-    return await updateConnection(db, existing.id, config, credential)
+    return await updateConnection(db, existing.id, config)
   }
 
-  return await db
+  const inserted = await db
     .insertInto('extensions.gcs_gcforms_connections')
     .values({
-      agency_id: streamContext.agencyId,
+      agency_id: identity.agencyId,
       stream_id: streamId,
-      credential_id: String(credential.id),
-      form_id: credential.form_id,
-      api_url: config.apiUrl || DEFAULT_GCFORMS_API_URL,
-      identity_provider_url: config.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL,
-      project_identifier: config.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
+      credential_id: identity.credentialId,
+      credential_revision: identity.credentialRevision,
+      secret_entry_id: identity.secretEntryId,
+      secret_updated_at: identity.secretUpdatedAt,
+      form_id: identity.formId,
+      api_url: identity.apiUrl,
+      identity_provider_url: identity.identityProviderUrl,
+      project_identifier: identity.projectIdentifier,
       contact_email: config.contactEmail || null,
       preferred_language: config.preferredLanguage,
       status: 'active'
     })
+    .onConflict(conflict => conflict.doNothing())
     .returningAll()
-    .executeTakeFirstOrThrow()
+    .executeTakeFirst()
+  if (inserted) {
+    return inserted
+  }
+
+  const concurrent = await findConnectionByIdentity(db, streamId, identity)
+  if (!concurrent) {
+    throw new Error('GC Forms connection identity conflict did not resolve to an active version.')
+  }
+  return await updateConnection(db, concurrent.id, config)
 }
 
-/** Upserts the stream integration and replaces its persisted field mappings with the current configuration. */
+const integrationConfigFingerprint = (config: GcsGcFormsStreamConfig): string => createHash('sha256')
+  .update(JSON.stringify(config))
+  .digest('hex')
+
+/** Returns or idempotently creates the immutable integration and mapping version for this configuration. */
 export const ensureIntegration = async (
   rawDb: unknown,
   streamId: string,
   connectionId: string,
   config: GcsGcFormsStreamConfig
 ): Promise<IntegrationRow> => {
-  const db = asGcFormsIntegrationDb(rawDb)
-  const existing = await db
-    .selectFrom('extensions.gcs_gcforms_integrations')
-    .selectAll()
-    .where('connection_id', '=', connectionId)
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
+  return await executeGcFormsTransaction(rawDb, async db => {
+    const normalizedConfig = parseGcFormsStreamConfig(config)
+    const configFingerprint = integrationConfigFingerprint(normalizedConfig)
+    const existing = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectAll()
+      .where('connection_id', '=', connectionId)
+      .where('config_fingerprint', '=', configFingerprint)
+      .where('_deleted', '=', false)
+      .executeTakeFirst()
+    if (existing) {
+      return existing
+    }
 
-  const values = {
-    name_en: 'GC Forms integration',
-    name_fr: 'Integration GC Forms',
-    enabled: true,
-    config: gcFormsJsonbValue(config),
-    updated_at: new Date()
-  }
+    const inserted = await db
+      .insertInto('extensions.gcs_gcforms_integrations')
+      .values({
+        connection_id: connectionId,
+        stream_id: streamId,
+        name_en: 'GC Forms integration',
+        name_fr: 'Integration GC Forms',
+        enabled: true,
+        config_fingerprint: configFingerprint,
+        config: gcFormsJsonbValue(normalizedConfig)
+      })
+      .onConflict(conflict => conflict.doNothing())
+      .returningAll()
+      .executeTakeFirst()
+    if (!inserted) {
+      const concurrent = await db
+        .selectFrom('extensions.gcs_gcforms_integrations')
+        .selectAll()
+        .where('connection_id', '=', connectionId)
+        .where('config_fingerprint', '=', configFingerprint)
+        .where('_deleted', '=', false)
+        .executeTakeFirst()
+      if (!concurrent) {
+        throw new Error('GC Forms integration identity conflict did not resolve to an active version.')
+      }
+      return concurrent
+    }
 
-  const integration = existing
-    ? await db
-        .updateTable('extensions.gcs_gcforms_integrations')
-        .set(values)
-        .where('id', '=', String(existing.id))
-        .returningAll()
-        .executeTakeFirstOrThrow()
-    : await db
-        .insertInto('extensions.gcs_gcforms_integrations')
-        .values({
-          connection_id: connectionId,
-          stream_id: streamId,
-          name_en: values.name_en,
-          name_fr: values.name_fr,
-          enabled: true,
-          config: gcFormsJsonbValue(config)
-        })
-        .returningAll()
-        .executeTakeFirstOrThrow()
+    if (normalizedConfig.mappings.length > 0) {
+      await db
+        .insertInto('extensions.gcs_gcforms_field_mappings')
+        .values(normalizedConfig.mappings.map(mapping => ({
+          integration_id: String(inserted.id),
+          mapping_key: mapping.id,
+          source_question_id: mapping.sourceQuestionId,
+          destination_entity: mapping.destinationEntity,
+          destination_path: mapping.destinationPath,
+          transform: mapping.transform,
+          required: mapping.required,
+          default_value: gcFormsJsonbValue(mapping.defaultValue),
+          on_missing: mapping.onMissing,
+          on_invalid: mapping.onInvalid
+        })))
+        .execute()
+    }
 
-  await db
-    .updateTable('extensions.gcs_gcforms_field_mappings')
-    .set({ _deleted: true })
-    .where('integration_id', '=', sql<string>`${String(integration.id)}::bigint`)
-    .where('_deleted', '=', false)
-    .execute()
-
-  if (config.mappings.length > 0) {
-    await db
-      .insertInto('extensions.gcs_gcforms_field_mappings')
-      .values(config.mappings.map(mapping => ({
-        integration_id: String(integration.id),
-        mapping_key: mapping.id,
-        source_question_id: mapping.sourceQuestionId,
-        destination_entity: mapping.destinationEntity,
-        destination_path: mapping.destinationPath,
-        transform: mapping.transform,
-        required: mapping.required,
-        default_value: gcFormsJsonbValue(mapping.defaultValue),
-        on_missing: mapping.onMissing,
-        on_invalid: mapping.onInvalid
-      })))
-      .execute()
-  }
-
-  return integration
+    return inserted
+  })
 }
 
-/** Creates a GC Forms API client from the stream's agency credential and connection settings. */
-export const createConfiguredClient = async (
+/** Creates a GC Forms API client and captures the exact credential identity used by this session. */
+const createConfiguredClientSession = async (
   rawDb: unknown,
   streamId: string,
   config: GcsGcFormsStreamConfig
-): Promise<GcFormsApiClient> => {
+): Promise<{ client: GcFormsApiClient; credentialIdentity: GcFormsCredentialSessionIdentity }> => {
   const credentialId = assertConfiguredCredential(config)
   const db = asGcFormsIntegrationDb(rawDb)
   const streamContext = await resolveExtensionStreamContext(db, streamId)
@@ -521,16 +767,30 @@ export const createConfiguredClient = async (
     })
   }
 
-  const credential = await getGcFormsCredential(db, streamContext.agencyId, credentialId)
-  return new GcFormsApiClient({
-    apiUrl: config.apiUrl,
-    identityProviderUrl: config.identityProviderUrl,
-    projectIdentifier: config.projectIdentifier,
-    privateApiKey: {
-      ...credential
-    }
-  })
+  const { credential, identity } = await getGcFormsCredentialState(
+    db,
+    streamContext.agencyId,
+    credentialId
+  )
+  return {
+    client: new GcFormsApiClient({
+      apiUrl: config.apiUrl,
+      identityProviderUrl: config.identityProviderUrl,
+      projectIdentifier: config.projectIdentifier,
+      privateApiKey: {
+        ...credential
+      }
+    }),
+    credentialIdentity: identity
+  }
 }
+
+/** Creates a GC Forms API client from the stream's agency credential and connection settings. */
+export const createConfiguredClient = async (
+  rawDb: unknown,
+  streamId: string,
+  config: GcsGcFormsStreamConfig
+): Promise<GcFormsApiClient> => (await createConfiguredClientSession(rawDb, streamId, config)).client
 
 /** Fetches, validates, and stores the current form template and normalized field catalog. */
 export const refreshTemplate = async (
@@ -596,7 +856,7 @@ export const refreshTemplate = async (
 }
 
 /** Persists whether the current remote template shape differs from the reviewed stream template. */
-const updateStreamTemplateShapeChanged = async (
+export const updateStreamTemplateShapeChanged = async (
   db: GcFormsIntegrationDb,
   streamId: string,
   templateShapeChanged: boolean
@@ -615,6 +875,54 @@ const updateStreamTemplateShapeChanged = async (
     .where('extension_key', '=', GCFORMS_EXTENSION_KEY)
     .where('_deleted', '=', false)
     .execute()
+}
+
+/** Persists template drift only when the renewed stream session still matches the failing remote read. */
+export const persistGcFormsTemplateShapeChangedForSession = async (
+  context: GcsExtensionRouteContext,
+  streamId: string,
+  error: unknown
+): Promise<void> => {
+  const expectedSession = getTemplateChangedSession(error)
+  if (!expectedSession) {
+    throw createGcFormsConfigChangedError()
+  }
+
+  await runAuthorizedGcFormsWrite(context, async trx => {
+    let currentConfig: GcsGcFormsStreamConfig
+    try {
+      currentConfig = await getStreamConfig(trx, streamId)
+    }
+    catch {
+      throw createGcFormsConfigChangedError()
+    }
+    const currentCredentialId = assertConfiguredCredential(currentConfig)
+    const currentConnection = await findCurrentGcFormsConnection(trx, streamId, currentConfig)
+    if (!currentConnection) {
+      throw createGcFormsConfigChangedError()
+    }
+    const currentCredentialIdentity = await getGcFormsCredentialSessionIdentity(
+      trx,
+      currentConnection.agency_id,
+      currentCredentialId
+    )
+    const currentSession = createSyncSessionIdentity(
+      currentConfig,
+      String(currentConnection.id),
+      currentCredentialIdentity
+    )
+    if (
+      currentSession.configFingerprint !== expectedSession.configFingerprint
+      || currentSession.connectionId !== expectedSession.connectionId
+      || currentSession.credentialId !== expectedSession.credentialId
+      || currentSession.credentialRevision !== expectedSession.credentialRevision
+      || currentSession.secretEntryId !== expectedSession.secretEntryId
+      || currentSession.secretUpdatedAt !== expectedSession.secretUpdatedAt
+    ) {
+      throw createGcFormsConfigChangedError()
+    }
+    await updateStreamTemplateShapeChanged(trx, streamId, true)
+  }, streamId)
 }
 
 /** Rejects templates that omit any questions required for claim materialization. */
@@ -643,9 +951,9 @@ const assertGcFormsClaimTemplateShape = (template: unknown) => {
 /** Blocks synchronization until a stored template exists and still matches the remote template shape. */
 const assertGcFormsTemplateShapeUnchanged = async (
   db: GcFormsIntegrationDb,
-  streamId: string,
   connectionId: string,
-  currentTemplate: unknown
+  currentTemplate: unknown,
+  sessionIdentity: GcFormsSyncSessionIdentity
 ) => {
   const stored = await db
     .selectFrom('extensions.gcs_gcforms_templates')
@@ -666,8 +974,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
   }
 
   if (!gcFormsTemplateShapesEqual(stored.template, currentTemplate)) {
-    await updateStreamTemplateShapeChanged(db, streamId, true)
-    throw createGcsExtensionUserError({
+    const templateChangedError = createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
       message: {
@@ -675,6 +982,9 @@ const assertGcFormsTemplateShapeUnchanged = async (
         fr: 'Le modele GC Forms a change depuis sa derniere verification. Actualisez le modele, verifiez les correspondances, enregistrez la configuration du volet, puis synchronisez de nouveau.'
       }
     })
+    throw Object.assign(templateChangedError, {
+      gcFormsSyncSession: sessionIdentity
+    }) satisfies GcFormsTemplateChangedError
   }
 }
 
@@ -739,7 +1049,7 @@ const getOrCreateGcFormsSubmission = async (
 const resolveGcFormsSubmissionImportStatus = (
   previewIssueCount: number,
   materializationStatus: string
-) => {
+): GcFormsSubmissionStatus => {
   if (previewIssueCount > 0) {
     return 'mapping_failed'
   }
@@ -806,11 +1116,24 @@ const updateGcFormsSubmissionProblem = async (
     .execute()
 }
 
+const createGcFormsAgreementUnavailableError = () => createGcsExtensionUserError({
+  statusCode: 403,
+  code: 'GCS_GCFORMS_AGREEMENT_UPDATE_FORBIDDEN',
+  message: {
+    en: 'The resolved agreement is no longer available for this import.',
+    fr: 'L entente resolue n est plus disponible pour cette importation.'
+  }
+})
+
 /** Decrypts, verifies, maps, materializes, stores, and optionally confirms one discovered submission. */
 const importGcFormsSubmission = async (
   context: SyncSubmissionContext,
-  submission: GcFormsNewSubmission
-): Promise<'imported' | 'problem' | 'skipped'> => {
+  submission: GcFormsNewSubmission,
+  decrypted: GcFormsDecryptedSubmission
+): Promise<{
+  outcome: 'imported' | 'problem' | 'skipped'
+  pendingConfirmationId?: string
+}> => {
   const row = await getOrCreateGcFormsSubmission(
     context.db,
     context.connection,
@@ -819,8 +1142,14 @@ const importGcFormsSubmission = async (
   )
   const submissionId = String(row.id)
 
+  if (row.status === 'imported_pending_confirm') {
+    return {
+      outcome: 'skipped',
+      pendingConfirmationId: submissionId
+    }
+  }
+
   try {
-    const decrypted = await context.client.getDecryptedSubmission(submission.name)
     if (!verifyGcFormsIntegrity(decrypted.answers, decrypted.checksum)) {
       throw new Error('GC Forms checksum verification failed')
     }
@@ -835,13 +1164,14 @@ const importGcFormsSubmission = async (
           issues: preparedMaterialization.materializationIssues
         }
       : preparedMaterialization.previewIssues.length === 0
-      ? await materializeGcFormsClaimSubmission(context.rawDb, {
+      ? await materializeGcFormsClaimSubmission(context.db, {
           streamId: context.streamId,
           integrationId: String(context.integration.id),
           submissionId,
           submissionUuid: submission.name,
           mappings: context.config.mappings,
-          mappedValues: preparedMaterialization.values
+          mappedValues: preparedMaterialization.values,
+          authorizeAgreementUpdate: context.authorizeAgreementUpdate
         })
       : {
           status: 'failed' as const,
@@ -849,13 +1179,21 @@ const importGcFormsSubmission = async (
           issues: []
         }
     const issues = [...preparedMaterialization.previewIssues, ...materialization.issues]
-    const status = resolveGcFormsSubmissionImportStatus(preparedMaterialization.previewIssues.length, materialization.status)
+    const finalStatus = resolveGcFormsSubmissionImportStatus(
+      preparedMaterialization.previewIssues.length,
+      materialization.status
+    )
+    const shouldConfirm = shouldConfirmGcFormsSubmission(
+      context.config.confirmSubmissions,
+      materialization.status,
+      issues
+      )
 
     await context.db
       .updateTable('extensions.gcs_gcforms_submissions')
       .set({
         integration_id: String(context.integration.id),
-        status,
+        status: shouldConfirm ? 'imported_pending_confirm' : finalStatus,
         confirmation_code: decrypted.confirmationCode,
         answers: gcFormsJsonbValue(answers),
         answers_checksum: decrypted.checksum,
@@ -870,19 +1208,36 @@ const importGcFormsSubmission = async (
     await replaceGcFormsSubmissionAttachments(context.db, submissionId, decrypted)
 
     if (issues.length > 0) {
-      return 'problem'
+      return { outcome: 'problem' }
     }
 
     const importResult = materialization.status === 'already_materialized' ? 'skipped' : 'imported'
-    if (shouldConfirmGcFormsSubmission(context.config.confirmSubmissions, materialization.status, issues)) {
-      await context.client.confirmSubmission(submission.name, decrypted.confirmationCode)
+    if (shouldConfirm) {
+      return {
+        outcome: importResult,
+        pendingConfirmationId: submissionId
+      }
     }
 
-    return importResult
+    return { outcome: importResult }
   } catch (error: unknown) {
     await updateGcFormsSubmissionProblem(context.db, submissionId, error)
-    return 'problem'
+    return { outcome: 'problem' }
   }
+}
+
+/** Finalizes local submission state only after its remote confirmation succeeds. */
+export const finalizeGcFormsSubmissionConfirmation = async (
+  rawDb: unknown,
+  submissionId: string,
+  finalStatus: GcFormsSubmissionStatus
+): Promise<void> => {
+  await asGcFormsIntegrationDb(rawDb)
+    .updateTable('extensions.gcs_gcforms_submissions')
+    .set({ status: finalStatus, updated_at: new Date() })
+    .where('id', '=', submissionId)
+    .where('_deleted', '=', false)
+    .execute()
 }
 
 const finishGcFormsImportRun = async (
@@ -928,50 +1283,385 @@ const failGcFormsImportRun = async (
     .execute()
 }
 
-/** Synchronizes all new submissions for a stream and records aggregate import-run results. */
-export const syncStream = async (
+type PendingConfirmationDiscovery = {
+  submissionId: string
+  remotelyPending: boolean
+}
+
+type HistoricalPendingRow = {
+  id: string
+  submission_name: string
+  connection_id: string
+  agency_id: string
+  credential_id: string
+  credential_revision: number
+  secret_entry_id: string
+  secret_updated_at: Date | string
+  form_id: string
+  api_url: string
+  identity_provider_url: string
+  project_identifier: string
+}
+
+const assertCurrentSyncSession = async (
+  db: GcFormsIntegrationDb,
+  streamId: string,
+  expectedSession: GcFormsSyncSessionIdentity
+): Promise<GcsGcFormsStreamConfig> => {
+  const currentConfig = await getStreamConfig(db, streamId)
+  const currentCredentialId = assertConfiguredCredential(currentConfig)
+  const currentConnection = await findCurrentGcFormsConnection(db, streamId, currentConfig)
+  if (!currentConnection) {
+    throw createGcFormsConfigChangedError()
+  }
+  const credentialIdentity = await getGcFormsCredentialSessionIdentity(
+    db,
+    currentConnection.agency_id,
+    currentCredentialId
+  )
+  const currentSession = createSyncSessionIdentity(
+    currentConfig,
+    String(currentConnection.id),
+    credentialIdentity
+  )
+  if (
+    currentSession.configFingerprint !== expectedSession.configFingerprint
+    || currentSession.connectionId !== expectedSession.connectionId
+    || currentSession.credentialId !== expectedSession.credentialId
+    || currentSession.credentialRevision !== expectedSession.credentialRevision
+    || currentSession.secretEntryId !== expectedSession.secretEntryId
+    || currentSession.secretUpdatedAt !== expectedSession.secretUpdatedAt
+  ) {
+    throw createGcFormsConfigChangedError()
+  }
+  return currentConfig
+}
+
+const createHistoricalConnectionClient = async (
   rawDb: unknown,
+  connection: Pick<HistoricalPendingRow, 'agency_id' | 'credential_id' | 'credential_revision' | 'secret_entry_id' | 'secret_updated_at' | 'form_id' | 'api_url' | 'identity_provider_url' | 'project_identifier'>
+): Promise<GcFormsApiClient> => {
+  const { credential, identity } = await getGcFormsCredentialState(
+    rawDb,
+    connection.agency_id,
+    connection.credential_id
+  )
+  if (
+    identity.credentialRevision !== connection.credential_revision
+    || identity.secretEntryId !== String(connection.secret_entry_id)
+    || identity.secretUpdatedAt !== timestampIdentity(connection.secret_updated_at)
+  ) {
+    throw createGcsExtensionUserError({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_HISTORICAL_CREDENTIAL_CHANGED',
+      message: {
+        en: 'The credential used by this pending GC Forms submission has changed.',
+        fr: 'Le justificatif utilise par cette soumission GC Forms en attente a change.'
+      }
+    })
+  }
+  return new GcFormsApiClient({
+    apiUrl: connection.api_url,
+    identityProviderUrl: connection.identity_provider_url,
+    projectIdentifier: connection.project_identifier,
+    privateApiKey: {
+      ...credential,
+      formId: connection.form_id
+    }
+  })
+}
+
+const getHistoricalPendingConfirmations = async (
+  db: GcFormsIntegrationDb,
+  streamId: string
+): Promise<HistoricalPendingRow[]> => await db
+  .selectFrom('extensions.gcs_gcforms_submissions as submission')
+  .innerJoin(
+    'extensions.gcs_gcforms_connections as connection',
+    'connection.id',
+    'submission.connection_id'
+  )
+  .select([
+    'submission.id as id',
+    'submission.submission_name as submission_name',
+    'submission.connection_id as connection_id',
+    'connection.agency_id as agency_id',
+    'connection.credential_id as credential_id',
+    'connection.credential_revision as credential_revision',
+    'connection.secret_entry_id as secret_entry_id',
+    'connection.secret_updated_at as secret_updated_at',
+    'connection.form_id as form_id',
+    'connection.api_url as api_url',
+    'connection.identity_provider_url as identity_provider_url',
+    'connection.project_identifier as project_identifier'
+  ])
+  .where('connection.stream_id', '=', streamId)
+  .where('submission.status', '=', 'imported_pending_confirm')
+  .where('submission._deleted', '=', false)
+  .execute() as HistoricalPendingRow[]
+
+/** Finalizes pending rows locally before remote preparation when confirmation is currently disabled. */
+export const reconcileDisabledGcFormsConfirmations = async (
+  context: GcsExtensionRouteContext,
+  streamId: string
+): Promise<number> => await runAuthorizedGcFormsWrite(context, async trx => {
+  const { config } = await resolveStreamConfig(trx, streamId)
+  if (config.confirmSubmissions) {
+    return 0
+  }
+
+  const pendingRows = await trx
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin(
+      'extensions.gcs_gcforms_connections as connection',
+      'connection.id',
+      'submission.connection_id'
+    )
+    .select('submission.id')
+    .where('connection.stream_id', '=', streamId)
+    .where('submission.status', '=', 'imported_pending_confirm')
+    .where('submission._deleted', '=', false)
+    .forUpdate('submission')
+    .execute()
+  if (pendingRows.length === 0) {
+    return 0
+  }
+
+  const pendingIds = pendingRows.map(row => String(row.id))
+  await trx
+    .updateTable('extensions.gcs_gcforms_submissions')
+    .set({ status: 'imported', updated_at: new Date() })
+    .where('id', 'in', pendingIds)
+    .where('status', '=', 'imported_pending_confirm')
+    .where('_deleted', '=', false)
+    .execute()
+  return pendingIds.length
+}, streamId)
+
+/** Re-authorizes and reconciles one durable pending confirmation using its historical connection. */
+export const reconcileGcFormsSubmissionConfirmation = async (
+  context: GcsExtensionRouteContext,
+  streamId: string,
+  pending: PendingConfirmationDiscovery
+): Promise<void> => {
+  const remoteConfirmation = await runAuthorizedGcFormsWrite(context, async trx => {
+    const row = await trx
+      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .innerJoin(
+        'extensions.gcs_gcforms_connections as connection',
+        'connection.id',
+        'submission.connection_id'
+      )
+      .innerJoin(
+        'extensions.gcs_gcforms_integrations as integration',
+        'integration.id',
+        'submission.integration_id'
+      )
+      .select([
+        'submission.id as id',
+        'submission.submission_name as submission_name',
+        'submission.confirmation_code as confirmation_code',
+        'connection.agency_id as agency_id',
+        'connection.credential_id as credential_id',
+        'connection.credential_revision as credential_revision',
+        'connection.secret_entry_id as secret_entry_id',
+        'connection.secret_updated_at as secret_updated_at',
+        'connection.form_id as form_id',
+        'connection.api_url as api_url',
+        'connection.identity_provider_url as identity_provider_url',
+        'connection.project_identifier as project_identifier',
+        'integration.config as integration_config'
+      ])
+      .where('submission.id', '=', pending.submissionId)
+      .where('connection.stream_id', '=', streamId)
+      .where('submission.status', '=', 'imported_pending_confirm')
+      .where('submission._deleted', '=', false)
+      .executeTakeFirst()
+    if (!row) {
+      return null
+    }
+
+    const persistedConfig = parseGcFormsStreamConfig(row.integration_config)
+    if (!persistedConfig.confirmSubmissions || !pending.remotelyPending) {
+      await finalizeGcFormsSubmissionConfirmation(trx, pending.submissionId, 'imported')
+      return null
+    }
+    const confirmationCode = row.confirmation_code
+    if (!confirmationCode) {
+      throw new Error('Pending GC Forms confirmation is missing its confirmation code.')
+    }
+
+    return { ...row, confirmation_code: confirmationCode }
+  }, streamId)
+
+  if (!remoteConfirmation) {
+    return
+  }
+
+  const client = await createHistoricalConnectionClient(context.db, remoteConfirmation)
+  await client.confirmSubmission(remoteConfirmation.submission_name, remoteConfirmation.confirmation_code)
+
+  await runAuthorizedGcFormsWrite(context, async trx => {
+    const current = await trx
+      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .innerJoin(
+        'extensions.gcs_gcforms_connections as connection',
+        'connection.id',
+        'submission.connection_id'
+      )
+      .select('submission.id')
+      .where('submission.id', '=', pending.submissionId)
+      .where('connection.stream_id', '=', streamId)
+      .where('submission.status', '=', 'imported_pending_confirm')
+      .where('submission.confirmation_code', '=', remoteConfirmation.confirmation_code)
+      .where('submission._deleted', '=', false)
+      .forUpdate('submission')
+      .executeTakeFirst()
+    if (current) {
+      await finalizeGcFormsSubmissionConfirmation(trx, pending.submissionId, 'imported')
+    }
+  }, streamId)
+}
+
+/** Synchronizes remote data outside locks and commits only short re-authorized local batches. */
+export const syncStream = async (
+  context: GcsExtensionRouteContext,
   streamId: string
 ) => {
-  const db = asGcFormsIntegrationDb(rawDb)
-  const config = await getStreamConfig(db, streamId)
-  const connection = await ensureConnection(rawDb, streamId, config)
-  const client = await createConfiguredClient(rawDb, streamId, config)
+  await reconcileDisabledGcFormsConfirmations(context, streamId)
+  const session = await runAuthorizedGcFormsWrite(context, async trx => {
+    const config = await getStreamConfig(trx, streamId)
+    const connection = await ensureConnection(trx, streamId, config)
+    const integration = await ensureIntegration(trx, streamId, String(connection.id), config)
+    return { config, connection, integration }
+  }, streamId)
+  const db = asGcFormsIntegrationDb(context.db)
+  const { client, credentialIdentity } = await createConfiguredClientSession(db, streamId, session.config)
+  const sessionIdentity = createSyncSessionIdentity(
+    session.config,
+    String(session.connection.id),
+    credentialIdentity
+  )
   const currentTemplate = await client.getFormTemplate()
   assertGcFormsClaimTemplateShape(currentTemplate)
-  await assertGcFormsTemplateShapeUnchanged(db, streamId, String(connection.id), currentTemplate)
-  const integration = await ensureIntegration(rawDb, streamId, String(connection.id), config)
-  const run = await createGcFormsImportRun(db, String(connection.id), String(integration.id))
+  await assertGcFormsTemplateShapeUnchanged(
+    db,
+    String(session.connection.id),
+    currentTemplate,
+    sessionIdentity
+  )
+  const submissions = await client.getNewSubmissions()
+  const historicalPending = await getHistoricalPendingConfirmations(db, streamId)
+  const currentPendingNames = new Set(
+    historicalPending
+      .filter(pending => String(pending.connection_id) === String(session.connection.id))
+      .map(pending => pending.submission_name)
+  )
+  const decryptedSubmissions = new Map<string, GcFormsDecryptedSubmission>()
+  for (const submission of submissions) {
+    if (currentPendingNames.has(submission.name)) {
+      continue
+    }
+    decryptedSubmissions.set(submission.name, await client.getDecryptedSubmission(submission.name))
+  }
+
+  const remoteNamesByConnection = new Map<string, Set<string>>([
+    [String(session.connection.id), new Set(submissions.map(submission => submission.name))]
+  ])
+  for (const pending of historicalPending) {
+    const pendingConnectionId = String(pending.connection_id)
+    if (remoteNamesByConnection.has(pendingConnectionId)) {
+      continue
+    }
+    const historicalClient = await createHistoricalConnectionClient(db, pending)
+    const historicalSubmissions = await historicalClient.getNewSubmissions()
+    remoteNamesByConnection.set(
+      pendingConnectionId,
+      new Set(historicalSubmissions.map(submission => submission.name))
+    )
+  }
+
+  const run = await runAuthorizedGcFormsWrite(context, async trx => {
+    await assertCurrentSyncSession(trx, streamId, sessionIdentity)
+    return await createGcFormsImportRun(
+      trx,
+      String(session.connection.id),
+      String(session.integration.id)
+    )
+  }, streamId)
   let importedCount = 0
   let skippedCount = 0
   let problemCount = 0
-  const submissions = await client.getNewSubmissions()
-  const syncContext: SyncSubmissionContext = {
-    rawDb,
-    db,
-    client,
-    streamId,
-    connection,
-    integration,
-    config,
-    currentTemplate
+  const pendingConfirmations = new Map<string, PendingConfirmationDiscovery>()
+  for (const pending of historicalPending) {
+    pendingConfirmations.set(String(pending.id), {
+      submissionId: String(pending.id),
+      remotelyPending: remoteNamesByConnection.get(String(pending.connection_id))?.has(pending.submission_name) === true
+    })
   }
 
   try {
     for (const submission of submissions) {
-      const result = await importGcFormsSubmission(syncContext, submission)
-      if (result === 'problem') {
+      if (currentPendingNames.has(submission.name)) {
+        skippedCount += 1
+        continue
+      }
+      const decrypted = decryptedSubmissions.get(submission.name)
+      if (!decrypted) {
+        throw new Error('Prepared GC Forms submission data was not found.')
+      }
+      const result = await runAuthorizedGcFormsWrite(context, async trx => {
+        const config = await assertCurrentSyncSession(
+          trx,
+          streamId,
+          sessionIdentity
+        )
+        return await importGcFormsSubmission({
+          db: trx,
+          streamId,
+          connection: session.connection,
+          integration: session.integration,
+          config,
+          currentTemplate,
+          authorizeAgreementUpdate: async agreementId => {
+            const lockAndAuthorizeAgreement = context.writeAuthorization?.lockAndAuthorizeAgreement
+            if (!lockAndAuthorizeAgreement) {
+              throw new Error('GC Forms claim imports require host-provided agreement write authorization.')
+            }
+            const available = await lockAndAuthorizeAgreement(trx, {
+              agreementId,
+              streamId,
+              action: 'update'
+            })
+            if (!available) {
+              throw createGcFormsAgreementUnavailableError()
+            }
+          }
+        }, submission, decrypted)
+      }, streamId)
+      if (result.pendingConfirmationId) {
+        pendingConfirmations.set(result.pendingConfirmationId, {
+          submissionId: result.pendingConfirmationId,
+          remotelyPending: true
+        })
+      }
+      if (result.outcome === 'problem') {
         problemCount += 1
-      } else if (result === 'skipped') {
+      } else if (result.outcome === 'skipped') {
         skippedCount += 1
       } else {
         importedCount += 1
       }
     }
 
-    await finishGcFormsImportRun(db, String(run.id), submissions, importedCount, problemCount)
+    await runAuthorizedGcFormsWrite(context, async trx => {
+      await assertCurrentSyncSession(trx, streamId, sessionIdentity)
+      await finishGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount)
+    }, streamId)
   } catch (error: unknown) {
-    await failGcFormsImportRun(db, String(run.id), submissions, importedCount, problemCount, error)
+    await runAuthorizedGcFormsWrite(context, async trx => {
+      await failGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount, error)
+    }, streamId)
     throw error
   }
 
@@ -980,6 +1670,7 @@ export const syncStream = async (
     discovered: submissions.length,
     imported: importedCount,
     skipped: skippedCount,
-    problems: problemCount
+    problems: problemCount,
+    pendingConfirmations: [...pendingConfirmations.values()]
   }
 }

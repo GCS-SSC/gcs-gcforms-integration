@@ -3,9 +3,9 @@ import { authorizeGcFormsStream } from '../runtime.ts'
 import { listClaimMaterializationFailures } from '../materialization-failures.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
-  const { params, db } = context
+  const { params } = context
   const streamId = params.streamId ?? ''
   await authorizeGcFormsStream(context, streamId, 'read')
 
-  return await listClaimMaterializationFailures(db, streamId)
+  return await listClaimMaterializationFailures(context, streamId)
 })

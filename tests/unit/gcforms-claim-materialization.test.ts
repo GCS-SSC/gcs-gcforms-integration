@@ -3,7 +3,7 @@ import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import type { GcsGcFormsFieldMapping, GcsGcFormsMappedValue } from '../../shared/gcforms'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
-import { materializeGcFormsClaimSubmission } from '../../server/materialize-claims'
+import { authorizeGcFormsAgreementUpdates, materializeGcFormsClaimSubmission } from '../../server/materialize-claims'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 
@@ -536,14 +536,16 @@ const materialize = async (
   mappings: GcsGcFormsFieldMapping[],
   mappedValues: GcsGcFormsMappedValue[],
   submissionId = '901',
-  submissionUuid = '05-09-09f4'
+  submissionUuid = '05-09-09f4',
+  authorizeAgreementUpdate: (agreementId: string) => Promise<void> = async () => undefined
 ) => await materializeGcFormsClaimSubmission(db, {
   streamId: '31',
   integrationId: '601',
   submissionId,
   submissionUuid,
   mappings,
-  mappedValues
+  mappedValues,
+  authorizeAgreementUpdate
 })
 
 beforeEach(async () => {
@@ -558,6 +560,16 @@ afterEach(async () => {
 })
 
 describe('GC Forms claim materialization', () => {
+  it('authorizes distinct agreement targets in deterministic order', async () => {
+    const authorizationOrder: string[] = []
+
+    await authorizeGcFormsAgreementUpdates(['20', '10', '20', '3'], async agreementId => {
+      authorizationOrder.push(agreementId)
+    })
+
+    expect(authorizationOrder).toEqual(['3', '10', '20'])
+  })
+
   it('fails materialization when configured mappings target unsupported destinations', async () => {
     const result = await materialize([
       {
@@ -653,6 +665,22 @@ describe('GC Forms claim materialization', () => {
       owner_id: 1,
       destination_entity: 'claim'
     }))
+  })
+
+  it('leaves agreement-owned tables unchanged when agreement authorization is denied', async () => {
+    await seedMappings(claimMappings)
+    const authorizationDenied = new Error('agreement update denied')
+
+    await expect(materialize(
+      claimMappings,
+      claimValues,
+      '901',
+      '05-09-09f4',
+      async () => { throw authorizationDenied }
+    )).rejects.toBe(authorizationDenied)
+
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+    await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toEqual([])
   })
 
   it('defaults final for year to false when no source field is mapped', async () => {

@@ -20,6 +20,7 @@ export interface GcFormsClientOptions {
   projectIdentifier?: string
   privateApiKey: GcFormsPrivateApiKey
   fetchImpl?: typeof fetch
+  requestTimeoutMs?: number
 }
 
 export interface GcFormsProblemReport {
@@ -32,6 +33,14 @@ const base64Url = (value: string | Buffer): string =>
   Buffer.from(value).toString('base64url')
 
 const GCM_AUTH_TAG_LENGTH = 16
+const DEFAULT_GCFORMS_REQUEST_TIMEOUT_MS = 15_000
+
+const resolveRequestTimeoutMs = (value: number | undefined): number => {
+  if (value === undefined) {
+    return DEFAULT_GCFORMS_REQUEST_TIMEOUT_MS
+  }
+  return value
+}
 
 /** Signs the short-lived JWT assertion used to authenticate with the GC Forms identity provider. */
 export const signGcFormsJwt = async (
@@ -59,11 +68,12 @@ export const signGcFormsJwt = async (
 
 /** Exchanges a signed GC Forms JWT assertion for an OAuth access token. */
 export const generateGcFormsAccessToken = async (
-  options: Pick<GcFormsClientOptions, 'identityProviderUrl' | 'projectIdentifier' | 'privateApiKey' | 'fetchImpl'>
+  options: Pick<GcFormsClientOptions, 'identityProviderUrl' | 'projectIdentifier' | 'privateApiKey' | 'fetchImpl' | 'requestTimeoutMs'>
 ): Promise<string> => {
   const identityProviderUrl = options.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL
   const projectIdentifier = options.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER
   const fetchImpl = options.fetchImpl ?? fetch
+  const requestTimeoutMs = resolveRequestTimeoutMs(options.requestTimeoutMs)
   const assertion = await signGcFormsJwt(identityProviderUrl, options.privateApiKey)
   const body = new URLSearchParams({
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
@@ -76,7 +86,8 @@ export const generateGcFormsAccessToken = async (
     headers: {
       'content-type': 'application/x-www-form-urlencoded'
     },
-    body
+    body,
+    signal: AbortSignal.timeout(requestTimeoutMs)
   })
 
   if (!response.ok) {
@@ -129,6 +140,7 @@ export class GcFormsApiClient {
   private readonly fetchImpl: typeof fetch
   private readonly identityProviderUrl: string
   private readonly projectIdentifier: string
+  private readonly requestTimeoutMs: number
   private accessToken: string | null = null
 
   constructor(options: GcFormsClientOptions) {
@@ -137,6 +149,7 @@ export class GcFormsApiClient {
     this.projectIdentifier = options.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER
     this.privateApiKey = options.privateApiKey
     this.fetchImpl = options.fetchImpl ?? fetch
+    this.requestTimeoutMs = resolveRequestTimeoutMs(options.requestTimeoutMs)
   }
 
   private async token(): Promise<string> {
@@ -145,7 +158,8 @@ export class GcFormsApiClient {
         identityProviderUrl: this.identityProviderUrl,
         projectIdentifier: this.projectIdentifier,
         privateApiKey: this.privateApiKey,
-        fetchImpl: this.fetchImpl
+        fetchImpl: this.fetchImpl,
+        requestTimeoutMs: this.requestTimeoutMs
       })
     }
 
@@ -159,7 +173,8 @@ export class GcFormsApiClient {
       headers: {
         authorization: `Bearer ${await this.token()}`,
         ...init.headers
-      }
+      },
+      signal: AbortSignal.timeout(this.requestTimeoutMs)
     })
 
     if (response.status === 401) {
@@ -169,7 +184,8 @@ export class GcFormsApiClient {
         headers: {
           authorization: `Bearer ${await this.token()}`,
           ...init.headers
-        }
+        },
+        signal: AbortSignal.timeout(this.requestTimeoutMs)
       })
       if (!retry.ok) {
         throw new Error(`GC Forms request failed with status ${retry.status}`)

@@ -7,6 +7,11 @@ import extensionDefinition from '../../extension.config'
 const testDirectory = dirname(fileURLToPath(import.meta.url))
 
 describe('GC Forms extension manifest and entity tab contract', () => {
+  it('registers the public extension lifecycle guard plugin', () => {
+    expect(extensionDefinition.requiredHostCapabilities).toContain('extension-lifecycle-hooks')
+    expect(extensionDefinition.nitroPlugin).toBe('./server/plugins/lifecycle-guards.ts')
+  })
+
   it('does not register a source-data tab on agreements', () => {
     expect(extensionDefinition.client?.tabs.some(tab => tab.target === 'agreement')).toBe(false)
   })

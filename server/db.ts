@@ -18,6 +18,10 @@ export type GcFormsSubmissionStatus =
   | 'mapping_failed'
 
 export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase {
+  'Agency_Profile': {
+    id: Generated<string>
+    _deleted: Generated<boolean>
+  }
   'Transfer_Payment_Profile': {
     id: Generated<string>
     egcs_tp_agency: string
@@ -117,6 +121,9 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     agency_id: string
     stream_id: string
     credential_id: string
+    credential_revision: number
+    secret_entry_id: string
+    secret_updated_at: Date | string
     form_id: string
     api_url: string
     identity_provider_url: string
@@ -137,6 +144,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     key_id: string
     user_id: string
     form_id: string
+    revision: Generated<number>
     created_at: Generated<Date | string>
     updated_at: Date | string | null
     _deleted: Generated<boolean>
@@ -159,6 +167,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     name_en: string
     name_fr: string
     enabled: boolean
+    config_fingerprint: string
     config: JsonValue
     created_at: Generated<Date | string>
     updated_at: Date | string | null
@@ -256,3 +265,16 @@ export type GcFormsIntegrationDatabaseClient =
 /** Narrows a host database instance to the tables used by the GC Forms integration. */
 export const asGcFormsIntegrationDb = (db: unknown): GcFormsIntegrationDb =>
   db as GcFormsIntegrationDb
+
+/** Reuses an owning transaction, or starts one when called with a root Kysely client. */
+export const executeGcFormsTransaction = async <T>(
+  rawDb: unknown,
+  callback: (trx: GcFormsIntegrationDb) => Promise<T>
+): Promise<T> => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  if ((db as unknown as { isTransaction?: boolean }).isTransaction === true) {
+    return await callback(db)
+  }
+
+  return await db.transaction().execute(async trx => await callback(asGcFormsIntegrationDb(trx)))
+}

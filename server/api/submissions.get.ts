@@ -1,6 +1,6 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db.ts'
-import { authorizeGcFormsStream, ensureConnection, ensureIntegration, getStreamConfig } from '../runtime.ts'
+import { authorizeGcFormsStream, findCurrentGcFormsConnection, getStreamConfig } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db: rawDb } = context
@@ -9,16 +9,16 @@ export default defineGcsExtensionRouteHandler(async (context) => {
 
   const db = asGcFormsIntegrationDb(rawDb)
   const config = await getStreamConfig(db, streamId)
-  const connection = await ensureConnection(rawDb, streamId, config)
-  await ensureIntegration(rawDb, streamId, String(connection.id), config)
-
-  const items = await db
-    .selectFrom('extensions.gcs_gcforms_submissions')
-    .selectAll()
-    .where('connection_id', '=', String(connection.id))
-    .where('_deleted', '=', false)
-    .orderBy('created_at', 'desc')
-    .execute()
+  const connection = await findCurrentGcFormsConnection(db, streamId, config)
+  const items = connection
+    ? await db
+        .selectFrom('extensions.gcs_gcforms_submissions')
+        .selectAll()
+        .where('connection_id', '=', String(connection.id))
+        .where('_deleted', '=', false)
+        .orderBy('created_at', 'desc')
+        .execute()
+    : []
 
   return {
     items,

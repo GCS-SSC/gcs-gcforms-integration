@@ -13,6 +13,7 @@ export default defineGcsExtensionMigration({
       .addColumn('key_id', 'varchar(200)', col => col.notNull())
       .addColumn('user_id', 'varchar(200)', col => col.notNull())
       .addColumn('form_id', 'varchar(80)', col => col.notNull())
+      .addColumn('revision', 'integer', col => col.defaultTo(1).notNull())
       .addColumn('created_at', 'timestamptz', col => col.defaultTo(sql`now()`).notNull())
       .addColumn('updated_at', 'timestamptz')
       .addColumn('_deleted', 'boolean', col => col.defaultTo(false).notNull())
@@ -24,6 +25,9 @@ export default defineGcsExtensionMigration({
       .addColumn('agency_id', 'bigint', col => col.notNull().references('Agency_Profile.id').onDelete('restrict'))
       .addColumn('stream_id', 'bigint', col => col.notNull().references('Transfer_Payment_Stream.id').onDelete('restrict'))
       .addColumn('credential_id', 'varchar(120)', col => col.notNull())
+      .addColumn('credential_revision', 'integer', col => col.notNull())
+      .addColumn('secret_entry_id', 'bigint', col => col.notNull().references('extensions.secret_entry.id').onDelete('restrict'))
+      .addColumn('secret_updated_at', 'timestamptz', col => col.notNull())
       .addColumn('form_id', 'varchar(80)', col => col.notNull())
       .addColumn('api_url', 'text', col => col.notNull())
       .addColumn('identity_provider_url', 'text', col => col.notNull())
@@ -39,8 +43,18 @@ export default defineGcsExtensionMigration({
       .execute()
 
     await sql`
-      CREATE UNIQUE INDEX gcs_gcforms_connection_stream_credential
-      ON extensions.gcs_gcforms_connections (stream_id, credential_id)
+      CREATE UNIQUE INDEX gcs_gcforms_connection_remote_identity
+      ON extensions.gcs_gcforms_connections (
+        stream_id,
+        credential_id,
+        credential_revision,
+        secret_entry_id,
+        secret_updated_at,
+        form_id,
+        api_url,
+        identity_provider_url,
+        project_identifier
+      )
       WHERE _deleted = false
     `.execute(db)
 
@@ -71,6 +85,7 @@ export default defineGcsExtensionMigration({
       .addColumn('name_en', 'varchar(200)', col => col.notNull())
       .addColumn('name_fr', 'varchar(200)', col => col.notNull())
       .addColumn('enabled', 'boolean', col => col.defaultTo(true).notNull())
+      .addColumn('config_fingerprint', 'varchar(64)', col => col.notNull())
       .addColumn('config', 'jsonb', col => col.notNull())
       .addColumn('created_at', 'timestamptz', col => col.defaultTo(sql`now()`).notNull())
       .addColumn('updated_at', 'timestamptz')
@@ -78,8 +93,8 @@ export default defineGcsExtensionMigration({
       .execute()
 
     await sql`
-      CREATE UNIQUE INDEX gcs_gcforms_integration_connection
-      ON extensions.gcs_gcforms_integrations (connection_id)
+      CREATE UNIQUE INDEX gcs_gcforms_integration_identity
+      ON extensions.gcs_gcforms_integrations (connection_id, config_fingerprint)
       WHERE _deleted = false
     `.execute(db)
 

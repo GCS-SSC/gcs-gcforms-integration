@@ -15,7 +15,8 @@ export default defineGcsExtension({
     'extension-ui',
     'extension-api-client',
     'host-api-client',
-    'extension-secrets'
+    'extension-secrets',
+    'extension-lifecycle-hooks'
   ],
   name: {
     en: 'GC Forms integration',
@@ -90,6 +91,7 @@ export default defineGcsExtension({
       path: './server/migrations/0002_claim_submission_uuid.ts'
     }
   ],
+  nitroPlugin: './server/plugins/lifecycle-guards.ts',
   serverHandlers: [
     {
       route: '/agencies/[agencyId]/credentials',

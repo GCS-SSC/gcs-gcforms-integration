@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { createGcsExtensionUserError } from '@gcs-ssc/extensions/server'
+import { createGcsExtensionUserError, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   type GcsDestinationEntity,
@@ -11,15 +11,10 @@ import {
 import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
 import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims.ts'
-import { ensureConnection, ensureIntegration, getStreamConfig } from './runtime.ts'
+import { reconcileGcFormsSubmissionConfirmation, runAuthorizedGcFormsWrite } from './runtime.ts'
+import { shouldConfirmGcFormsSubmission } from './submission-confirmation.ts'
 
 type ClaimMaterializationStatus = 'not_applicable' | 'created' | 'already_materialized' | 'failed'
-
-interface GcFormsAgreementOption {
-  id: string
-  agreementNumber: string
-  label: string
-}
 
 interface GcFormsMaterializationFailureItem {
   submissionId: string
@@ -110,30 +105,6 @@ const materializationStatus = (status: ClaimMaterializationStatus): 'mapped' | '
       ? 'mapped'
       : 'imported'
 
-/** Lists active agreement identifiers and numbers available for manual matching within a stream. */
-const streamAgreements = async (
-  rawDb: unknown,
-  streamId: string
-): Promise<GcFormsAgreementOption[]> => {
-  const db = asGcFormsIntegrationDb(rawDb)
-  const agreements = await db
-    .selectFrom('Funding_Case_Agreement_Profile')
-    .select(['id', 'egcs_fc_agreementnumber'])
-    .where('egcs_fc_transferpaymentstream', '=', streamId)
-    .where('_deleted', '=', false)
-    .orderBy('egcs_fc_agreementnumber', 'asc')
-    .execute()
-
-  return agreements.map(agreement => {
-    const agreementNumber = String(agreement.egcs_fc_agreementnumber)
-    return {
-      id: String(agreement.id),
-      agreementNumber,
-      label: agreementNumber
-    }
-  })
-}
-
 /** Loads active manual agreement selections keyed by submission identifier. */
 const selectedAgreementOverrides = async (
   rawDb: unknown,
@@ -157,35 +128,32 @@ const selectedAgreementOverrides = async (
   return new Map(rows.map(row => [String(row.submission_id), String(row.owner_id)]))
 }
 
-const ensureFailureContext = async (
-  db: GcFormsIntegrationDb,
-  streamId: string
-): Promise<{ config: GcsGcFormsStreamConfig; connectionId: string; integrationId: string }> => {
-  const config = await getStreamConfig(db, streamId)
-  const connection = await ensureConnection(db, streamId, config)
-  const integration = await ensureIntegration(db, streamId, String(connection.id), config)
-
-  return {
-    config,
-    connectionId: String(connection.id),
-    integrationId: String(integration.id)
-  }
-}
-
 /** Lists failed claim materializations together with mapping issues and agreement matching choices. */
 export const listClaimMaterializationFailures = async (
-  rawDb: unknown,
+  context: GcsExtensionRouteContext,
   streamId: string
 ) => {
+  const rawDb = context.db
   const db = asGcFormsIntegrationDb(rawDb)
-  const { connectionId } = await ensureFailureContext(db, streamId)
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_submissions')
-    .select(['id', 'submission_name', 'mapped_values', 'mapping_issues', 'last_error', 'created_at'])
-    .where('connection_id', '=', connectionId)
-    .where('status', '=', 'materialization_failed')
-    .where('_deleted', '=', false)
-    .orderBy('updated_at', 'desc')
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin(
+      'extensions.gcs_gcforms_connections as connection',
+      'connection.id',
+      'submission.connection_id'
+    )
+    .select([
+      'submission.id as id',
+      'submission.submission_name as submission_name',
+      'submission.mapped_values as mapped_values',
+      'submission.mapping_issues as mapping_issues',
+      'submission.last_error as last_error',
+      'submission.created_at as created_at'
+    ])
+    .where('connection.stream_id', '=', streamId)
+    .where('submission.status', '=', 'materialization_failed')
+    .where('submission._deleted', '=', false)
+    .orderBy('submission.updated_at', 'desc')
     .execute()
 
   const failedRows = rows
@@ -196,7 +164,14 @@ export const listClaimMaterializationFailures = async (
     }))
 
   const overrides = await selectedAgreementOverrides(rawDb, failedRows.map(item => String(item.row.id)))
-  const agreements = await streamAgreements(rawDb, streamId)
+  if (!context.agreementAccess) {
+    throw new Error('GC Forms agreement options require host-provided agreement visibility.')
+  }
+  const agreements = await context.agreementAccess.listVisibleOptions(rawDb, {
+    streamId,
+    action: 'read'
+  })
+  const visibleAgreementIds = new Set(agreements.map(agreement => agreement.id))
   const items: GcFormsMaterializationFailureItem[] = failedRows.map(item => {
     const submissionId = String(item.row.id)
     const createdAt = item.row.created_at instanceof Date
@@ -207,7 +182,9 @@ export const listClaimMaterializationFailures = async (
       submissionId,
       submissionName: item.row.submission_name,
       agreementNumber: mappedAgreementNumber(item.values),
-      selectedAgreementId: overrides.get(submissionId) ?? null,
+      selectedAgreementId: visibleAgreementIds.has(overrides.get(submissionId) ?? '')
+        ? overrides.get(submissionId) ?? null
+        : null,
       lastError: item.row.last_error,
       issues: item.issues,
       createdAt
@@ -221,32 +198,41 @@ export const listClaimMaterializationFailures = async (
   }
 }
 
-/** Rejects a manual match when the selected agreement is not active in the requested stream. */
-const assertAgreementInStream = async (
-  rawDb: unknown,
-  streamId: string,
-  agreementId: string
-) => {
-  const db = asGcFormsIntegrationDb(rawDb)
-  const agreement = await db
-    .selectFrom('Funding_Case_Agreement_Profile')
-    .select('id')
-    .where('id', '=', agreementId)
-    .where('egcs_fc_transferpaymentstream', '=', streamId)
-    .where('_deleted', '=', false)
-    .executeTakeFirst()
-
-  if (!agreement) {
-    throw createGcsExtensionUserError({
-      statusCode: 400,
-      code: 'GCS_GCFORMS_AGREEMENT_OVERRIDE_INVALID',
-      message: {
-        en: 'Selected agreement is not available in this transfer payment stream.',
-        fr: 'L entente selectionnee n est pas disponible dans ce volet de paiements de transfert.'
-      }
-    })
+const createSubmissionNotFoundError = () => createGcsExtensionUserError({
+  statusCode: 404,
+  code: 'GCS_GCFORMS_SUBMISSION_NOT_FOUND',
+  message: {
+    en: 'GC Forms submission was not found for this stream.',
+    fr: 'La soumission GC Forms est introuvable pour ce volet.'
   }
-}
+})
+
+const createSubmissionStatusConflictError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_SUBMISSION_NOT_MATERIALIZATION_FAILED',
+  message: {
+    en: 'This GC Forms submission is no longer awaiting materialization failure resolution.',
+    fr: 'Cette soumission GC Forms n attend plus la resolution d un echec de materialisation.'
+  }
+})
+
+const createMaterializationContextConflictError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_MATERIALIZATION_CONTEXT_MISSING',
+  message: {
+    en: 'The saved GC Forms materialization context is no longer available.',
+    fr: 'Le contexte de materialisation GC Forms enregistre n est plus disponible.'
+  }
+})
+
+const createAgreementOverrideInvalidError = () => createGcsExtensionUserError({
+  statusCode: 400,
+  code: 'GCS_GCFORMS_AGREEMENT_OVERRIDE_INVALID',
+  message: {
+    en: 'Selected agreement is not available in this transfer payment stream.',
+    fr: 'L entente selectionnee n est pas disponible dans ce volet de paiements de transfert.'
+  }
+})
 
 /** Creates or updates the manual agreement override for a failed claim submission. */
 const saveAgreementOverride = async (
@@ -291,62 +277,124 @@ const saveAgreementOverride = async (
 
 /** Applies a manual agreement match, retries claim materialization, and persists the resulting status. */
 export const resolveClaimMaterializationFailure = async (
-  rawDb: unknown,
+  context: GcsExtensionRouteContext,
   streamId: string,
   submissionId: string,
   agreementId: string
 ) => {
-  const db = asGcFormsIntegrationDb(rawDb)
-  const { config, connectionId, integrationId } = await ensureFailureContext(db, streamId)
-  await assertAgreementInStream(rawDb, streamId, agreementId)
-
-  const submission = await db
-    .selectFrom('extensions.gcs_gcforms_submissions')
-    .selectAll()
-    .where('id', '=', submissionId)
-    .where('connection_id', '=', connectionId)
-    .where('_deleted', '=', false)
+  const resolution = await runAuthorizedGcFormsWrite(context, async trx => {
+  const lockAndAuthorizeAgreement = context.writeAuthorization?.lockAndAuthorizeAgreement
+  if (!lockAndAuthorizeAgreement) {
+    throw new Error('GC Forms recovery requires host-provided agreement write authorization.')
+  }
+  const agreementAvailable = await lockAndAuthorizeAgreement(trx, {
+    agreementId,
+    streamId,
+    action: 'update'
+  })
+  if (!agreementAvailable) {
+    throw createAgreementOverrideInvalidError()
+  }
+  const submission = await trx
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin(
+      'extensions.gcs_gcforms_connections as connection',
+      'connection.id',
+      'submission.connection_id'
+    )
+    .selectAll('submission')
+    .where('submission.id', '=', submissionId)
+    .where('connection.stream_id', '=', streamId)
+    .where('submission._deleted', '=', false)
+    .forUpdate('submission')
     .executeTakeFirst()
-
   if (!submission) {
-    throw createGcsExtensionUserError({
-      statusCode: 404,
-      code: 'GCS_GCFORMS_SUBMISSION_NOT_FOUND',
-      message: {
-        en: 'GC Forms submission was not found for this stream.',
-        fr: 'La soumission GC Forms est introuvable pour ce volet.'
-      }
-    })
+    throw createSubmissionNotFoundError()
+  }
+  if (submission.status !== 'materialization_failed') {
+    throw createSubmissionStatusConflictError()
   }
 
-  await saveAgreementOverride(rawDb, submissionId, agreementId)
+  const integrationId = submission.integration_id === null
+    ? null
+    : String(submission.integration_id)
+  const integration = integrationId === null
+    ? undefined
+    : await trx
+        .selectFrom('extensions.gcs_gcforms_integrations')
+        .select(['id', 'config'])
+        .where('id', '=', integrationId)
+        .where('connection_id', '=', String(submission.connection_id))
+        .where('stream_id', '=', streamId)
+        .where('_deleted', '=', false)
+        .executeTakeFirst()
+  if (!integration) {
+    throw createMaterializationContextConflictError()
+  }
 
-  const streamConfig = parseGcFormsStreamConfig(config)
-  const result = await materializeGcFormsClaimSubmission(rawDb, {
+  await saveAgreementOverride(trx, submissionId, agreementId)
+
+  const streamConfig: GcsGcFormsStreamConfig = parseGcFormsStreamConfig(integration.config)
+  const result = await materializeGcFormsClaimSubmission(trx, {
     streamId,
-    integrationId,
+    integrationId: String(integration.id),
     submissionId,
     submissionUuid: submission.submission_name,
     mappings: streamConfig.mappings,
-    mappedValues: mappedValues(submission.mapped_values)
+    mappedValues: mappedValues(submission.mapped_values),
+    authorizeAgreementUpdate: async resolvedAgreementId => {
+      if (resolvedAgreementId !== agreementId) {
+        throw createAgreementOverrideInvalidError()
+      }
+    }
   })
-  const status = materializationStatus(result.status)
+  const shouldConfirm = shouldConfirmGcFormsSubmission(
+    streamConfig.confirmSubmissions,
+    result.status,
+    result.issues
+  )
+  const status = shouldConfirm
+    ? 'imported_pending_confirm' as const
+    : materializationStatus(result.status)
 
-  await db
+  const updated = await trx
     .updateTable('extensions.gcs_gcforms_submissions')
     .set({
-      integration_id: integrationId,
+      integration_id: String(integration.id),
       status,
       mapping_issues: gcFormsJsonbValue(result.issues),
       last_error: result.issues[0]?.message ?? null,
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
-    .execute()
+    .where('status', '=', 'materialization_failed')
+    .where('_deleted', '=', false)
+    .returning('id')
+    .executeTakeFirst()
+  if (!updated) {
+    throw createSubmissionStatusConflictError()
+  }
 
   return {
-    ok: result.status !== 'failed',
-    status,
-    materialization: result
+    shouldConfirm,
+    response: {
+      ok: result.status !== 'failed',
+      status,
+      materialization: result
+    }
+  }
+  }, streamId)
+
+  if (!resolution.shouldConfirm) {
+    return resolution.response
+  }
+
+  await reconcileGcFormsSubmissionConfirmation(context, streamId, {
+    submissionId,
+    remotelyPending: true
+  })
+  return {
+    ...resolution.response,
+    status: 'imported' as const
   }
 }
