@@ -122,8 +122,7 @@ const createSchema = async () => {
 const auth = (canAccess = true): GcsExtensionAuthContext => ({
   userId: 'user-1',
   userAbilities: {
-    authorize: () => canAccess,
-    authorizeWithTeam: () => canAccess
+    authorize: () => canAccess
   }
 })
 

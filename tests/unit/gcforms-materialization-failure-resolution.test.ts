@@ -243,8 +243,7 @@ const createCredentialContext = (body: unknown) => ({
   auth: {
     userId: 'user-1',
     userAbilities: {
-      authorize: () => true,
-      authorizeWithTeam: () => true
+      authorize: () => true
     }
   },
   readBody: async () => body
