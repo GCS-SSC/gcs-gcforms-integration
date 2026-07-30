@@ -42,8 +42,7 @@ const createRouteSyncEvent = () => {
   const auth = {
     userId: 'user-1',
     userAbilities: {
-      authorize: () => true,
-      authorizeWithTeam: async () => true
+      authorize: () => true
     }
   }
   const syncContext = createSyncContext()
@@ -68,8 +67,7 @@ const createCredentialContext = (credentialId: string, body: unknown = {}) => ({
   auth: {
     userId: 'user-1',
     userAbilities: {
-      authorize: () => true,
-      authorizeWithTeam: () => true
+      authorize: () => true
     }
   },
   readBody: async () => body

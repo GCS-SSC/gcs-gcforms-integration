@@ -364,7 +364,7 @@ const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
   })
 }
 
-/** Authorizes direct or inherited team access to a stream's GC Forms integration. */
+/** Authorizes role access to a stream's GC Forms integration. */
 export const authorizeGcFormsStream = async (
   context: GcsExtensionRouteContext,
   streamId: string,
@@ -395,17 +395,9 @@ export const authorizeGcFormsStream = async (
     })
   }
 
-  const canAccessWithTeam = await authContext.userAbilities.authorizeWithTeam(
-    'transfer_payment',
-    action,
-    streamContext.scope,
-    authContext.userId,
-    true,
-    context.db
-  )
   const canAccessScope = authContext.userAbilities.authorize('transfer_payment', action, streamContext.scope)
 
-  if (!canAccessWithTeam && !canAccessScope) {
+  if (!canAccessScope) {
     throw createGcsExtensionUserError({
       statusCode: 403,
       code: 'GCS_GCFORMS_FORBIDDEN',
