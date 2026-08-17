@@ -13,7 +13,16 @@ export default defineGcsExtensionRouteHandler(async (context) => {
   const items = connection
     ? await db
         .selectFrom('extensions.gcs_gcforms_submissions')
-        .selectAll()
+        .select([
+          'id',
+          'form_id',
+          'submission_name',
+          'gcforms_created_at',
+          'status',
+          'mapping_issues',
+          'created_at',
+          'updated_at'
+        ])
         .where('connection_id', '=', String(connection.id))
         .where('_deleted', '=', false)
         .orderBy('created_at', 'desc')

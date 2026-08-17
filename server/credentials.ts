@@ -1,5 +1,6 @@
 import { createPrivateKey } from 'node:crypto'
 import { sql } from 'kysely'
+import type { ZodType } from 'zod'
 import {
   createGcsExtensionUserError,
   deleteEncryptedExtensionSecret,
@@ -36,6 +37,28 @@ type CredentialRow = {
 }
 
 const getAgencyId = (context: GcsExtensionRouteContext): string => context.params.agencyId ?? ''
+
+const parseCredentialRequest = <Output>(schema: ZodType<Output>, value: unknown): Output => {
+  const parsed = schema.safeParse(value)
+  if (parsed.success) return parsed.data
+
+  throw createGcsExtensionUserError({
+    statusCode: 400,
+    code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
+    message: {
+      en: 'The credential details are invalid.',
+      fr: 'Les renseignements du justificatif sont invalides.'
+    },
+    details: parsed.error.issues.map(issue => ({
+      path: issue.path.map(segment => String(segment)).join('.'),
+      code: issue.code,
+      message: {
+        en: 'Review this credential field.',
+        fr: 'Verifiez ce champ du justificatif.'
+      }
+    }))
+  })
+}
 
 /** Verifies that the current user may read or update credentials for the requested agency. */
 const authorizeGcFormsAgencyCredentials = (
@@ -173,7 +196,7 @@ export const createGcFormsCredential = async (context: GcsExtensionRouteContext)
   const agencyId = getAgencyId(context)
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
-  const body = GcFormsCredentialCreateSchema.parse(await context.readBody())
+  const body = parseCredentialRequest(GcFormsCredentialCreateSchema, await context.readBody())
   assertValidPrivateKey(body.key)
 
   const item = await runAuthorizedGcFormsWrite(context, async trx => {
@@ -252,7 +275,7 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
   const credentialId = context.params.credentialId ?? ''
   authorizeGcFormsAgencyCredentials(context, agencyId, 'update')
 
-  const body = GcFormsCredentialPatchSchema.parse(await context.readBody())
+  const body = parseCredentialRequest(GcFormsCredentialPatchSchema, await context.readBody())
   if (body.key !== undefined) {
     assertValidPrivateKey(body.key)
   }

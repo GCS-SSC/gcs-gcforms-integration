@@ -135,6 +135,29 @@ describe('GC Forms API client', () => {
     ])
   })
 
+  it('rejects unsafe API and identity-provider endpoints before sending credentials', async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    const privateApiKey = {
+      keyId: 'key-1',
+      key: privateKeyPem(),
+      userId: 'user-1',
+      formId: 'form-1'
+    }
+
+    await expect(generateGcFormsAccessToken({
+      identityProviderUrl: 'http://169.254.169.254',
+      privateApiKey,
+      fetchImpl: fetchMock
+    })).rejects.toThrow()
+    expect(() => new GcFormsApiClient({
+      apiUrl: 'https://127.0.0.1/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      privateApiKey,
+      fetchImpl: fetchMock
+    })).toThrow()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('verifies checksums over the exact GC Forms answers string', () => {
     expect(verifyGcFormsIntegrity('{"a":"b"}', '92eff9dda44cb8003ee13990782580ff')).toBe(true)
     expect(verifyGcFormsIntegrity('{"a":"b"}', 'bad')).toBe(false)
@@ -153,5 +176,59 @@ describe('GC Forms API client', () => {
       truncated.encryptedSubmission,
       truncated.privateApiKey
     )).toThrow()
+  })
+
+  it('validates decrypted submission payloads before returning them to persistence', async () => {
+    const encrypted = createEncryptedSubmission('{"createdAt":"not-a-date"}')
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response(JSON.stringify(encrypted.encryptedSubmission), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }) as unknown as typeof fetch
+    const client = new GcFormsApiClient({
+      apiUrl: 'https://api.example.test/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      privateApiKey: encrypted.privateApiKey,
+      fetchImpl: fetchMock
+    })
+
+    await expect(client.getDecryptedSubmission('submission-1')).rejects.toThrow()
+  })
+
+  it('encodes credential and remote identifiers as single URL path segments', async () => {
+    const requestedUrls: string[] = []
+    const encrypted = createEncryptedSubmission('{}')
+    const fetchMock = vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response(JSON.stringify(encrypted.encryptedSubmission), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }) as unknown as typeof fetch
+    const client = new GcFormsApiClient({
+      apiUrl: 'https://api.example.test/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      privateApiKey: { ...encrypted.privateApiKey, formId: 'form/../admin' },
+      fetchImpl: fetchMock
+    })
+
+    await client.getEncryptedSubmission('submission/confirm/other')
+
+    expect(requestedUrls.at(-1)).toBe(
+      'https://api.example.test/v1/forms/form%2F..%2Fadmin/submission/submission%2Fconfirm%2Fother'
+    )
   })
 })

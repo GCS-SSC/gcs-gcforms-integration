@@ -5,6 +5,8 @@ import {
   DEFAULT_GCFORMS_IDP_URL,
   DEFAULT_GCFORMS_PROJECT_IDENTIFIER,
   GcFormsEncryptedSubmissionSchema,
+  GcFormsDecryptedSubmissionSchema,
+  GcFormsRemoteBaseUrlSchema,
   GcFormsFormTemplateSchema,
   GcFormsNewSubmissionSchema,
   type GcFormsDecryptedSubmission,
@@ -42,6 +44,9 @@ const resolveRequestTimeoutMs = (value: number | undefined): number => {
   return value
 }
 
+const normalizeGcFormsRemoteBaseUrl = (value: string | undefined, fallback: string): string =>
+  GcFormsRemoteBaseUrlSchema.parse(value || fallback).replace(/\/$/, '')
+
 /** Signs the short-lived JWT assertion used to authenticate with the GC Forms identity provider. */
 export const signGcFormsJwt = async (
   identityProviderUrl: string,
@@ -70,7 +75,7 @@ export const signGcFormsJwt = async (
 export const generateGcFormsAccessToken = async (
   options: Pick<GcFormsClientOptions, 'identityProviderUrl' | 'projectIdentifier' | 'privateApiKey' | 'fetchImpl' | 'requestTimeoutMs'>
 ): Promise<string> => {
-  const identityProviderUrl = options.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL
+  const identityProviderUrl = normalizeGcFormsRemoteBaseUrl(options.identityProviderUrl, DEFAULT_GCFORMS_IDP_URL)
   const projectIdentifier = options.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER
   const fetchImpl = options.fetchImpl ?? fetch
   const requestTimeoutMs = resolveRequestTimeoutMs(options.requestTimeoutMs)
@@ -87,7 +92,8 @@ export const generateGcFormsAccessToken = async (
       'content-type': 'application/x-www-form-urlencoded'
     },
     body,
-    signal: AbortSignal.timeout(requestTimeoutMs)
+    signal: AbortSignal.timeout(requestTimeoutMs),
+    redirect: 'error'
   })
 
   if (!response.ok) {
@@ -144,8 +150,8 @@ export class GcFormsApiClient {
   private accessToken: string | null = null
 
   constructor(options: GcFormsClientOptions) {
-    this.apiUrl = (options.apiUrl || DEFAULT_GCFORMS_API_URL).replace(/\/$/, '')
-    this.identityProviderUrl = options.identityProviderUrl || DEFAULT_GCFORMS_IDP_URL
+    this.apiUrl = normalizeGcFormsRemoteBaseUrl(options.apiUrl, DEFAULT_GCFORMS_API_URL)
+    this.identityProviderUrl = normalizeGcFormsRemoteBaseUrl(options.identityProviderUrl, DEFAULT_GCFORMS_IDP_URL)
     this.projectIdentifier = options.projectIdentifier || DEFAULT_GCFORMS_PROJECT_IDENTIFIER
     this.privateApiKey = options.privateApiKey
     this.fetchImpl = options.fetchImpl ?? fetch
@@ -174,7 +180,8 @@ export class GcFormsApiClient {
         authorization: `Bearer ${await this.token()}`,
         ...init.headers
       },
-      signal: AbortSignal.timeout(this.requestTimeoutMs)
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
+      redirect: 'error'
     })
 
     if (response.status === 401) {
@@ -185,7 +192,8 @@ export class GcFormsApiClient {
           authorization: `Bearer ${await this.token()}`,
           ...init.headers
         },
-        signal: AbortSignal.timeout(this.requestTimeoutMs)
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        redirect: 'error'
       })
       if (!retry.ok) {
         throw new Error(`GC Forms request failed with status ${retry.status}`)
@@ -211,7 +219,7 @@ export class GcFormsApiClient {
 
   async getFormTemplate(): Promise<GcFormsFormTemplate> {
     return await this.request(
-      `/forms/${this.privateApiKey.formId}/template`,
+      `/forms/${encodeURIComponent(this.privateApiKey.formId)}/template`,
       { method: 'GET' },
       value => GcFormsFormTemplateSchema.parse(value)
     )
@@ -219,7 +227,7 @@ export class GcFormsApiClient {
 
   async getNewSubmissions(): Promise<GcFormsNewSubmission[]> {
     return await this.request(
-      `/forms/${this.privateApiKey.formId}/submission/new`,
+      `/forms/${encodeURIComponent(this.privateApiKey.formId)}/submission/new`,
       { method: 'GET' },
       value => z.array(GcFormsNewSubmissionSchema).parse(value)
     )
@@ -227,7 +235,7 @@ export class GcFormsApiClient {
 
   async getEncryptedSubmission(submissionName: string): Promise<GcFormsEncryptedSubmission> {
     return await this.request(
-      `/forms/${this.privateApiKey.formId}/submission/${submissionName}`,
+      `/forms/${encodeURIComponent(this.privateApiKey.formId)}/submission/${encodeURIComponent(submissionName)}`,
       { method: 'GET' },
       value => GcFormsEncryptedSubmissionSchema.parse(value)
     )
@@ -235,12 +243,14 @@ export class GcFormsApiClient {
 
   async getDecryptedSubmission(submissionName: string): Promise<GcFormsDecryptedSubmission> {
     const encrypted = await this.getEncryptedSubmission(submissionName)
-    return JSON.parse(decryptGcFormsSubmission(encrypted, this.privateApiKey)) as GcFormsDecryptedSubmission
+    return GcFormsDecryptedSubmissionSchema.parse(
+      JSON.parse(decryptGcFormsSubmission(encrypted, this.privateApiKey))
+    )
   }
 
   async confirmSubmission(submissionName: string, confirmationCode: string): Promise<void> {
     await this.request(
-      `/forms/${this.privateApiKey.formId}/submission/${submissionName}/confirm/${confirmationCode}`,
+      `/forms/${encodeURIComponent(this.privateApiKey.formId)}/submission/${encodeURIComponent(submissionName)}/confirm/${encodeURIComponent(confirmationCode)}`,
       { method: 'PUT' },
       () => null
     )
@@ -248,7 +258,7 @@ export class GcFormsApiClient {
 
   async reportSubmissionProblem(submissionName: string, problem: GcFormsProblemReport): Promise<void> {
     await this.request(
-      `/forms/${this.privateApiKey.formId}/submission/${submissionName}/problem`,
+      `/forms/${encodeURIComponent(this.privateApiKey.formId)}/submission/${encodeURIComponent(submissionName)}/problem`,
       {
         method: 'POST',
         headers: {

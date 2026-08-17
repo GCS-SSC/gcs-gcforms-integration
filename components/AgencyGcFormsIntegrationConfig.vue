@@ -34,9 +34,9 @@ const { locale } = useExtensionI18n()
 const labels = {
   en: {
     connection: 'GC Forms instance',
-    description: 'Set the GC Forms API base URL for this agency. Use the hosted GC Forms URL or a locally hosted instance.',
+    description: 'Set the trusted public HTTPS GC Forms API base URL for this agency.',
     apiUrl: 'API base URL',
-    apiUrlHelp: 'Example: http://localhost:3000/v1',
+    apiUrlHelp: 'HTTPS URL for the trusted public GC Forms API. Local and private-network endpoints are not allowed.',
     identityProviderUrl: 'Identity provider URL',
     identityProviderUrlHelp: 'Token issuer URL for the configured GC Forms instance.',
     confirmSubmissions: 'Confirm submissions after successful sync',
@@ -64,9 +64,9 @@ const labels = {
   },
   fr: {
     connection: 'Instance GC Forms',
-    description: 'Definissez l URL de base de l API GC Forms pour cette organisation. Utilisez l URL hebergee de GC Forms ou une instance locale.',
+    description: 'Definissez l URL HTTPS publique de confiance de l API GC Forms pour cette organisation.',
     apiUrl: 'URL de base de l API',
-    apiUrlHelp: 'Exemple : http://localhost:3000/v1',
+    apiUrlHelp: 'URL HTTPS de l API publique GC Forms de confiance. Les points de terminaison locaux et de reseau prive ne sont pas autorises.',
     identityProviderUrl: 'URL du fournisseur d identite',
     identityProviderUrlHelp: 'URL de l emetteur de jetons pour l instance GC Forms configuree.',
     confirmSubmissions: 'Confirmer les soumissions apres une synchronisation reussie',

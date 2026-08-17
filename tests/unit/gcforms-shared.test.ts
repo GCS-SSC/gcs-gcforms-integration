@@ -394,11 +394,23 @@ describe('GC Forms shared mapping utilities', () => {
 
   it('parses agency-level GC Forms base URL configuration', () => {
     expect(parseGcFormsAgencyConfig({
-      apiUrl: 'http://localhost:3000/v1'
+      apiUrl: 'https://gcforms.example.test/v1'
     })).toEqual({
-      apiUrl: 'http://localhost:3000/v1',
+      apiUrl: 'https://gcforms.example.test/v1',
       confirmSubmissions: false
     })
+  })
+
+  it.each([
+    'http://gcforms.example.test/v1',
+    'https://localhost:3000/v1',
+    'https://127.0.0.1/v1',
+    'https://169.254.169.254/latest',
+    'https://10.0.0.4/v1',
+    'https://user:password@gcforms.example.test/v1',
+    'https://gcforms.example.test/v1?token=secret'
+  ])('rejects unsafe GC Forms remote endpoint %s', (apiUrl) => {
+    expect(() => parseGcFormsAgencyConfig({ apiUrl })).toThrow()
   })
 
   it('treats cleared config fields as absent values', () => {

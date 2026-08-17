@@ -101,7 +101,7 @@ const GcFormsAttachmentSchema = z.object({
   md5: z.string().optional()
 })
 
-const GcFormsDecryptedSubmissionSchema = z.object({
+export const GcFormsDecryptedSubmissionSchema = z.object({
   createdAt: z.coerce.number(),
   status: z.string(),
   confirmationCode: z.string(),
@@ -190,6 +190,46 @@ const OptionalStringSchema = z.preprocess(
   z.string().optional()
 )
 
+const isPrivateGcFormsHostname = (hostname: string): boolean => {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (normalized === 'localhost' || normalized.endsWith('.localhost') || normalized === '::' || normalized === '::1') {
+    return true
+  }
+  if (normalized.includes(':')) {
+    return normalized.startsWith('fc') || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized) || normalized.startsWith('::ffff:')
+  }
+  const octets = normalized.split('.').map(Number)
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false
+  }
+  const [first = 0, second = 0] = octets
+  return first === 0 || first === 10 || first === 127
+    || (first === 100 && second >= 64 && second <= 127)
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+    || (first === 198 && (second === 18 || second === 19))
+    || first >= 224
+}
+
+export const GcFormsRemoteBaseUrlSchema = z.string().trim().url().superRefine((value, ctx) => {
+  const url = new URL(value)
+  if (url.protocol !== 'https:') {
+    ctx.addIssue({ code: 'custom', message: 'GC Forms endpoints must use HTTPS.' })
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    ctx.addIssue({ code: 'custom', message: 'GC Forms endpoints cannot contain credentials, a query, or a fragment.' })
+  }
+  if (isPrivateGcFormsHostname(url.hostname)) {
+    ctx.addIssue({ code: 'custom', message: 'GC Forms endpoints cannot target local or private network addresses.' })
+  }
+})
+
+const OptionalRemoteBaseUrlSchema = z.preprocess(
+  value => typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined,
+  GcFormsRemoteBaseUrlSchema.optional()
+)
+
 const GcsGcFormsFieldMappingSchema = z.object({
   id: z.string().min(1),
   sourceQuestionId: z.string().min(1),
@@ -205,8 +245,8 @@ const GcsGcFormsFieldMappingSchema = z.object({
 export type GcsGcFormsFieldMapping = z.infer<typeof GcsGcFormsFieldMappingSchema>
 
 const GcsGcFormsAgencyConfigSchema = z.object({
-  apiUrl: OptionalStringSchema,
-  identityProviderUrl: OptionalStringSchema,
+  apiUrl: OptionalRemoteBaseUrlSchema,
+  identityProviderUrl: OptionalRemoteBaseUrlSchema,
   confirmSubmissions: z.boolean().default(false)
 })
 
@@ -214,8 +254,8 @@ export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema
 
 const GcsGcFormsStreamConfigSchema = z.object({
   credentialId: OptionalStringSchema,
-  apiUrl: OptionalStringSchema,
-  identityProviderUrl: OptionalStringSchema,
+  apiUrl: OptionalRemoteBaseUrlSchema,
+  identityProviderUrl: OptionalRemoteBaseUrlSchema,
   projectIdentifier: OptionalStringSchema,
   contactEmail: OptionalStringSchema,
   preferredLanguage: z.enum(['en', 'fr']).default('en'),

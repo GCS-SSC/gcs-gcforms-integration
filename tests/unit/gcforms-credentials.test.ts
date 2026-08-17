@@ -298,6 +298,35 @@ describe('GC Forms encrypted credentials', () => {
     })
   })
 
+  it('returns a stable bilingual user error for invalid credential payloads', async () => {
+    await expect(createGcFormsCredential(contextFor('10', true, undefined, {}))).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
+      localizedMessage: {
+        en: 'The credential details are invalid.',
+        fr: 'Les renseignements du justificatif sont invalides.'
+      },
+      details: expect.arrayContaining([
+        expect.objectContaining({
+          path: 'name_en',
+          message: {
+            en: 'Review this credential field.',
+            fr: 'Verifiez ce champ du justificatif.'
+          }
+        })
+      ])
+    })
+
+    await expect(patchGcFormsCredential(contextFor('10', true, '1', {}))).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
+      localizedMessage: {
+        en: 'The credential details are invalid.',
+        fr: 'Les renseignements du justificatif sont invalides.'
+      }
+    })
+  })
+
   it('patches metadata without requiring a new key', async () => {
     const credential = await seedCredential()
 

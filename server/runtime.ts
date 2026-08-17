@@ -1094,14 +1094,13 @@ const replaceGcFormsSubmissionAttachments = async (
 
 const updateGcFormsSubmissionProblem = async (
   db: GcFormsIntegrationDb,
-  submissionId: string,
-  error: unknown
+  submissionId: string
 ) => {
   await db
     .updateTable('extensions.gcs_gcforms_submissions')
     .set({
       status: 'problem',
-      last_error: error instanceof Error ? error.message : String(error),
+      last_error: 'GC Forms submission processing failed.',
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
@@ -1212,8 +1211,8 @@ const importGcFormsSubmission = async (
     }
 
     return { outcome: importResult }
-  } catch (error: unknown) {
-    await updateGcFormsSubmissionProblem(context.db, submissionId, error)
+  } catch {
+    await updateGcFormsSubmissionProblem(context.db, submissionId)
     return { outcome: 'problem' }
   }
 }
@@ -1258,8 +1257,7 @@ const failGcFormsImportRun = async (
   runId: string,
   submissions: GcFormsNewSubmission[],
   importedCount: number,
-  problemCount: number,
-  error: unknown
+  problemCount: number
 ) => {
   await db
     .updateTable('extensions.gcs_gcforms_import_runs')
@@ -1269,7 +1267,7 @@ const failGcFormsImportRun = async (
       discovered_count: submissions.length,
       imported_count: importedCount,
       problem_count: problemCount,
-      error_message: error instanceof Error ? error.message : String(error)
+      error_message: 'GC Forms synchronization failed.'
     })
     .where('id', '=', runId)
     .execute()
@@ -1652,7 +1650,7 @@ export const syncStream = async (
     }, streamId)
   } catch (error: unknown) {
     await runAuthorizedGcFormsWrite(context, async trx => {
-      await failGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount, error)
+      await failGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount)
     }, streamId)
     throw error
   }

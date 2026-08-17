@@ -68,4 +68,29 @@ describe('GC Forms extension manifest and entity tab contract', () => {
     expect(source).toContain('getJson(`/streams/${streamId}/claim-template`)')
     expect(source).toContain('gcs-claim-form-stream-${streamId}.json')
   })
+
+  it('keeps raw decrypted answers and confirmation credentials out of stream list responses', async () => {
+    const source = await readFile(
+      resolve(testDirectory, '../../server/api/submissions.get.ts'),
+      'utf8'
+    )
+
+    expect(source).not.toContain('.selectAll()')
+    expect(source).not.toMatch(
+      /['"]answers['"]|['"]answers_checksum['"]|['"]confirmation_code['"]|['"]mapped_values['"]|['"]last_error['"]/
+    )
+    expect(source).toContain("'submission_name'")
+    expect(source).toContain("'status'")
+  })
+
+  it('persists stable diagnostic categories instead of raw exception messages', async () => {
+    const source = await readFile(
+      resolve(testDirectory, '../../server/runtime.ts'),
+      'utf8'
+    )
+
+    expect(source).toContain("last_error: 'GC Forms submission processing failed.'")
+    expect(source).toContain("error_message: 'GC Forms synchronization failed.'")
+    expect(source).not.toMatch(/last_error:\s*error instanceof Error|error_message:\s*error instanceof Error/)
+  })
 })
