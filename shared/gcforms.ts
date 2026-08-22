@@ -190,10 +190,11 @@ const OptionalStringSchema = z.preprocess(
   z.string().optional()
 )
 
-const MAX_POSTGRES_BIGINT = 9_223_372_036_854_775_807n
+const MAX_POSTGRES_BIGINT = '9223372036854775807'
 const OptionalBigintIdSchema = z.preprocess(
   value => typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined,
-  z.string().regex(/^[1-9]\d*$/).refine(value => BigInt(value) <= MAX_POSTGRES_BIGINT).optional()
+  z.string().regex(/^[1-9]\d*$/).refine(value => value.length < MAX_POSTGRES_BIGINT.length
+    || (value.length === MAX_POSTGRES_BIGINT.length && value <= MAX_POSTGRES_BIGINT)).optional()
 )
 
 const isPrivateGcFormsHostname = (hostname: string): boolean => {
