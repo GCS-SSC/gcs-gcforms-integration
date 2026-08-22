@@ -105,7 +105,7 @@ const findRecoverableHistoricalStatusReference = async (
       ? query.where(sql<boolean>`integration.config ->> 'submissionStatusId' = ${statusId}`)
       : query.where(sql<boolean>`integration.config ->> 'submissionStatusId' IS DISTINCT FROM ${statusId}`)
   }
-  return await query.forUpdate('submission').executeTakeFirst()
+  return await query.executeTakeFirst()
 }
 
 /** Validates and locks the configured live Agency status before host configuration persistence. */
