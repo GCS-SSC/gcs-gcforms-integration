@@ -110,6 +110,15 @@ beforeEach(async () => {
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_integrations (
+      id bigserial PRIMARY KEY,
+      connection_id bigint NOT NULL,
+      stream_id bigint NOT NULL,
+      config jsonb DEFAULT '{}'::jsonb NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
 
   const hooks: DisableHook[] = []
   const configurationHooks: ConfigurationHook[] = []
@@ -267,5 +276,37 @@ describe('GC Forms registered lifecycle guard', () => {
     })
     await expect(invokeStatusReferenceGuard('20', '92')).resolves.toBeUndefined()
     await expect(invokeStatusReferenceGuard('21', '91')).resolves.toBeUndefined()
+  })
+
+  it('preserves statuses pinned by recoverable historical submissions', async () => {
+    await db.insertInto('Common_Status').values([
+      { id: '91', egcs_cn_agency: '20' },
+      { id: '92', egcs_cn_agency: '20' }
+    ]).execute()
+    const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
+      agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
+      secret_entry_id: '1', secret_updated_at: new Date(0), form_id: 'form-1',
+      api_url: 'https://api.example.test', identity_provider_url: 'https://idp.example.test',
+      project_identifier: 'project-1', contact_email: null, preferred_language: 'en', status: 'active'
+    }).returning('id').executeTakeFirstOrThrow()
+    const integration = await db.insertInto('extensions.gcs_gcforms_integrations').values({
+      connection_id: String(connection.id), stream_id: '30', config: { submissionStatusId: '91' }
+    }).returning('id').executeTakeFirstOrThrow()
+    await db.insertInto('extensions.gcs_gcforms_submissions').values({
+      connection_id: String(connection.id), integration_id: String(integration.id), form_id: 'form-1',
+      submission_name: 'failed-1', status: 'materialization_failed'
+    }).execute()
+
+    await expect(invokeConfigurationGuard('20', '92')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED'
+    })
+    await expect(invokeStatusReferenceGuard('20', '91')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED'
+    })
+    await db.updateTable('extensions.gcs_gcforms_submissions').set({ status: 'materialized' })
+      .where('id', '=', String((await db.selectFrom('extensions.gcs_gcforms_submissions').select('id')
+        .where('submission_name', '=', 'failed-1').executeTakeFirstOrThrow()).id)).execute()
+    await expect(invokeConfigurationGuard('20', '92')).resolves.toBeUndefined()
+    await expect(invokeStatusReferenceGuard('20', '91')).resolves.toBeUndefined()
   })
 })

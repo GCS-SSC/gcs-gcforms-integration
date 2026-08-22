@@ -76,6 +76,38 @@ const createGcFormsSubmissionStatusUnavailableError = () => createGcsExtensionUs
   }
 })
 
+const createGcFormsSubmissionStatusReferencedError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
+  message: {
+    en: 'This status is still required by recoverable GC Forms imported claims.',
+    fr: 'Ce statut est toujours requis par des reclamations importees recuperables de GC Forms.'
+  }
+})
+
+const findRecoverableHistoricalStatusReference = async (
+  db: ReturnType<typeof asGcFormsIntegrationDb>,
+  agencyId: string,
+  statusId?: string,
+  match: 'equal' | 'different' = 'equal'
+) => {
+  let query = db
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')
+    .innerJoin('extensions.gcs_gcforms_integrations as integration', 'integration.id', 'submission.integration_id')
+    .select('submission.id')
+    .where('connection.agency_id', '=', agencyId)
+    .where('submission.status', '=', 'materialization_failed')
+    .where('submission._deleted', '=', false)
+    .where('integration._deleted', '=', false)
+  if (statusId !== undefined) {
+    query = match === 'equal'
+      ? query.where(sql<boolean>`integration.config ->> 'submissionStatusId' = ${statusId}`)
+      : query.where(sql<boolean>`integration.config ->> 'submissionStatusId' IS DISTINCT FROM ${statusId}`)
+  }
+  return await query.forUpdate('submission').executeTakeFirst()
+}
+
 /** Validates and locks the configured live Agency status before host configuration persistence. */
 export const guardGcFormsConfiguration = async (
   context: GcsExtensionConfigurationGuardContext
@@ -114,6 +146,10 @@ export const guardGcFormsConfiguration = async (
   if (!status) {
     throw createGcFormsSubmissionStatusUnavailableError()
   }
+  const historicalReference = await findRecoverableHistoricalStatusReference(
+    db, context.agencyId, config.submissionStatusId, 'different'
+  )
+  if (historicalReference) throw createGcFormsSubmissionStatusReferencedError()
 }
 
 /** Rejects Agency status deletion while the live GC Forms Agency configuration references it. */
@@ -130,16 +166,8 @@ export const guardGcFormsStatusReference = async (
     .where(sql<boolean>`config ->> 'submissionStatusId' = ${context.statusId}`)
     .forUpdate()
     .executeTakeFirst()
-  if (reference) {
-    throw createGcsExtensionUserError({
-      statusCode: 409,
-      code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
-      message: {
-        en: 'This status is still configured for GC Forms imported claims.',
-        fr: 'Ce statut est toujours configure pour les reclamations importees de GC Forms.'
-      }
-    })
-  }
+  const historicalReference = await findRecoverableHistoricalStatusReference(db, context.agencyId, context.statusId)
+  if (reference || historicalReference) throw createGcFormsSubmissionStatusReferencedError()
 }
 
 export default defineGcsExtensionNitroPlugin(nitroApp => {
