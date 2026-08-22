@@ -303,6 +303,7 @@ export const resolveClaimMaterializationFailure = async (
       'submission.connection_id'
     )
     .selectAll('submission')
+    .select('connection.agency_id as connection_agency_id')
     .where('submission.id', '=', submissionId)
     .where('connection.stream_id', '=', streamId)
     .where('submission._deleted', '=', false)
@@ -335,11 +336,16 @@ export const resolveClaimMaterializationFailure = async (
   await saveAgreementOverride(trx, submissionId, agreementId)
 
   const streamConfig: GcsGcFormsStreamConfig = parseGcFormsStreamConfig(integration.config)
+  if (!streamConfig.submissionStatusId) {
+    throw createMaterializationContextConflictError()
+  }
   const result = await materializeGcFormsClaimSubmission(trx, {
+    agencyId: String(submission.connection_agency_id),
     streamId,
     integrationId: String(integration.id),
     submissionId,
     submissionUuid: submission.submission_name,
+    submissionStatusId: streamConfig.submissionStatusId,
     mappings: streamConfig.mappings,
     mappedValues: mappedValues(submission.mapped_values),
     authorizeAgreementUpdate: async resolvedAgreementId => {

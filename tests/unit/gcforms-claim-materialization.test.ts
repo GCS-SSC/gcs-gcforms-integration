@@ -243,6 +243,13 @@ const withMappedTableDestinationPathPrefix = (
 const createSchema = async () => {
   await sql`CREATE SCHEMA extensions`.execute(db)
   await sql`
+    CREATE TABLE "Common_Status" (
+      id bigserial PRIMARY KEY,
+      egcs_cn_agency bigint NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
     CREATE TABLE "Funding_Case_Agreement_Profile" (
       id bigserial PRIMARY KEY,
       egcs_fc_agreementnumber varchar(15) NOT NULL,
@@ -395,6 +402,27 @@ const createSchema = async () => {
 
 const seedBaseData = async () => {
   await db
+    .insertInto('Common_Status')
+    .values({
+      id: '91',
+      egcs_cn_agency: '20'
+    })
+    .execute()
+  await db
+    .insertInto('Common_Status')
+    .values([
+      {
+        id: '92',
+        egcs_cn_agency: '21'
+      },
+      {
+        id: '93',
+        egcs_cn_agency: '20',
+        _deleted: true
+      }
+    ])
+    .execute()
+  await db
     .insertInto('Funding_Case_Agreement_Profile')
     .values([
       {
@@ -537,12 +565,16 @@ const materialize = async (
   mappedValues: GcsGcFormsMappedValue[],
   submissionId = '901',
   submissionUuid = '05-09-09f4',
-  authorizeAgreementUpdate: (agreementId: string) => Promise<void> = async () => undefined
+  authorizeAgreementUpdate: (agreementId: string) => Promise<void> = async () => undefined,
+  submissionStatusId = '91',
+  agencyId = '20'
 ) => await materializeGcFormsClaimSubmission(db, {
+  agencyId,
   streamId: '31',
   integrationId: '601',
   submissionId,
   submissionUuid,
+  submissionStatusId,
   mappings,
   mappedValues,
   authorizeAgreementUpdate
@@ -631,7 +663,7 @@ describe('GC Forms claim materialization', () => {
     })
   })
 
-  it('creates a submitted claim and destination link for claim mappings', async () => {
+  it('creates a claim with the configured Agency status and destination link for claim mappings', async () => {
     await seedMappings(claimMappings)
 
     const result = await materialize(claimMappings, claimValues)
@@ -648,7 +680,7 @@ describe('GC Forms claim materialization', () => {
     expect(claim).toEqual(expect.objectContaining({
       egcs_fc_fundingagreement: 101,
       egcs_fc_fiscalyear: 501,
-      egcs_fc_status: 'submitted',
+      egcs_fc_status: '91',
       egcs_fc_isfinalforyear: false,
       egcs_fc_periodstart: 0,
       egcs_fc_periodend: 2,
@@ -665,6 +697,26 @@ describe('GC Forms claim materialization', () => {
       owner_id: 1,
       destination_entity: 'claim'
     }))
+  })
+
+  it.each([
+    ['another Agency', '92'],
+    ['a deleted status', '93']
+  ])('rejects materialization when the configured status belongs to %s', async (_label, statusId) => {
+    await seedMappings(claimMappings)
+
+    await expect(materialize(
+      claimMappings,
+      claimValues,
+      '901',
+      '05-09-09f4',
+      async () => undefined,
+      statusId
+    )).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
   })
 
   it('leaves agreement-owned tables unchanged when agreement authorization is denied', async () => {

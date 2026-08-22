@@ -12,6 +12,7 @@ import {
   ExtensionInput,
   ExtensionRawTextarea,
   ExtensionSaveButton,
+  ExtensionStatusSelect,
   useExtensionApi,
   useExtensionI18n
 } from '@gcs-ssc/extensions/ui'
@@ -40,6 +41,8 @@ const labels = {
     identityProviderUrl: 'Identity provider URL',
     identityProviderUrlHelp: 'Token issuer URL for the configured GC Forms instance.',
     confirmSubmissions: 'Confirm submissions after successful sync',
+    submissionStatus: 'Imported claim status',
+    submissionStatusHelp: 'Required status assigned to claims materialized from GC Forms submissions.',
     defaultUrl: 'Hosted GC Forms default',
     credentials: 'Credentials',
     credentialsDescription: 'Store GC Forms private API keys for this agency. Private keys are encrypted and are never shown after saving.',
@@ -70,6 +73,8 @@ const labels = {
     identityProviderUrl: 'URL du fournisseur d identite',
     identityProviderUrlHelp: 'URL de l emetteur de jetons pour l instance GC Forms configuree.',
     confirmSubmissions: 'Confirmer les soumissions apres une synchronisation reussie',
+    submissionStatus: 'Statut des reclamations importees',
+    submissionStatusHelp: 'Statut obligatoire attribue aux reclamations materialisees a partir des soumissions GC Forms.',
     defaultUrl: 'Valeur par defaut de GC Forms heberge',
     credentials: 'Justificatifs',
     credentialsDescription: 'Enregistrez les cles API privees GC Forms pour cette organisation. Les cles privees sont chiffrees et ne sont jamais affichees apres l enregistrement.',
@@ -115,7 +120,8 @@ watch(localConfig, value => {
   config.value = {
     apiUrl: value.apiUrl || null,
     identityProviderUrl: value.identityProviderUrl || null,
-    confirmSubmissions: value.confirmSubmissions
+    confirmSubmissions: value.confirmSubmissions,
+    submissionStatusId: value.submissionStatusId ?? null
   }
 }, { deep: true })
 
@@ -217,6 +223,16 @@ onMounted(async () => {
       <ExtensionFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')">
         <ExtensionInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
       </ExtensionFormField>
+      <div class="md:col-span-2">
+        <ExtensionFormField
+          required
+          :label="tLocal('submissionStatus')"
+          :description="tLocal('submissionStatusHelp')">
+          <ExtensionStatusSelect
+            v-model="localConfig.submissionStatusId"
+            :agency-id="agencyId" />
+        </ExtensionFormField>
+      </div>
       <div class="md:col-span-2">
         <ExtensionCheckbox
           v-model="localConfig.confirmSubmissions"

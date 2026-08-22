@@ -247,7 +247,8 @@ export type GcsGcFormsFieldMapping = z.infer<typeof GcsGcFormsFieldMappingSchema
 const GcsGcFormsAgencyConfigSchema = z.object({
   apiUrl: OptionalRemoteBaseUrlSchema,
   identityProviderUrl: OptionalRemoteBaseUrlSchema,
-  confirmSubmissions: z.boolean().default(false)
+  confirmSubmissions: z.boolean().default(false),
+  submissionStatusId: OptionalStringSchema
 })
 
 export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema>
@@ -260,6 +261,7 @@ const GcsGcFormsStreamConfigSchema = z.object({
   contactEmail: OptionalStringSchema,
   preferredLanguage: z.enum(['en', 'fr']).default('en'),
   confirmSubmissions: z.boolean().default(false),
+  submissionStatusId: OptionalStringSchema,
   templateShapeChanged: z.boolean().default(false),
   mappings: z.array(GcsGcFormsFieldMappingSchema).default([])
 })

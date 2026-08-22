@@ -1,16 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
-import type { GcsExtensionDisableGuardHookPayload } from '@gcs-ssc/extensions/server'
+import type {
+  GcsExtensionConfigurationGuardHookPayload,
+  GcsExtensionDisableGuardHookPayload,
+  GcsExtensionStatusReferenceGuardHookPayload
+} from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db.ts'
 import lifecyclePlugin from '../../server/plugins/lifecycle-guards.ts'
 import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms.ts'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 type DisableHook = (payload: GcsExtensionDisableGuardHookPayload) => Promise<void> | void
+type ConfigurationHook = (payload: GcsExtensionConfigurationGuardHookPayload) => Promise<void> | void
+type StatusReferenceHook = (payload: GcsExtensionStatusReferenceGuardHookPayload) => Promise<void> | void
 
 let db: TestDb
 let disableHook: DisableHook
+let configurationHook: ConfigurationHook
+let statusReferenceHook: StatusReferenceHook
 
 const invokeGuard = async (
   scope: 'agency' | 'stream',
@@ -25,10 +33,50 @@ const invokeGuard = async (
   ...(streamId ? { streamId } : {})
 }))
 
+const invokeConfigurationGuard = async (
+  agencyId: string,
+  submissionStatusId?: string
+) => await db.transaction().execute(async trx => await configurationHook({
+  targetExtensionKey: GCFORMS_EXTENSION_KEY,
+  scope: 'agency',
+  event: {},
+  db: trx as unknown as GcsExtensionConfigurationGuardHookPayload['db'],
+  agencyId,
+  enabled: true,
+  config: submissionStatusId ? { submissionStatusId } : {}
+}))
+
+const invokeStatusReferenceGuard = async (
+  agencyId: string,
+  statusId: string
+) => await db.transaction().execute(async trx => await statusReferenceHook({
+  event: {},
+  db: trx as unknown as GcsExtensionStatusReferenceGuardHookPayload['db'],
+  agencyId,
+  statusId
+}))
+
 beforeEach(async () => {
   const pglite = await KyselyPGlite.create(`memory://gcforms-lifecycle-${Date.now()}`)
   db = new Kysely<GcFormsIntegrationHostDatabase>({ dialect: pglite.dialect })
   await sql`CREATE SCHEMA extensions`.execute(db)
+  await sql`
+    CREATE TABLE "Common_Status" (
+      id bigserial PRIMARY KEY,
+      egcs_cn_agency bigint NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
+  await sql`
+    CREATE TABLE extensions.agency_enablement (
+      id bigserial PRIMARY KEY,
+      extension_key varchar(120) NOT NULL,
+      agency_id bigint NOT NULL,
+      enabled boolean DEFAULT false NOT NULL,
+      config jsonb DEFAULT '{}'::jsonb NOT NULL,
+      _deleted boolean DEFAULT false NOT NULL
+    )
+  `.execute(db)
   await sql`
     CREATE TABLE extensions.gcs_gcforms_connections (
       id bigserial PRIMARY KEY,
@@ -64,11 +112,17 @@ beforeEach(async () => {
   `.execute(db)
 
   const hooks: DisableHook[] = []
+  const configurationHooks: ConfigurationHook[] = []
+  const statusReferenceHooks: StatusReferenceHook[] = []
   lifecyclePlugin({
     hooks: {
       hook: (name, handler) => {
         if (name === 'gcs:extension:disable-guard') {
           hooks.push(handler as DisableHook)
+        } else if (name === 'gcs:extension:configuration-guard') {
+          configurationHooks.push(handler as ConfigurationHook)
+        } else if (name === 'gcs:extension:status-reference-guard') {
+          statusReferenceHooks.push(handler as StatusReferenceHook)
         }
       }
     }
@@ -78,6 +132,13 @@ beforeEach(async () => {
     throw new Error('GC Forms lifecycle guard was not registered.')
   }
   disableHook = registeredHook
+  const registeredConfigurationHook = configurationHooks[0]
+  const registeredStatusReferenceHook = statusReferenceHooks[0]
+  if (!registeredConfigurationHook || !registeredStatusReferenceHook) {
+    throw new Error('GC Forms status guards were not registered.')
+  }
+  configurationHook = registeredConfigurationHook
+  statusReferenceHook = registeredStatusReferenceHook
 })
 
 afterEach(async () => {
@@ -166,5 +227,45 @@ describe('GC Forms registered lifecycle guard', () => {
       code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS'
     })
     await expect(invokeGuard('agency', '21')).resolves.toBeUndefined()
+  })
+
+  it('requires and Agency-scopes the configured imported claim status', async () => {
+    await db
+      .insertInto('Common_Status')
+      .values([
+        { id: '91', egcs_cn_agency: '20' },
+        { id: '92', egcs_cn_agency: '21' },
+        { id: '93', egcs_cn_agency: '20', _deleted: true }
+      ])
+      .execute()
+
+    await expect(invokeConfigurationGuard('20')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED'
+    })
+    await expect(invokeConfigurationGuard('20', '92')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
+    await expect(invokeConfigurationGuard('20', '93')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
+    await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
+  })
+
+  it('blocks deletion only for the exact live GC Forms Agency status reference', async () => {
+    await db
+      .insertInto('extensions.agency_enablement')
+      .values({
+        extension_key: GCFORMS_EXTENSION_KEY,
+        agency_id: '20',
+        enabled: true,
+        config: { submissionStatusId: '91' }
+      })
+      .execute()
+
+    await expect(invokeStatusReferenceGuard('20', '91')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED'
+    })
+    await expect(invokeStatusReferenceGuard('20', '92')).resolves.toBeUndefined()
+    await expect(invokeStatusReferenceGuard('21', '91')).resolves.toBeUndefined()
   })
 })

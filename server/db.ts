@@ -18,6 +18,11 @@ export type GcFormsSubmissionStatus =
   | 'mapping_failed'
 
 export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase {
+  'Common_Status': {
+    id: Generated<string>
+    egcs_cn_agency: string
+    _deleted: Generated<boolean>
+  }
   'Agency_Profile': {
     id: Generated<string>
     _deleted: Generated<boolean>

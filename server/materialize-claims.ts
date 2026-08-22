@@ -1,5 +1,6 @@
 import { sql, type Insertable } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
+import { createGcsExtensionUserError } from '@gcs-ssc/extensions/server'
 import type {
   GcsDestinationEntity,
   GcsGcFormsFieldMapping,
@@ -25,10 +26,12 @@ type NormalizedMappedValue = GcsGcFormsMappedValue & {
 }
 
 interface ClaimMaterializationInput {
+  agencyId: string
   streamId: string
   integrationId: string
   submissionId: string
   submissionUuid: string
+  submissionStatusId: string
   mappings: GcsGcFormsFieldMapping[]
   mappedValues: GcsGcFormsMappedValue[]
   authorizeAgreementUpdate: (agreementId: string) => Promise<void>
@@ -76,6 +79,35 @@ export interface ClaimMaterializationResult {
   claimId?: string
   lineItemIds: string[]
   issues: GcsGcFormsMappingIssue[]
+}
+
+const createSubmissionStatusUnavailableError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
+  message: {
+    en: 'The configured imported claim status is no longer available for this agency.',
+    fr: 'Le statut configure des reclamations importees n est plus disponible pour cette organisation.'
+  }
+})
+
+/** Locks and validates the exact live Agency status used by this materialization transaction. */
+const lockGcFormsSubmissionStatus = async (
+  db: ReturnType<typeof asGcFormsIntegrationDb>,
+  agencyId: string,
+  statusId: string
+): Promise<string> => {
+  const status = await db
+    .selectFrom('Common_Status')
+    .select('id')
+    .where('id', '=', sql<string>`${statusId}::bigint`)
+    .where('egcs_cn_agency', '=', sql<string>`${agencyId}::bigint`)
+    .where('_deleted', '=', false)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!status) {
+    throw createSubmissionStatusUnavailableError()
+  }
+  return String(status.id)
 }
 
 /** Authorizes each distinct agreement target in a stable lock order. */
@@ -887,6 +919,11 @@ export const materializeGcFormsClaimSubmission = async (
   const mappingIdsByKey = await fieldMappingIdsByKey(rawDb, input.integrationId)
 
   return await executeGcFormsTransaction(db, async trx => {
+    const submissionStatusId = await lockGcFormsSubmissionStatus(
+      trx,
+      input.agencyId,
+      input.submissionStatusId
+    )
     const claimValues: ClaimInsert = {
       egcs_fc_fundingagreement: claimInput.agreementId,
       egcs_fc_fiscalyear: claimInput.fiscalYearId,
@@ -895,7 +932,7 @@ export const materializeGcFormsClaimSubmission = async (
       egcs_fc_periodend: claimInput.periodEnd,
       egcs_fc_receiveddate: claimInput.receivedDate,
       egcs_fc_gcformssubmissionuuid: input.submissionUuid,
-      egcs_fc_status: 'submitted'
+      egcs_fc_status: submissionStatusId
     }
 
     const claim = await trx

@@ -101,6 +101,43 @@ afterEach(() => {
 })
 
 describe('AgencyGcFormsIntegrationConfig', () => {
+  it('stores the Agency-owned status selected for imported claims', async () => {
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.CommonStatusSelect = defineComponent({
+      inheritAttrs: false,
+      emits: ['update:modelValue'],
+      setup: (_, { attrs, emit }) => () => h('select', {
+        'data-submission-status': '',
+        'value': String(attrs.modelValue ?? ''),
+        'data-agency-id': String(attrs.agencyId ?? attrs['agency-id'] ?? ''),
+        'onChange': (event: Event) => {
+          emit('update:modelValue', (event.target as HTMLSelectElement).value)
+        }
+      }, [h('option', { value: '91' }, 'Submitted')])
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+    const updates = vi.fn()
+    const wrapper = mount(AgencyGcFormsIntegrationConfig, {
+      props: {
+        agencyId: '20',
+        extension,
+        modelValue: {},
+        'onUpdate:modelValue': updates
+      }
+    })
+    await flushPromises()
+
+    const select = wrapper.get('[data-submission-status]')
+    expect(select.attributes('data-agency-id')).toBe('20')
+    await select.setValue('91')
+    await flushPromises()
+
+    expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({
+      submissionStatusId: '91'
+    }))
+    wrapper.unmount()
+  })
+
   it('submits unchanged authentication fields during a name-only edit without resending the private key', async () => {
     installExtensionTestUiRuntime()
     let patchBody: Record<string, unknown> | null = null
