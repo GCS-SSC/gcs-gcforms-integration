@@ -67,34 +67,34 @@ const labels = {
   },
   fr: {
     connection: 'Instance GC Forms',
-    description: 'Definissez l URL HTTPS publique de confiance de l API GC Forms pour cette organisation.',
-    apiUrl: 'URL de base de l API',
-    apiUrlHelp: 'URL HTTPS de l API publique GC Forms de confiance. Les points de terminaison locaux et de reseau prive ne sont pas autorises.',
-    identityProviderUrl: 'URL du fournisseur d identite',
-    identityProviderUrlHelp: 'URL de l emetteur de jetons pour l instance GC Forms configuree.',
-    confirmSubmissions: 'Confirmer les soumissions apres une synchronisation reussie',
-    submissionStatus: 'Statut des reclamations importees',
-    submissionStatusHelp: 'Statut obligatoire attribue aux reclamations materialisees a partir des soumissions GC Forms.',
-    defaultUrl: 'Valeur par defaut de GC Forms heberge',
-    credentials: 'Justificatifs',
-    credentialsDescription: 'Enregistrez les cles API privees GC Forms pour cette organisation. Les cles privees sont chiffrees et ne sont jamais affichees apres l enregistrement.',
+    description: 'Définissez l’URL HTTPS publique de confiance de l’API GC Forms pour cette organisation.',
+    apiUrl: 'URL de base de l’API',
+    apiUrlHelp: 'URL HTTPS de l’API publique GC Forms de confiance. Les points de terminaison locaux et de réseau privé ne sont pas autorisés.',
+    identityProviderUrl: 'URL du fournisseur d’identité',
+    identityProviderUrlHelp: 'URL de l’émetteur de jetons pour l’instance GC Forms configurée.',
+    confirmSubmissions: 'Confirmer les soumissions après une synchronisation réussie',
+    submissionStatus: 'Statut des réclamations importées',
+    submissionStatusHelp: 'Statut obligatoire attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
+    defaultUrl: 'Valeur par défaut de GC Forms hébergé',
+    credentials: 'Identifiants',
+    credentialsDescription: 'Enregistrez les clés API privées GC Forms pour cette organisation. Les clés privées sont chiffrées et ne sont jamais affichées après l’enregistrement.',
     nameEn: 'Nom anglais',
-    nameFr: 'Nom francais',
+    nameFr: 'Nom français',
     name: 'Nom',
-    keyId: 'ID de la cle',
+    keyId: 'ID de la clé',
     userId: 'ID utilisateur',
     formId: 'ID du formulaire',
-    privateKey: 'Cle privee',
-    privateKeyEditHelp: 'Laissez vide pour conserver la cle privee enregistree.',
-    updatedAt: 'Mis a jour',
+    privateKey: 'Clé privée',
+    privateKeyEditHelp: 'Laissez vide pour conserver la clé privée enregistrée.',
+    updatedAt: 'Mis à jour',
     actions: 'Actions',
     edit: 'Modifier',
-    newCredential: 'Nouveau justificatif',
-    saveCredential: 'Enregistrer le justificatif',
-    saved: 'Justificatif enregistre.',
-    deleted: 'Justificatif supprime.',
-    failed: 'Action du justificatif echouee.',
-    noCredentials: 'Aucun justificatif n a encore ete enregistre.',
+    newCredential: 'Nouvel identifiant',
+    saveCredential: 'Enregistrer l’identifiant',
+    saved: 'Identifiant enregistré.',
+    deleted: 'Identifiant supprimé.',
+    failed: 'Échec de l’action sur l’identifiant.',
+    noCredentials: 'Aucun identifiant n’a encore été enregistré.',
     remove: 'Supprimer'
   }
 }
@@ -116,6 +116,14 @@ const isLoadingCredentials: Ref<boolean> = ref(false)
 const isSavingCredential: Ref<boolean> = ref(false)
 const statusMessage: Ref<string> = ref('')
 
+const hasSameAgencyConfig = (
+  left: GcsGcFormsAgencyConfig,
+  right: GcsGcFormsAgencyConfig
+): boolean => left.apiUrl === right.apiUrl
+  && left.identityProviderUrl === right.identityProviderUrl
+  && left.confirmSubmissions === right.confirmSubmissions
+  && left.submissionStatusId === right.submissionStatusId
+
 watch(localConfig, value => {
   config.value = {
     apiUrl: value.apiUrl || null,
@@ -126,7 +134,10 @@ watch(localConfig, value => {
 }, { deep: true })
 
 watch(config, value => {
-  localConfig.value = parseGcFormsAgencyConfig(value)
+  const nextConfig = parseGcFormsAgencyConfig(value)
+  if (!hasSameAgencyConfig(localConfig.value, nextConfig)) {
+    localConfig.value = nextConfig
+  }
 })
 
 const api = useExtensionApi(extension.key)
