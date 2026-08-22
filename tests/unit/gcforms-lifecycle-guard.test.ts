@@ -309,4 +309,26 @@ describe('GC Forms registered lifecycle guard', () => {
     await expect(invokeConfigurationGuard('20', '92')).resolves.toBeUndefined()
     await expect(invokeStatusReferenceGuard('20', '91')).resolves.toBeUndefined()
   })
+
+  it('repairs a missing historical status pin from the next valid Agency configuration', async () => {
+    await db.insertInto('Common_Status').values({ id: '91', egcs_cn_agency: '20' }).execute()
+    const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
+      agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
+      secret_entry_id: '1', secret_updated_at: new Date(0), form_id: 'legacy-form',
+      api_url: 'https://api.example.test', identity_provider_url: 'https://idp.example.test',
+      project_identifier: 'legacy-project', contact_email: null, preferred_language: 'en', status: 'active'
+    }).returning('id').executeTakeFirstOrThrow()
+    const integration = await db.insertInto('extensions.gcs_gcforms_integrations').values({
+      connection_id: String(connection.id), stream_id: '30', config: {}
+    }).returning('id').executeTakeFirstOrThrow()
+    await db.insertInto('extensions.gcs_gcforms_submissions').values({
+      connection_id: String(connection.id), integration_id: String(integration.id), form_id: 'legacy-form',
+      submission_name: 'legacy-failed', status: 'materialization_failed'
+    }).execute()
+
+    await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
+    const repaired = await db.selectFrom('extensions.gcs_gcforms_integrations').select('config')
+      .where('id', '=', String(integration.id)).executeTakeFirstOrThrow()
+    expect(repaired.config).toMatchObject({ submissionStatusId: '91' })
+  })
 })

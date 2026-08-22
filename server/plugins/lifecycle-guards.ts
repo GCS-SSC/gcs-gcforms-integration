@@ -146,6 +146,26 @@ export const guardGcFormsConfiguration = async (
   if (!status) {
     throw createGcFormsSubmissionStatusUnavailableError()
   }
+  const legacyIntegrations = await db
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')
+    .innerJoin('extensions.gcs_gcforms_integrations as integration', 'integration.id', 'submission.integration_id')
+    .select('integration.id')
+    .distinct()
+    .where('connection.agency_id', '=', context.agencyId)
+    .where('submission.status', '=', 'materialization_failed')
+    .where('submission._deleted', '=', false)
+    .where('integration._deleted', '=', false)
+    .where(sql<boolean>`integration.config ->> 'submissionStatusId' IS NULL`)
+    .execute()
+  if (legacyIntegrations.length > 0) {
+    await db.updateTable('extensions.gcs_gcforms_integrations')
+      .set({
+        config: sql`jsonb_set(config, '{submissionStatusId}', to_jsonb(${config.submissionStatusId}::text), true)`
+      })
+      .where('id', 'in', legacyIntegrations.map(integration => String(integration.id)))
+      .execute()
+  }
   const historicalReference = await findRecoverableHistoricalStatusReference(
     db, context.agencyId, config.submissionStatusId, 'different'
   )

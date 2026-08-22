@@ -515,4 +515,11 @@ describe('GC Forms shared mapping utilities', () => {
     expect(parseGcFormsStreamConfig({}).confirmSubmissions).toBe(false)
     expect(parseGcFormsStreamConfig({ confirmSubmissions: true }).confirmSubmissions).toBe(true)
   })
+
+  it.each(['0', '-1', 'abc', '9223372036854775808'])(
+    'rejects invalid PostgreSQL bigint status id %s',
+    submissionStatusId => {
+      expect(() => parseGcFormsStreamConfig({ submissionStatusId })).toThrow()
+    }
+  )
 })

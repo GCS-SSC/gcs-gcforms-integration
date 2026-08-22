@@ -335,7 +335,12 @@ export const resolveClaimMaterializationFailure = async (
 
   await saveAgreementOverride(trx, submissionId, agreementId)
 
-  const streamConfig: GcsGcFormsStreamConfig = parseGcFormsStreamConfig(integration.config)
+  let streamConfig: GcsGcFormsStreamConfig
+  try {
+    streamConfig = parseGcFormsStreamConfig(integration.config)
+  } catch {
+    throw createMaterializationContextConflictError()
+  }
   if (!streamConfig.submissionStatusId) {
     throw createMaterializationContextConflictError()
   }
