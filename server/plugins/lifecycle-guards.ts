@@ -1,4 +1,5 @@
 import { sql, type Transaction } from 'kysely'
+import { ZodError } from 'zod'
 import {
   createGcsExtensionUserError,
   defineGcsExtensionNitroPlugin,
@@ -76,6 +77,15 @@ const createGcFormsSubmissionStatusUnavailableError = () => createGcsExtensionUs
   }
 })
 
+const createGcFormsSubmissionStatusInvalidError = () => createGcsExtensionUserError({
+  statusCode: 400,
+  code: 'GCS_GCFORMS_SUBMISSION_STATUS_INVALID',
+  message: {
+    en: 'The selected imported claim status identifier is invalid.',
+    fr: 'L identifiant du statut selectionne pour les reclamations importees est invalide.'
+  }
+})
+
 const createGcFormsSubmissionStatusReferencedError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
@@ -130,7 +140,13 @@ export const guardGcFormsConfiguration = async (
         .where('_deleted', '=', false)
         .executeTakeFirst()
     : undefined
-  const config = parseGcFormsAgencyConfig(context.config ?? persisted?.config ?? {})
+  let config
+  try {
+    config = parseGcFormsAgencyConfig(context.config ?? persisted?.config ?? {})
+  } catch (error: unknown) {
+    if (error instanceof ZodError) throw createGcFormsSubmissionStatusInvalidError()
+    throw error
+  }
   if (!config.submissionStatusId) {
     throw createGcFormsSubmissionStatusRequiredError()
   }

@@ -260,6 +260,20 @@ describe('GC Forms registered lifecycle guard', () => {
     await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
   })
 
+  it.each(['0', '-1', 'not-an-id', '9223372036854775808'])(
+    'returns a localized configuration error for invalid status id %s',
+    async submissionStatusId => {
+      await expect(invokeConfigurationGuard('20', submissionStatusId)).rejects.toMatchObject({
+        statusCode: 400,
+        code: 'GCS_GCFORMS_SUBMISSION_STATUS_INVALID',
+        localizedMessage: {
+          en: expect.stringContaining('identifier is invalid'),
+          fr: expect.stringContaining('identifiant')
+        }
+      })
+    }
+  )
+
   it('blocks deletion only for the exact live GC Forms Agency status reference', async () => {
     await db
       .insertInto('extensions.agency_enablement')
