@@ -246,6 +246,7 @@ const createSchema = async () => {
     CREATE TABLE "Common_Status" (
       id bigserial PRIMARY KEY,
       egcs_cn_agency bigint NOT NULL,
+      egcs_cn_isdraft boolean DEFAULT false NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -405,7 +406,8 @@ const seedBaseData = async () => {
     .insertInto('Common_Status')
     .values({
       id: '91',
-      egcs_cn_agency: '20'
+      egcs_cn_agency: '20',
+      egcs_cn_isdraft: true
     })
     .execute()
   await db
@@ -715,6 +717,28 @@ describe('GC Forms claim materialization', () => {
     )).rejects.toMatchObject({
       statusCode: 409,
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+  })
+
+  it('rejects materialization when the configured live Agency status is not Draft', async () => {
+    await db.insertInto('Common_Status').values({ id: '94', egcs_cn_agency: '20' }).execute()
+    await seedMappings(claimMappings)
+
+    await expect(materialize(
+      claimMappings,
+      claimValues,
+      '901',
+      '05-09-09f4',
+      async () => undefined,
+      '94'
+    )).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
+      localizedMessage: {
+        en: expect.stringContaining('Draft'),
+        fr: expect.stringContaining('Ébauche')
+      }
     })
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
   })

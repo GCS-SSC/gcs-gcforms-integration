@@ -115,7 +115,7 @@ describe('AgencyGcFormsIntegrationConfig', () => {
     await flushPromises()
 
     expect(wrapper.find('[label="Statut des réclamations importées"]').exists()).toBe(true)
-    expect(wrapper.find('[description="Statut obligatoire attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
+    expect(wrapper.find('[description="Le statut Ébauche de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -165,6 +165,7 @@ describe('AgencyGcFormsIntegrationConfig', () => {
         'data-submission-status': '',
         'value': String(attrs.modelValue ?? ''),
         'data-agency-id': String(attrs.agencyId ?? attrs['agency-id'] ?? ''),
+        'data-draft-only': String(attrs.draftOnly ?? attrs['draft-only'] ?? false),
         'onChange': (event: Event) => {
           emit('update:modelValue', (event.target as HTMLSelectElement).value)
         }
@@ -184,6 +185,7 @@ describe('AgencyGcFormsIntegrationConfig', () => {
 
     const select = wrapper.get('[data-submission-status]')
     expect(select.attributes('data-agency-id')).toBe('20')
+    expect(select.attributes('data-draft-only')).toBe('true')
     await select.setValue('91')
     await flushPromises()
 

@@ -90,6 +90,15 @@ const createSubmissionStatusUnavailableError = () => createGcsExtensionUserError
   }
 })
 
+const createSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
+  message: {
+    en: 'Claims imported from GC Forms must use the agency Draft status.',
+    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Ébauche de l’organisation.'
+  }
+})
+
 /** Locks and validates the exact live Agency status used by this materialization transaction. */
 const lockGcFormsSubmissionStatus = async (
   db: ReturnType<typeof asGcFormsIntegrationDb>,
@@ -98,7 +107,7 @@ const lockGcFormsSubmissionStatus = async (
 ): Promise<string> => {
   const status = await db
     .selectFrom('Common_Status')
-    .select('id')
+    .select(['id', 'egcs_cn_isdraft'])
     .where('id', '=', sql<string>`${statusId}::bigint`)
     .where('egcs_cn_agency', '=', sql<string>`${agencyId}::bigint`)
     .where('_deleted', '=', false)
@@ -106,6 +115,9 @@ const lockGcFormsSubmissionStatus = async (
     .executeTakeFirst()
   if (!status) {
     throw createSubmissionStatusUnavailableError()
+  }
+  if (!status.egcs_cn_isdraft) {
+    throw createSubmissionStatusNotDraftError()
   }
   return String(status.id)
 }

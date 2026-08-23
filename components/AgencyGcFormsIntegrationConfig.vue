@@ -42,7 +42,7 @@ const labels = {
     identityProviderUrlHelp: 'Token issuer URL for the configured GC Forms instance.',
     confirmSubmissions: 'Confirm submissions after successful sync',
     submissionStatus: 'Imported claim status',
-    submissionStatusHelp: 'Required status assigned to claims materialized from GC Forms submissions.',
+    submissionStatusHelp: 'The Agency Draft status assigned to claims materialized from GC Forms submissions.',
     defaultUrl: 'Hosted GC Forms default',
     credentials: 'Credentials',
     credentialsDescription: 'Store GC Forms private API keys for this agency. Private keys are encrypted and are never shown after saving.',
@@ -74,7 +74,7 @@ const labels = {
     identityProviderUrlHelp: 'URL de l’émetteur de jetons pour l’instance GC Forms configurée.',
     confirmSubmissions: 'Confirmer les soumissions après une synchronisation réussie',
     submissionStatus: 'Statut des réclamations importées',
-    submissionStatusHelp: 'Statut obligatoire attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
+    submissionStatusHelp: 'Le statut Ébauche de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
     defaultUrl: 'Valeur par défaut de GC Forms hébergé',
     credentials: 'Identifiants',
     credentialsDescription: 'Enregistrez les clés API privées GC Forms pour cette organisation. Les clés privées sont chiffrées et ne sont jamais affichées après l’enregistrement.',
@@ -241,7 +241,8 @@ onMounted(async () => {
           :description="tLocal('submissionStatusHelp')">
           <ExtensionStatusSelect
             v-model="localConfig.submissionStatusId"
-            :agency-id="agencyId" />
+            :agency-id="agencyId"
+            :draft-only="true" />
         </ExtensionFormField>
       </div>
       <div class="md:col-span-2">

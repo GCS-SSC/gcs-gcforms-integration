@@ -64,6 +64,7 @@ beforeEach(async () => {
     CREATE TABLE "Common_Status" (
       id bigserial PRIMARY KEY,
       egcs_cn_agency bigint NOT NULL,
+      egcs_cn_isdraft boolean DEFAULT false NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -242,9 +243,10 @@ describe('GC Forms registered lifecycle guard', () => {
     await db
       .insertInto('Common_Status')
       .values([
-        { id: '91', egcs_cn_agency: '20' },
+        { id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true },
         { id: '92', egcs_cn_agency: '21' },
-        { id: '93', egcs_cn_agency: '20', _deleted: true }
+        { id: '93', egcs_cn_agency: '20', _deleted: true },
+        { id: '94', egcs_cn_agency: '20' }
       ])
       .execute()
 
@@ -256,6 +258,14 @@ describe('GC Forms registered lifecycle guard', () => {
     })
     await expect(invokeConfigurationGuard('20', '93')).rejects.toMatchObject({
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
+    await expect(invokeConfigurationGuard('20', '94')).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
+      localizedMessage: {
+        en: expect.stringContaining('Draft'),
+        fr: expect.stringContaining('Ébauche')
+      }
     })
     await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
   })
@@ -294,8 +304,8 @@ describe('GC Forms registered lifecycle guard', () => {
 
   it('preserves statuses pinned by recoverable historical submissions', async () => {
     await db.insertInto('Common_Status').values([
-      { id: '91', egcs_cn_agency: '20' },
-      { id: '92', egcs_cn_agency: '20' }
+      { id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true },
+      { id: '92', egcs_cn_agency: '20', egcs_cn_isdraft: true }
     ]).execute()
     const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
       agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
@@ -325,7 +335,9 @@ describe('GC Forms registered lifecycle guard', () => {
   })
 
   it('repairs a missing historical status pin from the next valid Agency configuration', async () => {
-    await db.insertInto('Common_Status').values({ id: '91', egcs_cn_agency: '20' }).execute()
+    await db.insertInto('Common_Status').values({
+      id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true
+    }).execute()
     const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
       agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
       secret_entry_id: '1', secret_updated_at: new Date(0), form_id: 'legacy-form',

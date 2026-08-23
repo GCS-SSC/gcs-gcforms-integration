@@ -3,6 +3,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely'
 import { Pool } from 'pg'
 import {
   lockGcsExtensionLifecycleScope,
+  type GcsExtensionConfigurationGuardHookPayload,
   type GcsExtensionDisableGuardHookPayload
 } from '@gcs-ssc/extensions/server'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db.ts'
@@ -12,6 +13,7 @@ import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms.ts'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 type DisableHook = (payload: GcsExtensionDisableGuardHookPayload) => Promise<void> | void
+type ConfigurationHook = (payload: GcsExtensionConfigurationGuardHookPayload) => Promise<void> | void
 
 const postgresTestUrl = process.env.GCFORMS_POSTGRES_TEST_URL
   ?? process.env.AGREEMENT_CONCURRENCY_POSTGRES_TEST_URL
@@ -86,6 +88,22 @@ const loadDisableGuard = (): DisableHook => {
   if (!guard) {
     throw new Error('GC Forms lifecycle guard was not registered.')
   }
+  return guard
+}
+
+const loadConfigurationGuard = (): ConfigurationHook => {
+  const hooks: ConfigurationHook[] = []
+  lifecyclePlugin({
+    hooks: {
+      hook: (name, handler) => {
+        if (name === 'gcs:extension:configuration-guard') {
+          hooks.push(handler as ConfigurationHook)
+        }
+      }
+    }
+  })
+  const guard = hooks[0]
+  if (!guard) throw new Error('GC Forms configuration guard was not registered.')
   return guard
 }
 
@@ -367,6 +385,42 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
       .select(observerDb.fn.countAll().as('count'))
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: '1' })
+  })
+
+  it('accepts only the locked live Agency Draft status during configuration', async () => {
+    await sql`DROP TABLE IF EXISTS pg_temp."Common_Status"`.execute(waiterDb)
+    await sql`
+      CREATE TEMP TABLE "Common_Status" (
+        id bigint PRIMARY KEY,
+        egcs_cn_agency bigint NOT NULL,
+        egcs_cn_isdraft boolean NOT NULL,
+        _deleted boolean NOT NULL DEFAULT false
+      ) ON COMMIT PRESERVE ROWS
+    `.execute(waiterDb)
+    await sql`
+      INSERT INTO "Common_Status" (id, egcs_cn_agency, egcs_cn_isdraft)
+      VALUES (910091, 20, true), (910092, 20, false), (910093, 21, true)
+    `.execute(waiterDb)
+    const configurationGuard = loadConfigurationGuard()
+    const invoke = async (statusId: string) => await waiterDb.transaction().execute(async trx =>
+      await configurationGuard({
+        extensionKey: GCFORMS_EXTENSION_KEY,
+        targetExtensionKey: GCFORMS_EXTENSION_KEY,
+        scope: 'agency',
+        event: {},
+        db: trx as unknown as GcsExtensionConfigurationGuardHookPayload['db'],
+        agencyId: '20',
+        enabled: true,
+        config: { submissionStatusId: statusId }
+      }))
+
+    await expect(invoke('910091')).resolves.toBeUndefined()
+    await expect(invoke('910092')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT'
+    })
+    await expect(invoke('910093')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE'
+    })
   })
 
   it('atomically resolves concurrent creation of the same integration and mapping identity', async () => {

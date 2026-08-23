@@ -4,6 +4,7 @@ import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
+  isGcsExtensionUserError,
   lockGcsExtensionLifecycleScope,
   type GcsExtensionRouteContext,
   resolveExtensionStreamContext
@@ -1112,13 +1113,14 @@ const replaceGcFormsSubmissionAttachments = async (
 
 const updateGcFormsSubmissionProblem = async (
   db: GcFormsIntegrationDb,
-  submissionId: string
+  submissionId: string,
+  diagnostic = 'GC Forms submission processing failed.'
 ) => {
   await db
     .updateTable('extensions.gcs_gcforms_submissions')
     .set({
       status: 'problem',
-      last_error: 'GC Forms submission processing failed.',
+      last_error: diagnostic,
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
@@ -1231,8 +1233,12 @@ const importGcFormsSubmission = async (
     }
 
     return { outcome: importResult }
-  } catch {
-    await updateGcFormsSubmissionProblem(context.db, submissionId)
+  } catch (error) {
+    const diagnostic = isGcsExtensionUserError(error)
+      && error.code.startsWith('GCS_GCFORMS_SUBMISSION_STATUS_')
+      ? `GC Forms submission status configuration is invalid (${error.code}).`
+      : undefined
+    await updateGcFormsSubmissionProblem(context.db, submissionId, diagnostic)
     return { outcome: 'problem' }
   }
 }
