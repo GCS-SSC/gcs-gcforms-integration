@@ -4,6 +4,7 @@ import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   createGcsExtensionUserError,
   getEncryptedExtensionSecret,
+  isGcsExtensionUserError,
   lockGcsExtensionLifecycleScope,
   type GcsExtensionRouteContext,
   resolveExtensionStreamContext
@@ -364,6 +365,22 @@ const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
   })
 }
 
+/** Returns the configured imported-claim status or rejects incomplete Agency configuration. */
+const assertConfiguredSubmissionStatus = (config: GcsGcFormsStreamConfig): string => {
+  if (config.submissionStatusId) {
+    return config.submissionStatusId
+  }
+
+  throw createGcsExtensionUserError({
+    statusCode: 400,
+    code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
+    message: {
+      en: 'Select an Agency status for claims imported from GC Forms before syncing.',
+      fr: 'Sélectionnez un statut d’organisation pour les réclamations importées de GC Forms avant la synchronisation.'
+    }
+  })
+}
+
 /** Authorizes role access to a stream's GC Forms integration. */
 export const authorizeGcFormsStream = async (
   context: GcsExtensionRouteContext,
@@ -464,6 +481,8 @@ const resolveStreamConfig = async (
   if (Object.hasOwn(agencyConfigSource, 'confirmSubmissions')) {
     config.confirmSubmissions = agencyConfig.confirmSubmissions
   }
+  config.submissionStatusId = agencyConfig.submissionStatusId
+  assertConfiguredSubmissionStatus(config)
 
   return {
     agencyId: streamContext.agencyId,
@@ -1094,13 +1113,14 @@ const replaceGcFormsSubmissionAttachments = async (
 
 const updateGcFormsSubmissionProblem = async (
   db: GcFormsIntegrationDb,
-  submissionId: string
+  submissionId: string,
+  diagnostic = 'GC Forms submission processing failed.'
 ) => {
   await db
     .updateTable('extensions.gcs_gcforms_submissions')
     .set({
       status: 'problem',
-      last_error: 'GC Forms submission processing failed.',
+      last_error: diagnostic,
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
@@ -1156,10 +1176,12 @@ const importGcFormsSubmission = async (
         }
       : preparedMaterialization.previewIssues.length === 0
       ? await materializeGcFormsClaimSubmission(context.db, {
+          agencyId: String(context.connection.agency_id),
           streamId: context.streamId,
           integrationId: String(context.integration.id),
           submissionId,
           submissionUuid: submission.name,
+          submissionStatusId: assertConfiguredSubmissionStatus(context.config),
           mappings: context.config.mappings,
           mappedValues: preparedMaterialization.values,
           authorizeAgreementUpdate: context.authorizeAgreementUpdate
@@ -1211,8 +1233,12 @@ const importGcFormsSubmission = async (
     }
 
     return { outcome: importResult }
-  } catch {
-    await updateGcFormsSubmissionProblem(context.db, submissionId)
+  } catch (error) {
+    const diagnostic = isGcsExtensionUserError(error)
+      && error.code.startsWith('GCS_GCFORMS_SUBMISSION_STATUS_')
+      ? `GC Forms submission status configuration is invalid (${error.code}).`
+      : undefined
+    await updateGcFormsSubmissionProblem(context.db, submissionId, diagnostic)
     return { outcome: 'problem' }
   }
 }

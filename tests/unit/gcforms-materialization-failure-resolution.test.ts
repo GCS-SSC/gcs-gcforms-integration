@@ -186,7 +186,7 @@ const seedSubmission = async (
       601,
       801,
       ${streamId}::bigint,
-      ${JSON.stringify({ confirmSubmissions, mappings: [] })}::jsonb
+      ${JSON.stringify({ confirmSubmissions, mappings: [], submissionStatusId: '91' })}::jsonb
     )
   `.execute(db)
   await sql`
@@ -389,12 +389,16 @@ describe('GC Forms materialization failure resolution', () => {
     const newMapping = { ...oldMapping, sourceQuestionId: 'new_agreement_number' }
     await db
       .updateTable('extensions.gcs_gcforms_integrations')
-      .set({ config: { confirmSubmissions: false, mappings: [oldMapping] } })
+      .set({ config: { confirmSubmissions: false, mappings: [oldMapping], submissionStatusId: '91' } })
       .where('id', '=', '601')
       .execute()
     await sql`
       INSERT INTO extensions.gcs_gcforms_integrations (id, connection_id, stream_id, config)
-      VALUES (602, 801, 30, ${JSON.stringify({ confirmSubmissions: false, mappings: [newMapping] })}::jsonb)
+      VALUES (602, 801, 30, ${JSON.stringify({
+        confirmSubmissions: false,
+        mappings: [newMapping],
+        submissionStatusId: '92'
+      })}::jsonb)
     `.execute(db)
     await db
       .insertInto('Funding_Case_Agreement_Profile')
@@ -420,6 +424,8 @@ describe('GC Forms materialization failure resolution', () => {
     expect(materializeMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       streamId: '30',
       integrationId: '601',
+      agencyId: '20',
+      submissionStatusId: '91',
       submissionId: '901',
       submissionUuid: 'submission-1',
       mappings: [expect.objectContaining({ sourceQuestionId: 'old_agreement_number' })]

@@ -101,6 +101,100 @@ afterEach(() => {
 })
 
 describe('AgencyGcFormsIntegrationConfig', () => {
+  it('renders the Agency-owned submission status field in French', async () => {
+    vi.stubGlobal('useI18n', () => ({
+      locale: ref('fr'),
+      t: (key: string) => key,
+      n: (value: number) => String(value)
+    }))
+    installExtensionTestUiRuntime()
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+    const wrapper = mount(AgencyGcFormsIntegrationConfig, {
+      props: { agencyId: '20', extension, modelValue: {} }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[label="Statut des réclamations importées"]').exists()).toBe(true)
+    expect(wrapper.find('[description="Le statut Brouillon de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('settles after updating a reactive parent model', async () => {
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.CommonStatusSelect = defineComponent({
+      inheritAttrs: false,
+      emits: ['update:modelValue'],
+      setup: (_, { attrs, emit }) => () => h('select', {
+        'data-submission-status': '',
+        'value': String(attrs.modelValue ?? ''),
+        'onChange': (event: Event) => {
+          emit('update:modelValue', (event.target as HTMLSelectElement).value)
+        }
+      }, [h('option', { value: '91' }, 'Submitted')])
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+    const parentModel: Ref<GcsExtensionJsonConfig> = ref({})
+    const updateModel = vi.fn((value: GcsExtensionJsonConfig) => {
+      parentModel.value = value
+    })
+    const Host = defineComponent({
+      setup: () => () => h(AgencyGcFormsIntegrationConfig, {
+        'agencyId': '20',
+        'extension': extension,
+        'modelValue': parentModel.value,
+        'onUpdate:modelValue': updateModel
+      })
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+
+    await wrapper.get('[data-submission-status]').setValue('91')
+    await flushPromises()
+
+    expect(parentModel.value).toMatchObject({ submissionStatusId: '91' })
+    expect(updateModel).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('stores the Agency-owned status selected for imported claims', async () => {
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.CommonStatusSelect = defineComponent({
+      inheritAttrs: false,
+      emits: ['update:modelValue'],
+      setup: (_, { attrs, emit }) => () => h('select', {
+        'data-submission-status': '',
+        'value': String(attrs.modelValue ?? ''),
+        'data-agency-id': String(attrs.agencyId ?? attrs['agency-id'] ?? ''),
+        'data-draft-only': String(attrs.draftOnly ?? attrs['draft-only'] ?? false),
+        'onChange': (event: Event) => {
+          emit('update:modelValue', (event.target as HTMLSelectElement).value)
+        }
+      }, [h('option', { value: '91' }, 'Submitted')])
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+    const updates = vi.fn()
+    const wrapper = mount(AgencyGcFormsIntegrationConfig, {
+      props: {
+        agencyId: '20',
+        extension,
+        modelValue: {},
+        'onUpdate:modelValue': updates
+      }
+    })
+    await flushPromises()
+
+    const select = wrapper.get('[data-submission-status]')
+    expect(select.attributes('data-agency-id')).toBe('20')
+    expect(select.attributes('data-draft-only')).toBe('true')
+    await select.setValue('91')
+    await flushPromises()
+
+    expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({
+      submissionStatusId: '91'
+    }))
+    wrapper.unmount()
+  })
+
   it('submits unchanged authentication fields during a name-only edit without resending the private key', async () => {
     installExtensionTestUiRuntime()
     let patchBody: Record<string, unknown> | null = null

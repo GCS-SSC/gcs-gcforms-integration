@@ -190,6 +190,13 @@ const OptionalStringSchema = z.preprocess(
   z.string().optional()
 )
 
+const MAX_POSTGRES_BIGINT = '9223372036854775807'
+const OptionalBigintIdSchema = z.preprocess(
+  value => typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined,
+  z.string().regex(/^[1-9]\d*$/).refine(value => value.length < MAX_POSTGRES_BIGINT.length
+    || (value.length === MAX_POSTGRES_BIGINT.length && value <= MAX_POSTGRES_BIGINT)).optional()
+)
+
 const isPrivateGcFormsHostname = (hostname: string): boolean => {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '')
   if (normalized === 'localhost' || normalized.endsWith('.localhost') || normalized === '::' || normalized === '::1') {
@@ -247,7 +254,8 @@ export type GcsGcFormsFieldMapping = z.infer<typeof GcsGcFormsFieldMappingSchema
 const GcsGcFormsAgencyConfigSchema = z.object({
   apiUrl: OptionalRemoteBaseUrlSchema,
   identityProviderUrl: OptionalRemoteBaseUrlSchema,
-  confirmSubmissions: z.boolean().default(false)
+  confirmSubmissions: z.boolean().default(false),
+  submissionStatusId: OptionalBigintIdSchema
 })
 
 export type GcsGcFormsAgencyConfig = z.infer<typeof GcsGcFormsAgencyConfigSchema>
@@ -260,6 +268,7 @@ const GcsGcFormsStreamConfigSchema = z.object({
   contactEmail: OptionalStringSchema,
   preferredLanguage: z.enum(['en', 'fr']).default('en'),
   confirmSubmissions: z.boolean().default(false),
+  submissionStatusId: OptionalBigintIdSchema,
   templateShapeChanged: z.boolean().default(false),
   mappings: z.array(GcsGcFormsFieldMappingSchema).default([])
 })

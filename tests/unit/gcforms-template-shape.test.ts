@@ -391,7 +391,8 @@ const seedConfig = async () => {
       agency_id: '20',
       enabled: true,
       config: {
-        apiUrl: 'https://api.example.test/v1'
+        apiUrl: 'https://api.example.test/v1',
+        submissionStatusId: '91'
       },
       _deleted: false
     })
@@ -617,7 +618,8 @@ describe('GC Forms template shape guard', () => {
       .updateTable('extensions.agency_enablement')
       .set({
         config: {
-          confirmSubmissions: false
+          confirmSubmissions: false,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1041,7 +1043,8 @@ describe('GC Forms template shape guard', () => {
       .set({
         config: {
           apiUrl: 'https://api.example.test/v1',
-          confirmSubmissions: true
+          confirmSubmissions: true,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1159,7 +1162,8 @@ describe('GC Forms template shape guard', () => {
         config: {
           apiUrl: 'https://old-api.example.test/v1',
           identityProviderUrl: 'https://old-idp.example.test',
-          confirmSubmissions: true
+          confirmSubmissions: true,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1237,7 +1241,8 @@ describe('GC Forms template shape guard', () => {
         config: {
           apiUrl: 'https://new-api.example.test/v2',
           identityProviderUrl: 'https://new-idp.example.test',
-          confirmSubmissions: true
+          confirmSubmissions: true,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1359,7 +1364,8 @@ describe('GC Forms template shape guard', () => {
       .set({
         config: {
           apiUrl: 'https://unavailable.invalid',
-          confirmSubmissions: false
+          confirmSubmissions: false,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1404,7 +1410,8 @@ describe('GC Forms template shape guard', () => {
       .set({
         config: {
           apiUrl: 'https://api.example.test/v1',
-          confirmSubmissions: true
+          confirmSubmissions: true,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')
@@ -1512,7 +1519,8 @@ describe('GC Forms template shape guard', () => {
       .set({
         config: {
           apiUrl: 'https://api.example.test/v1',
-          confirmSubmissions: true
+          confirmSubmissions: true,
+          submissionStatusId: '91'
         }
       })
       .where('agency_id', '=', '20')

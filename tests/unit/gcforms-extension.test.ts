@@ -89,7 +89,8 @@ describe('GC Forms extension manifest and entity tab contract', () => {
       'utf8'
     )
 
-    expect(source).toContain("last_error: 'GC Forms submission processing failed.'")
+    expect(source).toContain("diagnostic = 'GC Forms submission processing failed.'")
+    expect(source).toContain("error.code.startsWith('GCS_GCFORMS_SUBMISSION_STATUS_')")
     expect(source).toContain("error_message: 'GC Forms synchronization failed.'")
     expect(source).not.toMatch(/last_error:\s*error instanceof Error|error_message:\s*error instanceof Error/)
   })
