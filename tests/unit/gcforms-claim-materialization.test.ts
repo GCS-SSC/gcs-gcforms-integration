@@ -737,7 +737,7 @@ describe('GC Forms claim materialization', () => {
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
       localizedMessage: {
         en: expect.stringContaining('Draft'),
-        fr: expect.stringContaining('Ébauche')
+        fr: expect.stringContaining('Brouillon')
       }
     })
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])

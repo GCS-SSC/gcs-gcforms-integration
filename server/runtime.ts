@@ -376,7 +376,7 @@ const assertConfiguredSubmissionStatus = (config: GcsGcFormsStreamConfig): strin
     code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
     message: {
       en: 'Select an Agency status for claims imported from GC Forms before syncing.',
-      fr: 'Selectionnez un statut d organisation pour les reclamations importees de GC Forms avant la synchronisation.'
+      fr: 'Sélectionnez un statut d’organisation pour les réclamations importées de GC Forms avant la synchronisation.'
     }
   })
 }

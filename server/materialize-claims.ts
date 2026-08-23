@@ -86,7 +86,7 @@ const createSubmissionStatusUnavailableError = () => createGcsExtensionUserError
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
   message: {
     en: 'The configured imported claim status is no longer available for this agency.',
-    fr: 'Le statut configure des reclamations importees n est plus disponible pour cette organisation.'
+    fr: 'Le statut configuré des réclamations importées n’est plus disponible pour cette organisation.'
   }
 })
 
@@ -95,7 +95,7 @@ const createSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
   message: {
     en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Ébauche de l’organisation.'
+    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Brouillon de l’organisation.'
   }
 })
 

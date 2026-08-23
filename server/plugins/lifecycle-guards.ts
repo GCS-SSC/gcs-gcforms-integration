@@ -64,7 +64,7 @@ const createGcFormsSubmissionStatusRequiredError = () => createGcsExtensionUserE
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
   message: {
     en: 'Select an Agency status for claims imported from GC Forms before enabling the integration.',
-    fr: 'Selectionnez un statut d organisation pour les reclamations importees de GC Forms avant d activer l integration.'
+    fr: 'Sélectionnez un statut d’organisation pour les réclamations importées de GC Forms avant d’activer l’intégration.'
   }
 })
 
@@ -73,7 +73,7 @@ const createGcFormsSubmissionStatusUnavailableError = () => createGcsExtensionUs
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
   message: {
     en: 'The selected imported claim status is not active for this agency.',
-    fr: 'Le statut selectionne pour les reclamations importees n est pas actif pour cette organisation.'
+    fr: 'Le statut sélectionné pour les réclamations importées n’est pas actif pour cette organisation.'
   }
 })
 
@@ -82,7 +82,7 @@ const createGcFormsSubmissionStatusNotDraftError = () => createGcsExtensionUserE
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
   message: {
     en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Ébauche de l’organisation.'
+    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Brouillon de l’organisation.'
   }
 })
 
@@ -91,7 +91,7 @@ const createGcFormsSubmissionStatusInvalidError = () => createGcsExtensionUserEr
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_INVALID',
   message: {
     en: 'The selected imported claim status identifier is invalid.',
-    fr: 'L identifiant du statut selectionne pour les reclamations importees est invalide.'
+    fr: 'L’identifiant du statut sélectionné pour les réclamations importées est invalide.'
   }
 })
 
@@ -100,7 +100,7 @@ const createGcFormsSubmissionStatusReferencedError = () => createGcsExtensionUse
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
   message: {
     en: 'This status is still required by recoverable GC Forms imported claims.',
-    fr: 'Ce statut est toujours requis par des reclamations importees recuperables de GC Forms.'
+    fr: 'Ce statut est toujours requis par des réclamations importées récupérables de GC Forms.'
   }
 })
 

@@ -74,7 +74,7 @@ const labels = {
     identityProviderUrlHelp: 'URL de l’émetteur de jetons pour l’instance GC Forms configurée.',
     confirmSubmissions: 'Confirmer les soumissions après une synchronisation réussie',
     submissionStatus: 'Statut des réclamations importées',
-    submissionStatusHelp: 'Le statut Ébauche de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
+    submissionStatusHelp: 'Le statut Brouillon de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
     defaultUrl: 'Valeur par défaut de GC Forms hébergé',
     credentials: 'Identifiants',
     credentialsDescription: 'Enregistrez les clés API privées GC Forms pour cette organisation. Les clés privées sont chiffrées et ne sont jamais affichées après l’enregistrement.',

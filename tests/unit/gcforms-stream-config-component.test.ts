@@ -115,7 +115,7 @@ describe('AgencyGcFormsIntegrationConfig', () => {
     await flushPromises()
 
     expect(wrapper.find('[label="Statut des réclamations importées"]').exists()).toBe(true)
-    expect(wrapper.find('[description="Le statut Ébauche de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
+    expect(wrapper.find('[description="Le statut Brouillon de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
     wrapper.unmount()
   })
 

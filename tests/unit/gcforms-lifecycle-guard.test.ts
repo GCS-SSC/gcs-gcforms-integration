@@ -264,7 +264,7 @@ describe('GC Forms registered lifecycle guard', () => {
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
       localizedMessage: {
         en: expect.stringContaining('Draft'),
-        fr: expect.stringContaining('Ébauche')
+        fr: expect.stringContaining('Brouillon')
       }
     })
     await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
