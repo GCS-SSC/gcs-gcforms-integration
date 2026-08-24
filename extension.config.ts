@@ -89,6 +89,9 @@ export default defineGcsExtension({
     },
     {
       path: './server/migrations/0002_claim_submission_uuid.ts'
+    },
+    {
+      path: './server/migrations/0003_credential_identity_upgrade.ts'
     }
   ],
   nitroPlugin: './server/plugins/lifecycle-guards.ts',

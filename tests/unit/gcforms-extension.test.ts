@@ -12,6 +12,21 @@ describe('GC Forms extension manifest and entity tab contract', () => {
     expect(extensionDefinition.nitroPlugin).toBe('./server/plugins/lifecycle-guards.ts')
   })
 
+  it('registers the deployed-schema credential identity upgrade', async () => {
+    expect(extensionDefinition.migrations?.map(migration => migration.path)).toContain(
+      './server/migrations/0003_credential_identity_upgrade.ts'
+    )
+    const source = await readFile(
+      resolve(testDirectory, '../../server/migrations/0003_credential_identity_upgrade.ts'),
+      'utf8'
+    )
+    expect(source).toContain('ADD COLUMN IF NOT EXISTS revision')
+    expect(source).toContain('credential_revision')
+    expect(source).toContain('secret_entry_id')
+    expect(source).toContain('config_fingerprint')
+    expect(source).toContain('gcs_gcforms_connection_remote_identity')
+  })
+
   it('does not register a source-data tab on agreements', () => {
     expect(extensionDefinition.client?.tabs.some(tab => tab.target === 'agreement')).toBe(false)
   })
