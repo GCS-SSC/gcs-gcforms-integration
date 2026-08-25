@@ -17,7 +17,7 @@ const extension: GcsResolvedExtension = {
   key: 'gcs-gcforms-integration',
   packageName: '@gcs-ssc/gcs-gcforms-integration',
   rootDir: '',
-  sdkVersion: '0.1.0',
+  sdkVersion: '0.2.0',
   requiredHostCapabilities: [],
   name: {
     en: 'GC Forms integration',
