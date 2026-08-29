@@ -270,15 +270,19 @@ const createIssue = (
   entity: GcsDestinationEntity,
   path: string,
   code: GcsGcFormsMappingIssue['code'],
-  message: string
+  params: GcsGcFormsMappingIssue['params'] = {}
 ): GcsGcFormsMappingIssue => {
   const mapping = mappingForPath(mappings, entity, path)
+  const destinationPath = `${entity}.${path}`
   return {
     mappingId: mapping ? mapping.id : '',
     sourceQuestionId: mapping ? mapping.sourceQuestionId : '',
-    destinationPath: `${entity}.${path}`,
+    destinationPath,
     code,
-    message
+    params: {
+      ...params,
+      destinationPath
+    }
   }
 }
 
@@ -292,7 +296,10 @@ export const getUnsupportedGcFormsMaterializationIssues = (
     sourceQuestionId: mapping.sourceQuestionId,
     destinationPath: mapping.destinationPath,
     code: 'unsupported_destination',
-    message: `Configured destination entity "${mapping.destinationEntity}" is not supported by claim materialization.`
+    params: {
+      destinationEntity: mapping.destinationEntity,
+      destinationPath: mapping.destinationPath
+    }
   }))
 
 const requiredString = (
@@ -441,8 +448,7 @@ const collectMissingClaimIssues = (
         input.mappings,
         CLAIM_ENTITY,
         path,
-        'missing_required_value',
-        'Required claim materialization value is missing.'
+        'claim_required_value_missing'
       ))
     }
   }
@@ -548,8 +554,7 @@ const prepareClaimInput = async (
         input.mappings,
         CLAIM_ENTITY,
         CLAIM_AGREEMENT_NUMBER_PATH,
-        'invalid_value',
-        'Claim materialization values could not be coerced into the host claim fields.'
+        'claim_values_invalid'
       )]
     }
   }
@@ -560,8 +565,7 @@ const prepareClaimInput = async (
         input.mappings,
         CLAIM_ENTITY,
         'egcs_fc_periodend',
-        'invalid_value',
-        'Claim period must be within a single valid fiscal year range.'
+        'claim_period_invalid'
       )]
     }
   }
@@ -574,10 +578,7 @@ const prepareClaimInput = async (
         input.mappings,
         CLAIM_ENTITY,
         CLAIM_AGREEMENT_NUMBER_PATH,
-        hasOverride ? 'invalid_value' : 'agreement_not_found',
-        hasOverride
-          ? 'Selected agreement is no longer available in the configured transfer payment stream.'
-          : 'Agreement number could not be resolved in the configured transfer payment stream.'
+        hasOverride ? 'agreement_override_unavailable' : 'agreement_not_found'
       )]
     }
   }
@@ -590,8 +591,7 @@ const prepareClaimInput = async (
         input.mappings,
         CLAIM_ENTITY,
         'egcs_fc_fiscalyear',
-        'invalid_value',
-        'Claim fiscal year is not valid for the resolved agreement.'
+        'claim_fiscal_year_invalid'
       )]
     }
   }
@@ -637,8 +637,8 @@ const collectMissingClaimLineItemIssues = (
     input.mappings,
     CLAIM_LINE_ITEM_ENTITY,
     path,
-    'missing_required_value',
-    'Required claim line item materialization value is missing.'
+    'claim_line_item_required_value_missing',
+    { row: index + 1 }
   ))
 
 const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number) => ({
@@ -651,12 +651,15 @@ const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number)
   currency: requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency', index))
 })
 
-const invalidClaimLineItemValuesIssue = (input: ClaimMaterializationInput): GcsGcFormsMappingIssue => createIssue(
+const invalidClaimLineItemValuesIssue = (
+  input: ClaimMaterializationInput,
+  index: number
+): GcsGcFormsMappingIssue => createIssue(
   input.mappings,
   CLAIM_LINE_ITEM_ENTITY,
   'egcs_fc_amount',
-  'invalid_value',
-  'Claim line item values could not be coerced into the host claim line fields.'
+  'claim_line_item_values_invalid',
+  { row: index + 1 }
 )
 
 const lineItemDescription = (
@@ -762,7 +765,7 @@ const prepareClaimLineItemInputs = async (
     } = readClaimLineItemValues(values, index)
 
     if (!submittedCostCategory || !submittedCostSubsection || !submittedLineItem || amount === null) {
-      issues.push(invalidClaimLineItemValuesIssue(input))
+      issues.push(invalidClaimLineItemValuesIssue(input, index))
       continue
     }
 

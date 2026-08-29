@@ -134,7 +134,8 @@ export default defineGcsExtensionMigration({
       .addColumn('answers_checksum', 'varchar(80)')
       .addColumn('mapped_values', 'jsonb')
       .addColumn('mapping_issues', 'jsonb')
-      .addColumn('last_error', 'text')
+      .addColumn('diagnostic_code', 'varchar(100)')
+      .addColumn('diagnostic_params', 'jsonb')
       .addColumn('confirmed_at', 'timestamptz')
       .addColumn('created_at', 'timestamptz', col => col.defaultTo(sql`now()`).notNull())
       .addColumn('updated_at', 'timestamptz')
@@ -172,7 +173,6 @@ export default defineGcsExtensionMigration({
       .addColumn('discovered_count', 'integer', col => col.defaultTo(0).notNull())
       .addColumn('imported_count', 'integer', col => col.defaultTo(0).notNull())
       .addColumn('problem_count', 'integer', col => col.defaultTo(0).notNull())
-      .addColumn('error_message', 'text')
       .addColumn('_deleted', 'boolean', col => col.defaultTo(false).notNull())
       .execute()
 

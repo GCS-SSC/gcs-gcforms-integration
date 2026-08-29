@@ -36,6 +36,56 @@ const base64Url = (value: string | Buffer): string =>
 
 const GCM_AUTH_TAG_LENGTH = 16
 const DEFAULT_GCFORMS_REQUEST_TIMEOUT_MS = 15_000
+const GCFORMS_ACCESS_TOKEN_RESPONSE_MAX_BYTES = 64 * 1024
+const GCFORMS_DEFAULT_JSON_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
+export const GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_BYTES = 256 * 1024
+export const GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_COUNT = 500
+
+const GcFormsNewSubmissionsResponseSchema = z
+  .array(GcFormsNewSubmissionSchema)
+  .max(GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_COUNT)
+
+const createGcFormsResponseTooLargeError = (maxBytes: number): Error => Object.assign(
+  new Error(`GC Forms response exceeded the ${maxBytes}-byte limit.`),
+  { code: 'GCS_GCFORMS_RESPONSE_TOO_LARGE' }
+)
+
+/** Reads at most the configured number of decoded response bytes before parsing JSON. */
+const readBoundedJsonResponse = async (
+  response: Response,
+  maxBytes: number
+): Promise<unknown> => {
+  const contentLength = response.headers.get('content-length')
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    throw createGcFormsResponseTooLargeError(maxBytes)
+  }
+
+  if (!response.body) {
+    return null
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      totalBytes += value.byteLength
+      if (totalBytes > maxBytes) {
+        void reader.cancel().catch(() => undefined)
+        throw createGcFormsResponseTooLargeError(maxBytes)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8')) as unknown
+}
 
 const resolveRequestTimeoutMs = (value: number | undefined): number => {
   if (value === undefined) {
@@ -100,7 +150,10 @@ export const generateGcFormsAccessToken = async (
     throw new Error(`GC Forms token request failed with status ${response.status}`)
   }
 
-  const payload = await response.json() as { access_token?: unknown }
+  const payload = await readBoundedJsonResponse(
+    response,
+    GCFORMS_ACCESS_TOKEN_RESPONSE_MAX_BYTES
+  ) as { access_token?: unknown }
   if (typeof payload.access_token !== 'string' || !payload.access_token) {
     throw new Error('GC Forms token response did not include an access token')
   }
@@ -173,7 +226,12 @@ export class GcFormsApiClient {
   }
 
   /** Sends an authenticated API request, refreshing the cached token once after an unauthorized response. */
-  private async request<T>(path: string, init: RequestInit, parse: (value: unknown) => T): Promise<T> {
+  private async request<T>(
+    path: string,
+    init: RequestInit,
+    parse: (value: unknown) => T,
+    maxResponseBytes = GCFORMS_DEFAULT_JSON_RESPONSE_MAX_BYTES
+  ): Promise<T> {
     const response = await this.fetchImpl(`${this.apiUrl}${path}`, {
       ...init,
       headers: {
@@ -198,7 +256,10 @@ export class GcFormsApiClient {
       if (!retry.ok) {
         throw new Error(`GC Forms request failed with status ${retry.status}`)
       }
-      return parse(await retry.json())
+      const retryContentType = retry.headers.get('content-type') ?? ''
+      return parse(retryContentType.includes('application/json')
+        ? await readBoundedJsonResponse(retry, maxResponseBytes)
+        : null)
     }
 
     if (!response.ok) {
@@ -214,7 +275,7 @@ export class GcFormsApiClient {
       return parse(null)
     }
 
-    return parse(await response.json())
+    return parse(await readBoundedJsonResponse(response, maxResponseBytes))
   }
 
   async getFormTemplate(): Promise<GcFormsFormTemplate> {
@@ -229,7 +290,8 @@ export class GcFormsApiClient {
     return await this.request(
       `/forms/${encodeURIComponent(this.privateApiKey.formId)}/submission/new`,
       { method: 'GET' },
-      value => z.array(GcFormsNewSubmissionSchema).parse(value)
+      value => GcFormsNewSubmissionsResponseSchema.parse(value),
+      GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_BYTES
     )
   }
 

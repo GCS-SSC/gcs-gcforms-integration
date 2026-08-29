@@ -101,7 +101,8 @@ const createSchema = async () => {
       confirmation_code varchar(80),
       mapped_values jsonb,
       mapping_issues jsonb,
-      last_error text,
+      diagnostic_code varchar(100),
+      diagnostic_params jsonb,
       updated_at timestamptz,
       _deleted boolean DEFAULT false NOT NULL
     )
@@ -223,6 +224,7 @@ const createContext = () => {
     context: {
       db,
       stream: { agencyId: '20' },
+      getHeader: (name: string) => name === 'accept-language' ? 'fr-CA' : undefined,
       writeAuthorization: {
         lockAuthState,
         authorizeCurrentScope,
@@ -280,6 +282,16 @@ afterEach(async () => {
 })
 
 describe('GC Forms materialization failure resolution', () => {
+  it('requires the host agreement write capability before retrying', async () => {
+    await seedSubmission('materialization_failed')
+    const { context } = createContext()
+    delete context.writeAuthorization.lockAndAuthorizeAgreement
+
+    await expect(resolveClaimMaterializationFailure(context, '30', '901', '101'))
+      .rejects.toThrow('GC Forms recovery requires host-provided agreement write authorization.')
+    expect(materializeMock).not.toHaveBeenCalled()
+  })
+
   it('does not mutate recovery state when fresh agreement update authorization is denied', async () => {
     await seedSubmission('materialization_failed')
     const { context, lockAndAuthorizeAgreement } = createContext()
@@ -374,6 +386,89 @@ describe('GC Forms materialization failure resolution', () => {
     expect(materializeMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {
+      label: 'missing integration identity',
+      prepare: async () => {
+        await db
+          .updateTable('extensions.gcs_gcforms_submissions')
+          .set({ integration_id: null })
+          .where('id', '=', '901')
+          .execute()
+      }
+    },
+    {
+      label: 'invalid persisted integration config',
+      prepare: async () => {
+        await db
+          .updateTable('extensions.gcs_gcforms_integrations')
+          .set({ config: sql`'"invalid"'::jsonb` })
+          .where('id', '=', '601')
+          .execute()
+      }
+    },
+    {
+      label: 'missing historical submission status',
+      prepare: async () => {
+        await db
+          .updateTable('extensions.gcs_gcforms_integrations')
+          .set({ config: { mappings: [] } })
+          .where('id', '=', '601')
+          .execute()
+      }
+    }
+  ])('rejects $label before materialization', async ({ prepare }) => {
+    await seedSubmission('materialization_failed')
+    await prepare()
+
+    await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
+      .rejects.toMatchObject({ code: 'GCS_GCFORMS_MATERIALIZATION_CONTEXT_MISSING' })
+    expect(materializeMock).not.toHaveBeenCalled()
+  })
+
+  it('rolls back when materialization resolves a different agreement than the selected override', async () => {
+    await seedSubmission('materialization_failed')
+    materializeMock.mockImplementationOnce(async (_trx, input) => {
+      await input.authorizeAgreementUpdate('102')
+      return { status: 'created', claimId: '501', lineItemIds: [], issues: [] }
+    })
+
+    await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
+      .rejects.toMatchObject({ code: 'GCS_GCFORMS_AGREEMENT_OVERRIDE_INVALID' })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .select('id')
+      .execute()).resolves.toEqual([])
+  })
+
+  it('rejects a concurrent status change at the final retry write and rolls it back', async () => {
+    await seedSubmission('materialization_failed')
+    materializeMock.mockImplementationOnce(async trx => {
+      await trx
+        .updateTable('extensions.gcs_gcforms_submissions')
+        .set({ status: 'imported' })
+        .where('id', '=', '901')
+        .execute()
+      return { status: 'created', claimId: '501', lineItemIds: [], issues: [] }
+    })
+
+    await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
+      .rejects.toMatchObject({ code: 'GCS_GCFORMS_SUBMISSION_NOT_MATERIALIZATION_FAILED' })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('status')
+      .where('id', '=', '901')
+      .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'materialization_failed' })
+  })
+
+  it('returns mapped when the historical mappings are no longer applicable', async () => {
+    await seedSubmission('materialization_failed')
+    materializeMock.mockResolvedValueOnce({ status: 'not_applicable', lineItemIds: [], issues: [] })
+
+    await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
+      .resolves.toMatchObject({ ok: true, status: 'mapped' })
+  })
+
   it('resolves a historical failed submission using its persisted integration context', async () => {
     await seedSubmission('materialization_failed')
     const oldMapping = {
@@ -408,11 +503,14 @@ describe('GC Forms materialization failure resolution', () => {
         egcs_fc_transferpaymentstream: '30'
       })
       .execute()
-    materializeMock.mockResolvedValue({
-      status: 'created',
-      claimId: '501',
-      lineItemIds: [],
-      issues: []
+    materializeMock.mockImplementationOnce(async (_trx, input) => {
+      await input.authorizeAgreementUpdate('101')
+      return {
+        status: 'created',
+        claimId: '501',
+        lineItemIds: [],
+        issues: []
+      }
     })
     const confirmSpy = vi.spyOn(GcFormsApiClient.prototype, 'confirmSubmission').mockResolvedValue()
     const { context } = createContext()
@@ -443,6 +541,89 @@ describe('GC Forms materialization failure resolution', () => {
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
+  })
+
+  it('persists message-free diagnostics across a failed French retry and clears them on success', async () => {
+    await seedSubmission('materialization_failed')
+    await db
+      .insertInto('Funding_Case_Agreement_Profile')
+      .values({
+        id: '101',
+        egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_transferpaymentstream: '30'
+      })
+      .execute()
+    const persistedIssue = {
+      mappingId: 'agreement-number',
+      sourceQuestionId: 'agreement_number',
+      destinationPath: 'claim.egcs_fc_fundingagreement',
+      code: 'agreement_not_found' as const,
+      params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
+    }
+    materializeMock.mockResolvedValueOnce({
+      status: 'failed',
+      lineItemIds: [],
+      issues: [persistedIssue]
+    })
+    const { context } = createContext()
+
+    await expect(resolveClaimMaterializationFailure(context, '30', '901', '101')).resolves.toEqual({
+      ok: false,
+      status: 'materialization_failed',
+      materialization: {
+        status: 'failed',
+        lineItemIds: [],
+        issues: [{
+          ...persistedIssue,
+          message: 'L’entente pour claim.egcs_fc_fundingagreement est introuvable dans ce volet de paiements de transfert.'
+        }]
+      }
+    })
+    const failedRow = await db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['status', 'mapping_issues', 'diagnostic_code', 'diagnostic_params'])
+      .where('id', '=', '901')
+      .executeTakeFirstOrThrow()
+    expect(failedRow).toEqual({
+      status: 'materialization_failed',
+      mapping_issues: [persistedIssue],
+      diagnostic_code: 'agreement_not_found',
+      diagnostic_params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
+    })
+    expect(JSON.stringify(failedRow)).not.toMatch(/message|could not be found|introuvable/i)
+
+    materializeMock.mockResolvedValueOnce({
+      status: 'created',
+      claimId: '501',
+      lineItemIds: [],
+      issues: []
+    })
+    await expect(resolveClaimMaterializationFailure(context, '30', '901', '101')).resolves.toMatchObject({
+      ok: true,
+      status: 'imported'
+    })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['status', 'mapping_issues', 'diagnostic_code', 'diagnostic_params'])
+      .where('id', '=', '901')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      status: 'imported',
+      mapping_issues: [],
+      diagnostic_code: null,
+      diagnostic_params: null
+    })
+    expect(materializeMock.mock.calls.map(call => call[1])).toEqual([
+      expect.objectContaining({
+        integrationId: '601',
+        submissionId: '901',
+        submissionUuid: 'submission-1'
+      }),
+      expect.objectContaining({
+        integrationId: '601',
+        submissionId: '901',
+        submissionUuid: 'submission-1'
+      })
+    ])
   })
 
   it('durably confirms a created manual recovery when its historical policy enables confirmation', async () => {

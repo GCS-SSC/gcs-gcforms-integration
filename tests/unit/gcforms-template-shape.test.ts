@@ -15,6 +15,8 @@ import {
   getGcFormsCredential,
   getStreamConfig,
   persistGcFormsTemplateShapeChangedForSession,
+  GCFORMS_SYNC_BATCH_LIMIT,
+  reconcileDisabledGcFormsConfirmations,
   reconcileGcFormsSubmissionConfirmation,
   refreshTemplate,
   syncStream
@@ -331,7 +333,6 @@ const createSchema = async () => {
       discovered_count integer DEFAULT 0 NOT NULL,
       imported_count integer DEFAULT 0 NOT NULL,
       problem_count integer DEFAULT 0 NOT NULL,
-      error_message text,
       _deleted boolean DEFAULT false NOT NULL
     )
   `.execute(db)
@@ -349,7 +350,8 @@ const createSchema = async () => {
       answers_checksum varchar(200),
       mapped_values jsonb,
       mapping_issues jsonb,
-      last_error text,
+      diagnostic_code varchar(100),
+      diagnostic_params jsonb,
       confirmed_at timestamptz,
       created_at timestamptz DEFAULT now() NOT NULL,
       updated_at timestamptz,
@@ -360,6 +362,20 @@ const createSchema = async () => {
     CREATE UNIQUE INDEX gcs_gcforms_submission_unique
     ON extensions.gcs_gcforms_submissions (connection_id, submission_name)
     WHERE _deleted = false
+  `.execute(db)
+  await sql`
+    CREATE TABLE extensions.gcs_gcforms_attachments (
+      id bigserial PRIMARY KEY,
+      submission_id bigint NOT NULL,
+      gcforms_attachment_id varchar(120),
+      file_name text NOT NULL,
+      source_url text,
+      storage_path text,
+      md5 varchar(80),
+      is_potentially_malicious boolean DEFAULT false NOT NULL,
+      downloaded_at timestamptz,
+      _deleted boolean DEFAULT false NOT NULL
+    )
   `.execute(db)
 }
 
@@ -463,6 +479,28 @@ const rotateCredential = async () => {
       config: {
         credentialId: '2',
         mappings: []
+      }
+    })
+    .where('stream_id', '=', '30')
+    .execute()
+}
+
+const configureMissingRequiredClaimMapping = async () => {
+  await db
+    .updateTable('extensions.stream_configuration')
+    .set({
+      config: {
+        credentialId: '1',
+        mappings: [{
+          id: 'required-agreement',
+          sourceQuestionId: 'missing_agreement_number',
+          destinationEntity: 'claim',
+          destinationPath: 'egcs_fc_fundingagreement',
+          transform: 'string',
+          required: true,
+          onMissing: 'block',
+          onInvalid: 'block'
+        }]
       }
     })
     .where('stream_id', '=', '30')
@@ -1037,6 +1075,139 @@ describe('GC Forms template shape guard', () => {
     await expect(getGcFormsCredential(db, '20', '1')).resolves.toMatchObject({ key: replacementKey })
   })
 
+  it('decrypts selected submissions one at a time between per-submission transactions', async () => {
+    await configureMissingRequiredClaimMapping()
+    vi.spyOn(GcFormsApiClient.prototype, 'getFormTemplate').mockResolvedValue(initialTemplate)
+    vi.spyOn(GcFormsApiClient.prototype, 'getNewSubmissions').mockResolvedValue([
+      { name: 'submission-2', createdAt: 2 },
+      { name: 'submission-1', createdAt: 1 }
+    ])
+    const observedPersistedCounts: number[] = []
+    vi.spyOn(GcFormsApiClient.prototype, 'getDecryptedSubmission')
+      .mockImplementation(async submissionName => {
+        const persisted = await db
+          .selectFrom('extensions.gcs_gcforms_submissions')
+          .select(db.fn.countAll<number>().as('count'))
+          .executeTakeFirstOrThrow()
+        observedPersistedCounts.push(Number(persisted.count))
+        return {
+          createdAt: submissionName === 'submission-1' ? 1 : 2,
+          status: 'New',
+          confirmationCode: `confirmation-${submissionName}`,
+          answers: '{}',
+          checksum: '99914b932bd37a50b983c5e7c90ae93b'
+        }
+      })
+
+    await refreshTemplate(db, '30')
+    await expect(syncStream(createSyncContext(), '30')).resolves.toMatchObject({
+      discovered: 2,
+      imported: 0,
+      problems: 2,
+      continuationRequired: false
+    })
+    expect(observedPersistedCounts).toEqual([0, 1])
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('submission_name')
+      .orderBy('id', 'asc')
+      .execute()).resolves.toEqual([
+      { submission_name: 'submission-1' },
+      { submission_name: 'submission-2' }
+    ])
+  })
+
+  it('preserves the first committed submission when configuration drifts during a later download', async () => {
+    const replacementKey = privateKeyPem()
+    await configureMissingRequiredClaimMapping()
+    vi.spyOn(GcFormsApiClient.prototype, 'getFormTemplate').mockResolvedValue(initialTemplate)
+    vi.spyOn(GcFormsApiClient.prototype, 'getNewSubmissions').mockResolvedValue([
+      { name: 'submission-1', createdAt: 1 },
+      { name: 'submission-2', createdAt: 2 }
+    ])
+    vi.spyOn(GcFormsApiClient.prototype, 'getDecryptedSubmission')
+      .mockImplementation(async submissionName => {
+        if (submissionName === 'submission-2') {
+          await patchGcFormsCredential(createCredentialContext('1', { key: replacementKey }))
+        }
+        return {
+          createdAt: submissionName === 'submission-1' ? 1 : 2,
+          status: 'New',
+          confirmationCode: `confirmation-${submissionName}`,
+          answers: '{}',
+          checksum: '99914b932bd37a50b983c5e7c90ae93b'
+        }
+      })
+
+    await refreshTemplate(db, '30')
+    await expect(syncStream(createSyncContext(), '30')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_CONFIG_CHANGED'
+    })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['submission_name', 'status'])
+      .execute()).resolves.toEqual([
+      { submission_name: 'submission-1', status: 'mapping_failed' }
+    ])
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .select(['status', 'discovered_count', 'imported_count'])
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      status: 'failed',
+      discovered_count: 2,
+      imported_count: 0
+    })
+  })
+
+  it('rejects an oversized encrypted response before creating local import state', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/template')) {
+        return new Response(JSON.stringify(initialTemplate), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/new')) {
+        return new Response(JSON.stringify([
+          { name: 'oversized-submission', createdAt: 1 }
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.endsWith('/forms/form-1/submission/oversized-submission')) {
+        return new Response('{}', {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': '999999999'
+          }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', fetchMock)
+
+    await refreshTemplate(db, '30')
+    await expect(syncStream(createSyncContext(), '30')).rejects.toMatchObject({
+      code: 'GCS_GCFORMS_RESPONSE_TOO_LARGE'
+    })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .select(db.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select(db.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
+  })
+
   it('preserves and reconciles a same-connection pending marker instead of retrying failed content', async () => {
     await db
       .updateTable('extensions.agency_enablement')
@@ -1322,6 +1493,135 @@ describe('GC Forms template shape guard', () => {
     )
     expect(requestedUrls.some(url => url.includes('new-api.example.test') && url.includes('/confirm/'))).toBe(false)
     await expect(invokeLifecycleGuard()).resolves.toBeUndefined()
+  })
+
+  it('bounds enabled historical recovery requests and continues limit plus one by persisted id', async () => {
+    await db
+      .updateTable('extensions.agency_enablement')
+      .set({
+        config: {
+          apiUrl: 'https://api.example.test/v1',
+          confirmSubmissions: true,
+          submissionStatusId: '91'
+        }
+      })
+      .where('agency_id', '=', '20')
+      .execute()
+    vi.spyOn(GcFormsApiClient.prototype, 'getFormTemplate').mockResolvedValue(initialTemplate)
+    const getNewSubmissionsSpy = vi
+      .spyOn(GcFormsApiClient.prototype, 'getNewSubmissions')
+      .mockResolvedValue([])
+
+    await refreshTemplate(db, '30')
+    const currentConnection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectAll()
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('connection_id', '=', String(currentConnection.id))
+      .executeTakeFirstOrThrow()
+    const historicalConnections = await db
+      .insertInto('extensions.gcs_gcforms_connections')
+      .values(Array.from({ length: GCFORMS_SYNC_BATCH_LIMIT + 1 }, (_, index) => ({
+        agency_id: currentConnection.agency_id,
+        stream_id: currentConnection.stream_id,
+        credential_id: currentConnection.credential_id,
+        credential_revision: currentConnection.credential_revision,
+        secret_entry_id: String(currentConnection.secret_entry_id),
+        secret_updated_at: currentConnection.secret_updated_at,
+        form_id: currentConnection.form_id,
+        api_url: currentConnection.api_url,
+        identity_provider_url: currentConnection.identity_provider_url,
+        project_identifier: `historical-project-${index}`,
+        contact_email: null,
+        preferred_language: 'en' as const,
+        status: 'active',
+        _deleted: false
+      })))
+      .returning('id')
+      .execute()
+    await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values(historicalConnections.map((connection, index) => ({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: currentConnection.form_id,
+        submission_name: `enabled-pending-${String(index).padStart(3, '0')}`,
+        status: 'imported_pending_confirm' as const,
+        confirmation_code: `confirmation-${index}`
+      })))
+      .execute()
+
+    getNewSubmissionsSpy.mockClear()
+    const context = createSyncContext()
+    const first = await syncStream(context, '30')
+    expect(first.pendingConfirmations).toHaveLength(GCFORMS_SYNC_BATCH_LIMIT)
+    expect(first.continuationRequired).toBe(true)
+    expect(getNewSubmissionsSpy).toHaveBeenCalledTimes(GCFORMS_SYNC_BATCH_LIMIT + 1)
+    for (const pending of first.pendingConfirmations) {
+      expect(pending.remotelyPending).toBe(false)
+      await reconcileGcFormsSubmissionConfirmation(context, '30', pending)
+    }
+
+    getNewSubmissionsSpy.mockClear()
+    const second = await syncStream(context, '30')
+    expect(second.pendingConfirmations).toHaveLength(1)
+    expect(second.continuationRequired).toBe(false)
+    expect(getNewSubmissionsSpy).toHaveBeenCalledTimes(2)
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('submission_name')
+      .where('status', '=', 'imported_pending_confirm')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      submission_name: `enabled-pending-${String(GCFORMS_SYNC_BATCH_LIMIT).padStart(3, '0')}`
+    })
+  })
+
+  it('bounds confirmation-disabled recovery and continues limit plus one in persisted id order', async () => {
+    vi.spyOn(GcFormsApiClient.prototype, 'getFormTemplate').mockResolvedValue(initialTemplate)
+    const remoteListSpy = vi.spyOn(GcFormsApiClient.prototype, 'getNewSubmissions')
+    await refreshTemplate(db, '30')
+    const connection = await db
+      .selectFrom('extensions.gcs_gcforms_connections')
+      .select(['id', 'form_id'])
+      .where('stream_id', '=', '30')
+      .executeTakeFirstOrThrow()
+    const integration = await db
+      .selectFrom('extensions.gcs_gcforms_integrations')
+      .select('id')
+      .where('connection_id', '=', String(connection.id))
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('extensions.gcs_gcforms_submissions')
+      .values(Array.from({ length: GCFORMS_SYNC_BATCH_LIMIT + 1 }, (_, index) => ({
+        connection_id: String(connection.id),
+        integration_id: String(integration.id),
+        form_id: connection.form_id,
+        submission_name: `disabled-pending-${String(index).padStart(3, '0')}`,
+        status: 'imported_pending_confirm' as const,
+        confirmation_code: `confirmation-${index}`
+      })))
+      .execute()
+
+    await expect(reconcileDisabledGcFormsConfirmations(createSyncContext(), '30')).resolves.toEqual({
+      processed: GCFORMS_SYNC_BATCH_LIMIT,
+      hasMore: true
+    })
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_submissions')
+      .select('submission_name')
+      .where('status', '=', 'imported_pending_confirm')
+      .executeTakeFirstOrThrow()).resolves.toEqual({
+      submission_name: `disabled-pending-${String(GCFORMS_SYNC_BATCH_LIMIT).padStart(3, '0')}`
+    })
+    await expect(reconcileDisabledGcFormsConfirmations(createSyncContext(), '30')).resolves.toEqual({
+      processed: 1,
+      hasMore: false
+    })
+    expect(remoteListSpy).not.toHaveBeenCalled()
   })
 
   it('finalizes disabled-confirmation pending rows before unavailable credentials or endpoints', async () => {

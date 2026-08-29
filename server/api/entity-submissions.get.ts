@@ -1,7 +1,9 @@
 import { createGcsExtensionUserError, defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db.ts'
+import { getGcFormsDiagnosticLocale, renderStoredGcFormsMappingIssues } from '../diagnostics.ts'
 
-export default defineGcsExtensionRouteHandler(async ({ entity, db: rawDb }) => {
+export default defineGcsExtensionRouteHandler(async (context) => {
+  const { entity, db: rawDb } = context
   const ownerType = entity?.ownerType
   const ownerId = entity?.ownerId
   if (!ownerType || !ownerId) {
@@ -17,7 +19,7 @@ export default defineGcsExtensionRouteHandler(async ({ entity, db: rawDb }) => {
 
   const db = asGcFormsIntegrationDb(rawDb)
 
-  const items = await db
+  const rows = await db
     .selectFrom('extensions.gcs_gcforms_destination_links')
     .innerJoin(
       'extensions.gcs_gcforms_submissions',
@@ -39,6 +41,11 @@ export default defineGcsExtensionRouteHandler(async ({ entity, db: rawDb }) => {
     .where('extensions.gcs_gcforms_submissions._deleted', '=', false)
     .orderBy('extensions.gcs_gcforms_submissions.gcforms_created_at', 'desc')
     .execute()
+  const locale = getGcFormsDiagnosticLocale(context)
+  const items = rows.map(row => ({
+    ...row,
+    mapping_issues: renderStoredGcFormsMappingIssues(row.mapping_issues, locale)
+  }))
 
   return {
     items,

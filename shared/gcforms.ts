@@ -283,12 +283,205 @@ export interface GcsGcFormsMappedValue {
   value: JsonValue
 }
 
+export const GCFORMS_DIAGNOSTIC_CODES = [
+  'missing_required_value',
+  'invalid_value',
+  'unsupported_destination',
+  'claim_required_value_missing',
+  'claim_values_invalid',
+  'claim_period_invalid',
+  'agreement_not_found',
+  'agreement_override_unavailable',
+  'claim_fiscal_year_invalid',
+  'claim_line_item_required_value_missing',
+  'claim_line_item_values_invalid',
+  'submission_processing_failed',
+  'submission_status_invalid'
+] as const
+
+export type GcsGcFormsDiagnosticCode = typeof GCFORMS_DIAGNOSTIC_CODES[number]
+
+export type GcsGcFormsMappingDiagnosticCode = Exclude<
+  GcsGcFormsDiagnosticCode,
+  'submission_processing_failed' | 'submission_status_invalid'
+>
+
+export type GcsGcFormsDiagnosticParam = string | number | boolean | null
+export type GcsGcFormsDiagnosticParams = Record<string, GcsGcFormsDiagnosticParam>
+export type GcsGcFormsDiagnosticLocale = 'en' | 'fr'
+
+export interface GcsGcFormsStoredDiagnostic {
+  code: string
+  params: GcsGcFormsDiagnosticParams
+}
+
 export interface GcsGcFormsMappingIssue {
   mappingId: string
   sourceQuestionId: string
   destinationPath: string
-  code: 'missing_required_value' | 'invalid_value' | 'agreement_not_found' | 'materialization_failed' | 'unsupported_destination'
+  code: GcsGcFormsMappingDiagnosticCode
+  params: GcsGcFormsDiagnosticParams
+}
+
+export interface GcsGcFormsStoredMappingIssue extends Omit<GcsGcFormsMappingIssue, 'code'> {
+  code: string
+}
+
+export interface GcsGcFormsRenderedMappingIssue extends GcsGcFormsStoredMappingIssue {
   message: string
+}
+
+const GcsGcFormsDiagnosticParamSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null()
+])
+
+export const GcsGcFormsDiagnosticParamsSchema = z.record(
+  z.string(),
+  GcsGcFormsDiagnosticParamSchema
+)
+
+export const GcsGcFormsStoredMappingIssueSchema = z.object({
+  mappingId: z.string(),
+  sourceQuestionId: z.string(),
+  destinationPath: z.string(),
+  code: z.string().min(1),
+  params: GcsGcFormsDiagnosticParamsSchema
+}).strict()
+
+const UNKNOWN_DIAGNOSTIC_MESSAGES = {
+  en: 'GC Forms could not complete this mapping.',
+  fr: 'GC Forms n’a pas pu terminer cette correspondance.'
+} as const
+
+export const UNKNOWN_GCFORMS_DIAGNOSTIC_CODE = 'unknown_diagnostic'
+
+export const GCFORMS_DIAGNOSTIC_MESSAGES: Record<
+  GcsGcFormsDiagnosticLocale,
+  Record<GcsGcFormsDiagnosticCode, string>
+> = {
+  en: {
+    missing_required_value: 'A required GC Forms value is missing for {destinationPath}.',
+    invalid_value: 'The GC Forms value for {destinationPath} cannot be transformed.',
+    unsupported_destination: 'The configured destination {destinationEntity} is not supported for claim materialization.',
+    claim_required_value_missing: 'A required claim value is missing for {destinationPath}.',
+    claim_values_invalid: 'Claim values could not be converted for {destinationPath}.',
+    claim_period_invalid: 'The claim period at {destinationPath} must be within one fiscal year.',
+    agreement_not_found: 'The agreement for {destinationPath} could not be found in this transfer payment stream.',
+    agreement_override_unavailable: 'The selected agreement for {destinationPath} is no longer available in this transfer payment stream.',
+    claim_fiscal_year_invalid: 'The claim fiscal year for {destinationPath} is not valid for the resolved agreement.',
+    claim_line_item_required_value_missing: 'A required claim line item value is missing for {destinationPath} in row {row}.',
+    claim_line_item_values_invalid: 'Claim line item values could not be converted for {destinationPath} in row {row}.',
+    submission_processing_failed: 'GC Forms could not process this submission.',
+    submission_status_invalid: 'The configured GC Forms submission status is invalid ({statusCode}).'
+  },
+  fr: {
+    missing_required_value: 'Une valeur GC Forms obligatoire est manquante pour {destinationPath}.',
+    invalid_value: 'La valeur GC Forms pour {destinationPath} ne peut pas être transformée.',
+    unsupported_destination: 'La destination configurée {destinationEntity} n’est pas prise en charge pour la matérialisation des réclamations.',
+    claim_required_value_missing: 'Une valeur de réclamation obligatoire est manquante pour {destinationPath}.',
+    claim_values_invalid: 'Les valeurs de réclamation n’ont pas pu être converties pour {destinationPath}.',
+    claim_period_invalid: 'La période de réclamation à {destinationPath} doit se situer dans un seul exercice financier.',
+    agreement_not_found: 'L’entente pour {destinationPath} est introuvable dans ce volet de paiements de transfert.',
+    agreement_override_unavailable: 'L’entente sélectionnée pour {destinationPath} n’est plus disponible dans ce volet de paiements de transfert.',
+    claim_fiscal_year_invalid: 'L’exercice financier de la réclamation pour {destinationPath} n’est pas valide pour l’entente résolue.',
+    claim_line_item_required_value_missing: 'Une valeur obligatoire de ligne de réclamation est manquante pour {destinationPath} à la ligne {row}.',
+    claim_line_item_values_invalid: 'Les valeurs de la ligne de réclamation n’ont pas pu être converties pour {destinationPath} à la ligne {row}.',
+    submission_processing_failed: 'GC Forms n’a pas pu traiter cette soumission.',
+    submission_status_invalid: 'Le statut configuré pour les soumissions GC Forms n’est pas valide ({statusCode}).'
+  }
+}
+
+const diagnosticPlaceholders = (template: string): string[] => [
+  ...template.matchAll(/\{([^{}]+)\}/g)
+].map(match => match[1] as string)
+
+const isKnownGcFormsDiagnosticCode = (code: string): code is GcsGcFormsDiagnosticCode =>
+  GCFORMS_DIAGNOSTIC_CODES.some(candidate => candidate === code)
+
+/** Removes unknown codes, extra params, and invalid placeholder values before a diagnostic crosses a boundary. */
+export const sanitizeGcFormsDiagnostic = (
+  diagnostic: GcsGcFormsStoredDiagnostic
+): GcsGcFormsStoredDiagnostic => {
+  if (!isKnownGcFormsDiagnosticCode(diagnostic.code)) {
+    return { code: UNKNOWN_GCFORMS_DIAGNOSTIC_CODE, params: {} }
+  }
+
+  const parsedParams = GcsGcFormsDiagnosticParamsSchema.safeParse(diagnostic.params)
+  if (!parsedParams.success) {
+    return { code: UNKNOWN_GCFORMS_DIAGNOSTIC_CODE, params: {} }
+  }
+
+  const placeholders = diagnosticPlaceholders(GCFORMS_DIAGNOSTIC_MESSAGES.en[diagnostic.code])
+  if (placeholders.some(placeholder => !Object.hasOwn(parsedParams.data, placeholder))) {
+    return { code: UNKNOWN_GCFORMS_DIAGNOSTIC_CODE, params: {} }
+  }
+
+  return {
+    code: diagnostic.code,
+    params: Object.fromEntries(placeholders.map(placeholder => [
+      placeholder,
+      parsedParams.data[placeholder] as GcsGcFormsDiagnosticParam
+    ]))
+  }
+}
+
+/** Resolves the request or interface locale to the extension's supported locale set. */
+export const resolveGcFormsDiagnosticLocale = (
+  locale: string | undefined
+): GcsGcFormsDiagnosticLocale => locale?.toLowerCase().startsWith('fr') ? 'fr' : 'en'
+
+/** Renders a stable diagnostic without exposing unknown codes, params, or stored prose. */
+export const renderGcFormsDiagnostic = (
+  diagnostic: GcsGcFormsStoredDiagnostic,
+  locale: GcsGcFormsDiagnosticLocale
+): string => {
+  const sanitized = sanitizeGcFormsDiagnostic(diagnostic)
+  if (!isKnownGcFormsDiagnosticCode(sanitized.code)) {
+    return UNKNOWN_DIAGNOSTIC_MESSAGES[locale]
+  }
+
+  const template = GCFORMS_DIAGNOSTIC_MESSAGES[locale][sanitized.code]
+  const placeholders = diagnosticPlaceholders(template)
+
+  return placeholders.reduce(
+    (message, placeholder) => message.replaceAll(
+      `{${placeholder}}`,
+      String(sanitized.params[placeholder])
+    ),
+    template
+  )
+}
+
+/** Parses persisted message-free issues while accepting unknown future codes for safe rendering. */
+export const parseGcFormsStoredMappingIssues = (
+  value: unknown
+): GcsGcFormsStoredMappingIssue[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap(item => {
+    const parsed = GcsGcFormsStoredMappingIssueSchema.safeParse(item)
+    return parsed.success ? [parsed.data] : []
+  })
+}
+
+/** Adds active-locale display text to one persisted message-free mapping issue. */
+export const renderGcFormsMappingIssue = (
+  issue: GcsGcFormsStoredMappingIssue,
+  locale: GcsGcFormsDiagnosticLocale
+): GcsGcFormsRenderedMappingIssue => {
+  const diagnostic = sanitizeGcFormsDiagnostic(issue)
+  return {
+    mappingId: issue.mappingId,
+    sourceQuestionId: issue.sourceQuestionId,
+    destinationPath: issue.destinationPath,
+    ...diagnostic,
+    message: renderGcFormsDiagnostic(diagnostic, locale)
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -664,14 +857,15 @@ const createMappedValue = (
 
 const createMappingIssue = (
   mapping: GcsGcFormsFieldMapping,
-  code: GcsGcFormsMappingIssue['code'],
-  message: string
+  code: GcsGcFormsMappingIssue['code']
 ): GcsGcFormsMappingIssue => ({
   mappingId: mapping.id,
   sourceQuestionId: mapping.sourceQuestionId,
   destinationPath: mapping.destinationPath,
   code,
-  message
+  params: {
+    destinationPath: mapping.destinationPath
+  }
 })
 
 const getMappingDefaultValue = (mapping: GcsGcFormsFieldMapping): JsonValue =>
@@ -682,7 +876,7 @@ const previewMissingGcFormsValue = (
 ): { value?: GcsGcFormsMappedValue; issue?: GcsGcFormsMappingIssue } => {
   if (mapping.required || mapping.onMissing === 'block') {
     return {
-      issue: createMappingIssue(mapping, 'missing_required_value', 'Required GC Forms value is missing.')
+      issue: createMappingIssue(mapping, 'missing_required_value')
     }
   }
 
@@ -703,7 +897,7 @@ const previewInvalidGcFormsValue = (
   }
 
   return {
-    issue: createMappingIssue(mapping, 'invalid_value', 'GC Forms value cannot be transformed for the selected destination.')
+    issue: createMappingIssue(mapping, 'invalid_value')
   }
 }
 

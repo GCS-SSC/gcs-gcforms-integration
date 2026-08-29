@@ -5,6 +5,7 @@ const authorizeGcFormsStreamMock = vi.fn()
 
 vi.mock('h3', () => ({
   isEvent: () => true,
+  getHeader: (_event: unknown, name: string) => name === 'accept-language' ? 'fr-CA' : undefined,
   readBody: (...args: unknown[]) => readBodyMock(...args)
 }))
 
@@ -83,7 +84,9 @@ describe('GC Forms preview route', () => {
       values: [],
       issues: [expect.objectContaining({
         mappingId: 'map-name',
-        code: 'missing_required_value'
+        code: 'missing_required_value',
+        params: { destinationPath: 'egcs_fc_title_en' },
+        message: 'Une valeur GC Forms obligatoire est manquante pour egcs_fc_title_en.'
       })]
     }))
   })

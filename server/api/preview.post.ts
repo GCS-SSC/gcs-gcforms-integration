@@ -1,5 +1,6 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { normalizeGcFormsAnswers, parseGcFormsStreamConfig, previewGcFormsMapping } from '../../shared/gcforms.ts'
+import { getGcFormsDiagnosticLocale, renderStoredGcFormsMappingIssues } from '../diagnostics.ts'
 import { authorizeGcFormsStream } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
@@ -12,9 +13,11 @@ export default defineGcsExtensionRouteHandler(async (context) => {
   const answers = typeof body.answers === 'string'
     ? normalizeGcFormsAnswers(body.answers)
     : normalizeGcFormsAnswers(body.answers && typeof body.answers === 'object' ? body.answers as Record<string, unknown> : {})
+  const preview = previewGcFormsMapping(answers, config.mappings)
 
   return {
     ok: true,
-    ...previewGcFormsMapping(answers, config.mappings)
+    values: preview.values,
+    issues: renderStoredGcFormsMappingIssues(preview.issues, getGcFormsDiagnosticLocale(context))
   }
 })

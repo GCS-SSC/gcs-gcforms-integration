@@ -92,7 +92,7 @@ describe('GC Forms extension manifest and entity tab contract', () => {
 
     expect(source).not.toContain('.selectAll()')
     expect(source).not.toMatch(
-      /['"]answers['"]|['"]answers_checksum['"]|['"]confirmation_code['"]|['"]mapped_values['"]|['"]last_error['"]/
+      /['"]answers['"]|['"]answers_checksum['"]|['"]confirmation_code['"]|['"]mapped_values['"]|['"]diagnostic_params['"]/
     )
     expect(source).toContain("'submission_name'")
     expect(source).toContain("'status'")
@@ -104,9 +104,10 @@ describe('GC Forms extension manifest and entity tab contract', () => {
       'utf8'
     )
 
-    expect(source).toContain("diagnostic = 'GC Forms submission processing failed.'")
     expect(source).toContain("error.code.startsWith('GCS_GCFORMS_SUBMISSION_STATUS_')")
-    expect(source).toContain("error_message: 'GC Forms synchronization failed.'")
-    expect(source).not.toMatch(/last_error:\s*error instanceof Error|error_message:\s*error instanceof Error/)
+    expect(source).toContain("invalidStatusCode ? 'submission_status_invalid' : 'submission_processing_failed'")
+    expect(source).toContain('diagnostic_code: diagnosticCode')
+    expect(source).toContain('diagnostic_params: gcFormsJsonbValue(diagnosticParams)')
+    expect(source).not.toMatch(/diagnostic_(?:code|params):\s*error instanceof Error/)
   })
 })

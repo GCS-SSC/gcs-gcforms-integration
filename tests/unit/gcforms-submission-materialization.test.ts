@@ -23,7 +23,10 @@ describe('GC Forms submission materialization preflight', () => {
         sourceQuestionId: 'missing_payload',
         destinationPath: 'payload',
         code: 'unsupported_destination',
-        message: 'Configured destination entity "source_record" is not supported by claim materialization.'
+        params: {
+          destinationEntity: 'source_record',
+          destinationPath: 'payload'
+        }
       }]
     })
     expect(shouldConfirmGcFormsSubmission(true, 'failed', prepared.materializationIssues)).toBe(false)

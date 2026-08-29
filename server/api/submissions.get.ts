@@ -1,16 +1,18 @@
 import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db.ts'
+import { getGcFormsDiagnosticLocale, renderStoredGcFormsMappingIssues } from '../diagnostics.ts'
 import { authorizeGcFormsStream, findCurrentGcFormsConnection, getStreamConfig } from '../runtime.ts'
 
 export default defineGcsExtensionRouteHandler(async (context) => {
   const { params, db: rawDb } = context
+  const locale = getGcFormsDiagnosticLocale(context)
   const streamId = params.streamId ?? ''
   await authorizeGcFormsStream(context, streamId, 'read')
 
   const db = asGcFormsIntegrationDb(rawDb)
   const config = await getStreamConfig(db, streamId)
   const connection = await findCurrentGcFormsConnection(db, streamId, config)
-  const items = connection
+  const rows = connection
     ? await db
         .selectFrom('extensions.gcs_gcforms_submissions')
         .select([
@@ -28,6 +30,10 @@ export default defineGcsExtensionRouteHandler(async (context) => {
         .orderBy('created_at', 'desc')
         .execute()
     : []
+  const items = rows.map(row => ({
+    ...row,
+    mapping_issues: renderStoredGcFormsMappingIssues(row.mapping_issues, locale)
+  }))
 
   return {
     items,

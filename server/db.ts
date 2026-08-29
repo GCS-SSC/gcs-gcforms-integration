@@ -206,7 +206,8 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     answers_checksum: string | null
     mapped_values: JsonValue | null
     mapping_issues: JsonValue | null
-    last_error: string | null
+    diagnostic_code: string | null
+    diagnostic_params: JsonValue | null
     confirmed_at: Date | string | null
     created_at: Generated<Date | string>
     updated_at: Date | string | null
@@ -234,7 +235,6 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     discovered_count: number
     imported_count: number
     problem_count: number
-    error_message: string | null
     _deleted: Generated<boolean>
   }
   'extensions.gcs_gcforms_destination_links': {

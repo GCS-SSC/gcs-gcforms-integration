@@ -11,7 +11,10 @@ describe('GC Forms submission confirmation', () => {
       sourceQuestionId: 'payload',
       destinationPath: 'payload',
       code: 'unsupported_destination',
-      message: 'Unsupported destination.'
+      params: {
+        destinationEntity: 'source_record',
+        destinationPath: 'payload'
+      }
     }])).toBe(false)
   })
 })

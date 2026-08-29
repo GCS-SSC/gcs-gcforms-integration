@@ -38,7 +38,8 @@ const createSchema = async () => {
       answers_checksum varchar(80),
       mapped_values jsonb,
       mapping_issues jsonb,
-      last_error text,
+      diagnostic_code varchar(100),
+      diagnostic_params jsonb,
       confirmed_at timestamptz,
       created_at timestamptz DEFAULT now() NOT NULL,
       updated_at timestamptz,
@@ -121,10 +122,11 @@ describe('GC Forms materialization failure queue', () => {
               sourceQuestionId: 'agreement_number',
               destinationPath: 'claim.egcs_fc_fundingagreement',
               code: 'agreement_not_found',
-              message: 'Agreement number could not be resolved in the configured transfer payment stream.'
+              params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
             }
           ],
-          last_error: 'Agreement number could not be resolved in the configured transfer payment stream.'
+          diagnostic_code: 'agreement_not_found',
+          diagnostic_params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
         },
         {
           id: '902',
@@ -133,29 +135,82 @@ describe('GC Forms materialization failure queue', () => {
           form_id: 'form-1',
           submission_name: 'submission-2',
           status: 'materialization_failed',
-          mapped_values: [],
+          mapped_values: [
+            null,
+            {},
+            { mappingId: 'incomplete-1' },
+            { mappingId: 'incomplete-2', sourceQuestionId: 'source' },
+            {
+              mappingId: 'incomplete-3',
+              sourceQuestionId: 'source',
+              destinationEntity: 'claim'
+            },
+            {
+              mappingId: 'agreement-id-not-text',
+              sourceQuestionId: 'agreement',
+              destinationEntity: 'claim',
+              destinationPath: 'egcs_fc_fundingagreement',
+              value: 101
+            }
+          ],
           mapping_issues: [
             {
               mappingId: 'fiscal-year',
               sourceQuestionId: 'fiscal_year',
               destinationPath: 'claim.egcs_fc_fiscalyear',
-              code: 'invalid_value',
-              message: 'Claim fiscal year is not valid for the resolved agreement.'
+              code: 'claim_fiscal_year_invalid',
+              params: { destinationPath: 'claim.egcs_fc_fiscalyear' }
             }
           ],
-          last_error: 'Claim fiscal year is not valid for the resolved agreement.'
+          diagnostic_code: 'claim_fiscal_year_invalid',
+          diagnostic_params: { destinationPath: 'claim.egcs_fc_fiscalyear' }
+        },
+        {
+          id: '903',
+          connection_id: '801',
+          integration_id: '601',
+          form_id: 'form-1',
+          submission_name: 'submission-3',
+          status: 'materialization_failed',
+          mapped_values: null,
+          mapping_issues: null
+        },
+        {
+          id: '904',
+          connection_id: '801',
+          integration_id: '601',
+          form_id: 'form-1',
+          submission_name: 'submission-4',
+          status: 'materialization_failed',
+          mapped_values: [{
+            mappingId: 'agreement-number-prefixed',
+            sourceQuestionId: 'agreement',
+            destinationEntity: 'claim',
+            destinationPath: 'claim.egcs_fc_fundingagreement',
+            value: 'AGR-PREFIXED'
+          }],
+          mapping_issues: []
         }
       ])
       .execute()
     await db
       .insertInto('extensions.gcs_gcforms_materialization_overrides')
-      .values({
-        submission_id: '901',
-        destination_entity: 'claim',
-        destination_path: 'egcs_fc_fundingagreement',
-        owner_type: 'fundingcaseagreement',
-        owner_id: '103'
-      })
+      .values([
+        {
+          submission_id: '901',
+          destination_entity: 'claim',
+          destination_path: 'egcs_fc_fundingagreement',
+          owner_type: 'fundingcaseagreement',
+          owner_id: '103'
+        },
+        {
+          submission_id: '902',
+          destination_entity: 'claim',
+          destination_path: 'egcs_fc_fundingagreement',
+          owner_type: 'fundingcaseagreement',
+          owner_id: '101'
+        }
+      ])
       .execute()
 
     const listVisibleOptions = vi.fn(async () => [{
@@ -165,10 +220,11 @@ describe('GC Forms materialization failure queue', () => {
     }])
     const result = await listClaimMaterializationFailures({
       db,
+      getHeader: (name: string) => name === 'accept-language' ? 'fr-CA,fr;q=0.9,en;q=0.5' : undefined,
       agreementAccess: { listVisibleOptions }
     } as any, '31')
 
-    expect(result.items).toHaveLength(2)
+    expect(result.items).toHaveLength(4)
     expect(result.items).toContainEqual(expect.objectContaining({
       submissionId: '901',
       submissionName: 'submission-1',
@@ -179,8 +235,32 @@ describe('GC Forms materialization failure queue', () => {
       submissionId: '902',
       submissionName: 'submission-2',
       agreementNumber: null,
+      selectedAgreementId: '101',
+      diagnostic: {
+        code: 'claim_fiscal_year_invalid',
+        params: { destinationPath: 'claim.egcs_fc_fiscalyear' },
+        message: 'L’exercice financier de la réclamation pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
+      },
+      issues: [{
+        mappingId: 'fiscal-year',
+        sourceQuestionId: 'fiscal_year',
+        destinationPath: 'claim.egcs_fc_fiscalyear',
+        code: 'claim_fiscal_year_invalid',
+        params: { destinationPath: 'claim.egcs_fc_fiscalyear' },
+        message: 'L’exercice financier de la réclamation pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
+      }]
+    }))
+    expect(result.items).toContainEqual(expect.objectContaining({
+      submissionId: '903',
+      agreementNumber: null,
       selectedAgreementId: null,
-      lastError: 'Claim fiscal year is not valid for the resolved agreement.'
+      diagnostic: null,
+      issues: []
+    }))
+    expect(result.items).toContainEqual(expect.objectContaining({
+      submissionId: '904',
+      agreementNumber: 'AGR-PREFIXED',
+      selectedAgreementId: null
     }))
     expect(result.agreements).toEqual([
       {
@@ -190,5 +270,10 @@ describe('GC Forms materialization failure queue', () => {
       }
     ])
     expect(listVisibleOptions).toHaveBeenCalledWith(db, { streamId: '31', action: 'read' })
+  })
+
+  it('rejects a failure listing when the host agreement visibility capability is absent', async () => {
+    await expect(listClaimMaterializationFailures({ db } as any, '31'))
+      .rejects.toThrow('GC Forms agreement options require host-provided agreement visibility.')
   })
 })

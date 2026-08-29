@@ -4,11 +4,18 @@ import type { JsonValue } from '@gcs-ssc/extensions'
 import {
   type GcsDestinationEntity,
   type GcsGcFormsMappedValue,
-  type GcsGcFormsMappingIssue,
+  type GcsGcFormsRenderedMappingIssue,
   type GcsGcFormsStreamConfig,
-  parseGcFormsStreamConfig
+  parseGcFormsStoredMappingIssues,
+  parseGcFormsStreamConfig,
+  renderGcFormsMappingIssue
 } from '../shared/gcforms.ts'
 import { asGcFormsIntegrationDb, type GcFormsIntegrationDb } from './db.ts'
+import {
+  getGcFormsDiagnosticLocale,
+  renderStoredGcFormsDiagnostic,
+  renderStoredGcFormsMappingIssues
+} from './diagnostics.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
 import { CLAIM_AGREEMENT_DESTINATION_PATH, CLAIM_AGREEMENT_NUMBER_PATH, materializeGcFormsClaimSubmission } from './materialize-claims.ts'
 import { reconcileGcFormsSubmissionConfirmation, runAuthorizedGcFormsWrite } from './runtime.ts'
@@ -21,8 +28,12 @@ interface GcFormsMaterializationFailureItem {
   submissionName: string
   agreementNumber: string | null
   selectedAgreementId: string | null
-  lastError: string | null
-  issues: GcsGcFormsMappingIssue[]
+  diagnostic: {
+    code: string
+    params: Record<string, string | number | boolean | null>
+    message: string
+  } | null
+  issues: GcsGcFormsRenderedMappingIssue[]
   createdAt: string
 }
 
@@ -35,33 +46,6 @@ const CLAIM_ENTITY: GcsDestinationEntity = 'claim'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
-
-const isMappingIssue = (value: unknown): value is GcsGcFormsMappingIssue => {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return typeof value.mappingId === 'string'
-    && typeof value.sourceQuestionId === 'string'
-    && typeof value.destinationPath === 'string'
-    && typeof value.code === 'string'
-    && typeof value.message === 'string'
-}
-
-const mappingIssues = (value: JsonValue | null): GcsGcFormsMappingIssue[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const issues: GcsGcFormsMappingIssue[] = []
-  for (const item of value) {
-    if (isMappingIssue(item)) {
-      issues.push(item)
-    }
-  }
-
-  return issues
-}
 
 const isMappedValue = (value: unknown): value is GcsGcFormsMappedValue => {
   if (!isRecord(value)) {
@@ -133,6 +117,7 @@ export const listClaimMaterializationFailures = async (
   context: GcsExtensionRouteContext,
   streamId: string
 ) => {
+  const locale = getGcFormsDiagnosticLocale(context)
   const rawDb = context.db
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
@@ -147,7 +132,8 @@ export const listClaimMaterializationFailures = async (
       'submission.submission_name as submission_name',
       'submission.mapped_values as mapped_values',
       'submission.mapping_issues as mapping_issues',
-      'submission.last_error as last_error',
+      'submission.diagnostic_code as diagnostic_code',
+      'submission.diagnostic_params as diagnostic_params',
       'submission.created_at as created_at'
     ])
     .where('connection.stream_id', '=', streamId)
@@ -159,7 +145,7 @@ export const listClaimMaterializationFailures = async (
   const failedRows = rows
     .map(row => ({
       row,
-      issues: mappingIssues(row.mapping_issues),
+      issues: parseGcFormsStoredMappingIssues(row.mapping_issues),
       values: mappedValues(row.mapped_values)
     }))
 
@@ -174,19 +160,22 @@ export const listClaimMaterializationFailures = async (
   const visibleAgreementIds = new Set(agreements.map(agreement => agreement.id))
   const items: GcFormsMaterializationFailureItem[] = failedRows.map(item => {
     const submissionId = String(item.row.id)
-    const createdAt = item.row.created_at instanceof Date
-      ? item.row.created_at.toISOString()
-      : String(item.row.created_at)
+    const createdAt = new Date(item.row.created_at).toISOString()
+    const overrideAgreementId = overrides.get(submissionId)
 
     return {
       submissionId,
       submissionName: item.row.submission_name,
       agreementNumber: mappedAgreementNumber(item.values),
-      selectedAgreementId: visibleAgreementIds.has(overrides.get(submissionId) ?? '')
-        ? overrides.get(submissionId) ?? null
+      selectedAgreementId: overrideAgreementId && visibleAgreementIds.has(overrideAgreementId)
+        ? overrideAgreementId
         : null,
-      lastError: item.row.last_error,
-      issues: item.issues,
+      diagnostic: renderStoredGcFormsDiagnostic(
+        item.row.diagnostic_code,
+        item.row.diagnostic_params,
+        locale
+      ),
+      issues: item.issues.map(issue => renderGcFormsMappingIssue(issue, locale)),
       createdAt
     }
   })
@@ -367,6 +356,7 @@ export const resolveClaimMaterializationFailure = async (
   const status = shouldConfirm
     ? 'imported_pending_confirm' as const
     : materializationStatus(result.status)
+  const primaryIssue = result.issues[0]
 
   const updated = await trx
     .updateTable('extensions.gcs_gcforms_submissions')
@@ -374,7 +364,8 @@ export const resolveClaimMaterializationFailure = async (
       integration_id: String(integration.id),
       status,
       mapping_issues: gcFormsJsonbValue(result.issues),
-      last_error: result.issues[0]?.message ?? null,
+      diagnostic_code: primaryIssue?.code ?? null,
+      diagnostic_params: primaryIssue ? gcFormsJsonbValue(primaryIssue.params) : null,
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
@@ -391,7 +382,13 @@ export const resolveClaimMaterializationFailure = async (
     response: {
       ok: result.status !== 'failed',
       status,
-      materialization: result
+      materialization: {
+        ...result,
+        issues: renderStoredGcFormsMappingIssues(
+          result.issues,
+          getGcFormsDiagnosticLocale(context)
+        )
+      }
     }
   }
   }, streamId)

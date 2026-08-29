@@ -30,9 +30,12 @@ import {
 import {
   normalizeGcFormsJsonValue,
   parseGcFormsStreamConfig,
+  renderGcFormsDiagnostic,
+  resolveGcFormsDiagnosticLocale,
   upsertGcFormsFieldMapping,
   type GcFormsCredentialSummary,
   type GcFormsFieldCatalogItem,
+  type GcsGcFormsDiagnosticParams,
   type GcsGcFormsFieldMapping,
   type GcsGcFormsTransform,
   type GcsGcFormsStreamConfig
@@ -91,7 +94,6 @@ const labels = {
     saveFailed: 'Save failed',
     mappings: 'Mappings',
     failedMaterializations: 'Failed materializations',
-    fundingopportunity: 'Funding opportunities',
     transferpaymentstream: 'Transfer payment streams',
     fundingcaseintake: 'Intakes',
     fundingcaseagreement: 'Agreements',
@@ -189,7 +191,6 @@ const labels = {
     saveFailed: 'Echec de l enregistrement',
     mappings: 'Correspondances',
     failedMaterializations: 'Materialisations echouees',
-    fundingopportunity: 'Possibilites de financement',
     transferpaymentstream: 'Volets de paiements de transfert',
     fundingcaseintake: 'Admissions',
     fundingcaseagreement: 'Ententes',
@@ -303,11 +304,16 @@ interface GcFormsMaterializationFailureItem {
   submissionName: string
   agreementNumber: string | null
   selectedAgreementId: string | null
-  lastError: string | null
+  diagnostic: {
+    code: string
+    params: GcsGcFormsDiagnosticParams
+    message?: string
+  } | null
   issues: Array<{
     destinationPath: string
     code: string
-    message: string
+    params: GcsGcFormsDiagnosticParams
+    message?: string
   }>
   createdAt: string
 }
@@ -714,6 +720,13 @@ const failedMaterializationColumns = computed(() => [
   { id: 'sourceValue', header: tLocal('sourceValue') },
   { id: 'actions', header: tLocal('actions') }
 ])
+const activeDiagnosticLocale = () => resolveGcFormsDiagnosticLocale(locale.value)
+const issueMessage = (issue: GcFormsMaterializationFailureItem['issues'][number]): string =>
+  renderGcFormsDiagnostic(issue, activeDiagnosticLocale())
+const failureDiagnosticMessage = (submission: GcFormsMaterializationFailureItem): string =>
+  submission.diagnostic
+    ? renderGcFormsDiagnostic(submission.diagnostic, activeDiagnosticLocale())
+    : ''
 const filteredFailedMaterializations = computed(() => {
   const search = failedMaterializationSearch.value.trim().toLowerCase()
   if (!search) {
@@ -722,9 +735,9 @@ const filteredFailedMaterializations = computed(() => {
 
   return failedMaterializations.value.filter(item =>
     item.submissionName.toLowerCase().includes(search)
-    || (item.lastError ?? '').toLowerCase().includes(search)
+    || failureDiagnosticMessage(item).toLowerCase().includes(search)
     || (item.agreementNumber ?? '').toLowerCase().includes(search)
-    || item.issues.some(issue => issue.destinationPath.toLowerCase().includes(search) || issue.message.toLowerCase().includes(search))
+    || item.issues.some(issue => issue.destinationPath.toLowerCase().includes(search) || issueMessage(issue).toLowerCase().includes(search))
   )
 })
 const visibleFailedMaterializations = computed(() => {
@@ -739,9 +752,14 @@ const selectedFailureHasAgreementMatcher = computed(() => selectedMaterializatio
   issue.destinationPath === 'claim.egcs_fc_fundingagreement'
   || issue.destinationPath === 'egcs_fc_fundingagreement'
   || issue.code === 'agreement_not_found'
+  || issue.code === 'agreement_override_unavailable'
 ) === true)
 
 const firstFailureIssue = (submission: GcFormsMaterializationFailureItem) => submission.issues[0] ?? null
+const firstFailureIssueMessage = (submission: GcFormsMaterializationFailureItem): string => {
+  const issue = firstFailureIssue(submission)
+  return issue ? issueMessage(issue) : ''
+}
 
 const openMatchModal = (submission: GcFormsMaterializationFailureItem) => {
   selectedMaterializationFailure.value = submission
@@ -809,11 +827,14 @@ const upsertMappingRow = (row: MappingFieldTableRow, value: unknown) => {
 const errorDescription = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
 const postJson = async (path: string, body?: JsonValue | Record<string, unknown>): Promise<unknown> => {
-  return body === undefined ? await api.post(path) : await api.post(path, body)
+  const requestOptions = { headers: { 'accept-language': activeDiagnosticLocale() } }
+  return body === undefined
+    ? await api.post(path, undefined, requestOptions)
+    : await api.post(path, body, requestOptions)
 }
 
 const getJson = async (path: string): Promise<unknown> => {
-  return await api.get(path)
+  return await api.get(path, { headers: { 'accept-language': activeDiagnosticLocale() } })
 }
 
 const loadCredentials = async () => {
@@ -1082,8 +1103,8 @@ onMounted(async () => {
           <div class="font-medium text-highlighted">
             {{ row.original.submissionName }}
           </div>
-          <div v-if="row.original.lastError" class="mt-1 text-xs text-muted">
-            {{ row.original.lastError }}
+          <div v-if="failureDiagnosticMessage(row.original)" class="mt-1 text-xs text-muted">
+            {{ failureDiagnosticMessage(row.original) }}
           </div>
         </template>
 
@@ -1092,7 +1113,7 @@ onMounted(async () => {
             {{ firstFailureIssue(row.original)?.destinationPath ?? '-' }}
           </div>
           <div v-if="firstFailureIssue(row.original)" class="mt-1 text-xs text-muted">
-            {{ firstFailureIssue(row.original)?.message }}
+            {{ firstFailureIssueMessage(row.original) }}
           </div>
         </template>
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import type { Ref } from 'vue'
 import type {
   GcsExtensionJsonConfig,
@@ -55,6 +55,24 @@ const InteractiveResourceLayout = defineComponent({
             original
           }
         }),
+        slots['submission-cell']?.({
+          row: {
+            id: rowId,
+            original
+          }
+        }),
+        slots['failedOn-cell']?.({
+          row: {
+            id: rowId,
+            original
+          }
+        }),
+        slots['sourceValue-cell']?.({
+          row: {
+            id: rowId,
+            original
+          }
+        }),
         slots['actions-cell']?.({
           row: {
             id: rowId,
@@ -85,6 +103,41 @@ const VisibleAlert = defineComponent({
     String(attrs.description ?? ''),
     slots.default?.()
   ])
+})
+
+const ExhaustiveResourceLayout = defineComponent({
+  inheritAttrs: false,
+  setup: (_, { attrs, slots }) => () => {
+    const rows = Array.isArray(attrs.data) ? attrs.data : []
+    const tableRows = rows.map((original, index) => ({
+      id: String((original as { id?: unknown })?.id ?? index),
+      original
+    }))
+    const groupRow = tableRows.length === 0
+      ? null
+      : {
+          id: 'mappingGroup:claim',
+          original: tableRows[0]?.original,
+          groupingColumnId: 'mappingGroup',
+          subRows: tableRows,
+          leafRows: tableRows,
+          getIsGrouped: () => true,
+          getIsExpanded: () => true,
+          toggleExpanded: vi.fn()
+        }
+    const slotNames = [
+      'hostField-cell', 'requirement-cell', 'sourceField-cell',
+      'submission-cell', 'failedOn-cell', 'sourceValue-cell', 'actions-cell'
+    ]
+    const rendered = [groupRow, ...tableRows].flatMap(row => row === null
+      ? []
+      : slotNames.flatMap(name => slots[name]?.({ row }) ?? []))
+    return h('div', [
+      ...rendered,
+      ...(slots.empty?.() ?? []),
+      ...(slots['footer-left']?.() ?? [])
+    ])
+  }
 })
 
 const jsonResponse = (value: unknown): Response => new Response(JSON.stringify(value), {
@@ -259,12 +312,13 @@ describe('StreamGcFormsIntegrationConfig', () => {
   it('emits normalized JSON while replacing one mapping in place', async () => {
     const runtime = installExtensionTestUiRuntime()
     runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
-    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+    const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input)
       return url.includes('/materialization-failures')
         ? jsonResponse({ items: [], agreements: [] })
         : jsonResponse({ fieldCatalog: [], templateShapeChanged: false })
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const beforeDefault: Record<string, JsonValue> = Object.fromEntries([
       ['__proto__', { preserved: true }],
@@ -400,11 +454,14 @@ describe('StreamGcFormsIntegrationConfig', () => {
             submissionName: 'Claim submission',
             agreementNumber: 'AGR-001',
             selectedAgreementId: 'agreement-1',
-            lastError: 'Agreement was not found.',
+            diagnostic: {
+              code: 'agreement_not_found',
+              params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
+            },
             issues: [{
               destinationPath: 'claim.egcs_fc_fundingagreement',
               code: 'agreement_not_found',
-              message: 'Agreement was not found.'
+              params: { destinationPath: 'claim.egcs_fc_fundingagreement' }
             }],
             createdAt: '2026-07-24T12:00:00.000Z'
           }],
@@ -488,6 +545,99 @@ describe('StreamGcFormsIntegrationConfig', () => {
     wrapper.unmount()
   })
 
+  it('renders persisted diagnostics in French and never trusts raw API display text', async () => {
+    vi.stubGlobal('useI18n', () => ({
+      locale: ref('fr'),
+      t: (key: string) => key,
+      n: (value: number) => String(value)
+    }))
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
+    runtime.components.UModal = ReactiveModal
+    runtime.components.UAlert = VisibleAlert
+    const rawDetail = 'SQLSTATE 23505 secret@example.test'
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/credentials')) {
+        return jsonResponse({ items: [] })
+      }
+      if (url.endsWith('/sync')) {
+        return jsonResponse({ runId: 'run-fr', discovered: 1, imported: 0, skipped: 0, problems: 1 })
+      }
+      if (url.includes('/materialization-failures') && init?.method === 'POST') {
+        return jsonResponse({ ok: true, status: 'imported' })
+      }
+      if (url.includes('/materialization-failures')) {
+        return jsonResponse({
+          items: [{
+            submissionId: 'submission-fr',
+            submissionName: 'Réclamation française',
+            agreementNumber: 'AGR-INTROUVABLE',
+            selectedAgreementId: 'agreement-1',
+            diagnostic: {
+              code: 'agreement_not_found',
+              params: { destinationPath: 'claim.egcs_fc_fundingagreement' },
+              message: rawDetail
+            },
+            issues: [{
+              destinationPath: 'claim.egcs_fc_fundingagreement',
+              code: 'agreement_not_found',
+              params: { destinationPath: 'claim.egcs_fc_fundingagreement' },
+              message: rawDetail
+            }],
+            createdAt: '2026-07-24T12:00:00.000Z'
+          }],
+          agreements: [{ id: 'agreement-1', agreementNumber: 'AGR-001', label: 'AGR-001' }]
+        })
+      }
+      return jsonResponse({ fieldCatalog: [], templateShapeChanged: false })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mount(StreamGcFormsIntegrationConfig, {
+      props: {
+        extension,
+        streamId: 'stream-1',
+        agencyId: 'agency-1',
+        streamEnabled: true,
+        modelValue: { credentialId: 'credential-1', mappings: [] }
+      }
+    })
+    await flushPromises()
+
+    const clickButton = async (label: string) => {
+      const button = wrapper.findAll('button').find(candidate => candidate.text() === label)
+      if (!button) {
+        throw new Error(`Expected ${label} button.`)
+      }
+      await button.trigger('click')
+      await flushPromises()
+    }
+    await clickButton('Synchroniser les soumissions')
+    await clickButton('Verifier les materialisations echouees')
+
+    const localized = 'L’entente pour claim.egcs_fc_fundingagreement est introuvable dans ce volet de paiements de transfert.'
+    expect(wrapper.text()).toContain(localized)
+    expect(wrapper.text()).not.toContain(rawDetail)
+    expect(wrapper.text()).not.toContain('could not be found')
+
+    const matchAction = wrapper.findAll('button').find(button => button.text() === 'i-lucide-link')
+    if (!matchAction) {
+      throw new Error('Expected the French failed-submission match action.')
+    }
+    await matchAction.trigger('click')
+    await flushPromises()
+    await clickButton('Associer')
+
+    const diagnosticRequests = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes('/materialization-failures')
+    )
+    expect(diagnosticRequests.length).toBeGreaterThan(1)
+    for (const [, init] of diagnosticRequests) {
+      expect(new Headers(init?.headers).get('accept-language')).toBe('fr')
+    }
+    wrapper.unmount()
+  })
+
   it('reports failed template, save, download, and sync actions', async () => {
     const runtime = installExtensionTestUiRuntime()
     runtime.components.UModal = ReactiveModal
@@ -556,6 +706,207 @@ describe('StreamGcFormsIntegrationConfig', () => {
     expect(wrapper.text()).toContain('Sync failed')
     expect(wrapper.text()).toContain('Request failed:')
 
+    wrapper.unmount()
+  })
+
+  it('covers malformed catalogs, fallback mappings, searches, and alternate workspace states', async () => {
+    vi.stubGlobal('useI18n', () => ({
+      locale: ref('fr'),
+      t: (key: string) => key,
+      n: (value: number) => String(value)
+    }))
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.CommonResourceLayoutCard = ExhaustiveResourceLayout
+    runtime.components.UModal = ReactiveModal
+    runtime.components.UAlert = VisibleAlert
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/template')) {
+        return jsonResponse({
+          templateShapeChanged: true,
+          fieldCatalog: [
+            null,
+            {},
+            { questionId: 'missing-type' },
+            { questionId: 'plain', type: 'text' },
+            {
+              id: 'repeated-id',
+              questionId: 'repeated',
+              type: 'dynamicRow',
+              label_en: 'Repeated English',
+              label_fr: 'Répété français',
+              required: true,
+              tags: ['line_item', 42]
+            }
+          ]
+        })
+      }
+      return jsonResponse({
+          items: [
+            {
+              submissionId: 'submission-no-issue',
+              submissionName: 'No issue',
+              agreementNumber: null,
+              selectedAgreementId: null,
+              diagnostic: null,
+              issues: [],
+              createdAt: '2026-01-01T00:00:00.000Z'
+            },
+            {
+              submissionId: 'submission-other',
+              submissionName: 'Other target',
+              agreementNumber: 'AGR-2',
+              selectedAgreementId: null,
+              diagnostic: { code: 'other', params: { opaque: 'Other failure' } },
+              issues: [{ destinationPath: 'claim.other', code: 'other', params: { opaque: 'Other message' } }],
+              createdAt: '2026-01-02T00:00:00.000Z'
+            }
+          ],
+          agreements: [
+            { id: 'agreement-1', agreementNumber: 'AGR-1', label: 'Agreement One' },
+            { id: 'agreement-2', agreementNumber: 'AGR-2', label: 'Agreement Two' }
+          ]
+        })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(StreamGcFormsIntegrationConfig, {
+      props: {
+        extension,
+        streamId: 'stream-1',
+        hostLayout: true,
+        modelValue: {
+          credentialId: null,
+          templateShapeChanged: true,
+          mappings: [
+            {
+              id: 'final-for-year', sourceQuestionId: '__gcforms_final_for_year',
+              destinationEntity: 'claim', destinationPath: 'egcs_fc_finalforyear',
+              transform: 'boolean', required: false, onMissing: 'skip', onInvalid: 'block'
+            },
+            {
+              id: 'optional-existing', sourceQuestionId: 'duplicate-source',
+              destinationEntity: 'claim', destinationPath: 'optional',
+              transform: 'string', required: false, onMissing: 'skip', onInvalid: 'block'
+            }
+          ]
+        }
+      }
+    })
+    await flushPromises()
+
+    type StreamSetupState = {
+      parseFieldCatalog: (value: unknown) => Array<Record<string, unknown>>
+      errorDescription: (value: unknown) => string
+      fieldSelectValue: (field: Record<string, unknown>) => string
+      upsertClaimMapping: (field: Record<string, unknown>, sourceQuestionId: unknown) => void
+      localConfig: { mappings: Array<Record<string, unknown>> }
+      mappingFieldSearch: string
+      failedMaterializationSearch: string
+      matchSearchTerm: string
+      failedMaterializations: Array<Record<string, unknown>>
+      agreementOptions: Array<Record<string, unknown>>
+      mappingFieldRows: unknown[]
+      filteredFailedMaterializations: unknown[]
+      searchedAgreementSelectOptions: unknown[]
+      refreshTemplate: () => Promise<void>
+      syncSubmissions: () => Promise<void>
+      saveConfiguration: () => Promise<void>
+      downloadClaimTemplate: () => Promise<void>
+      resolveMaterializationFailure: () => Promise<void>
+      refreshMaterializationFailures: () => Promise<void>
+      openMatchModal: (submission: Record<string, unknown>) => void
+      statusMessage: string
+      isSaving: boolean
+      isDownloadingClaimTemplate: boolean
+      selectedTab: string
+    }
+    const setupState = (wrapper.vm as unknown as {
+      $: { setupState: unknown }
+    }).$.setupState as StreamSetupState
+    expect(setupState.parseFieldCatalog('invalid')).toEqual([])
+    expect(setupState.parseFieldCatalog([
+      12,
+      { questionId: 'missing-type' },
+      { questionId: 'fallbacks', type: 'text', tags: 'invalid' },
+      { id: 'full', questionId: 'full', type: 'dynamicRow', label_en: 'English', label_fr: 'Français', tags: ['line_item', 4] }
+    ])).toEqual([
+      {
+        id: 'fallbacks', questionId: 'fallbacks', type: 'text',
+        label_en: 'fallbacks', label_fr: 'fallbacks', required: false, tags: []
+      },
+      {
+        id: 'full', questionId: 'full', type: 'dynamicRow',
+        label_en: 'English', label_fr: 'Français', required: false, tags: ['line_item']
+      }
+    ])
+
+    expect(setupState.errorDescription('primitive failure')).toBe('primitive failure')
+    expect(setupState.fieldSelectValue({ id: 'missing', sourceQuestionId: '', destinationPath: 'x' }))
+      .toBe('__gcforms_no_source_field')
+    setupState.upsertClaimMapping({
+      id: 'optional-existing', destinationPath: 'optional', transform: 'string', required: false, repeat: false
+    }, null)
+    expect(setupState.localConfig.mappings.some((mapping: { id: string }) => mapping.id === 'optional-existing')).toBe(false)
+    setupState.upsertClaimMapping({
+      id: 'defaulted', destinationPath: 'defaulted', transform: 'number', required: true,
+      repeat: true, sourceQuestionId: 'fallback-source', defaultValue: 0
+    }, undefined)
+    expect(setupState.localConfig.mappings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'defaulted', sourceQuestionId: 'fallback-source', destinationEntity: 'claim_line_item',
+        onMissing: 'block', onInvalid: 'block', defaultValue: 0
+      })
+    ]))
+
+    setupState.failedMaterializations = [
+      {
+        submissionId: 'submission-no-issue', submissionName: 'No issue', agreementNumber: null,
+        selectedAgreementId: null, diagnostic: null, issues: [], createdAt: '2026-01-01T00:00:00.000Z'
+      },
+      {
+        submissionId: 'submission-other', submissionName: 'Other target', agreementNumber: 'AGR-2',
+        selectedAgreementId: null, diagnostic: { code: 'other', params: { opaque: 'Other failure' } },
+        issues: [{ destinationPath: 'claim.other', code: 'other', params: { opaque: 'Other message' } }],
+        createdAt: '2026-01-02T00:00:00.000Z'
+      }
+    ]
+    setupState.agreementOptions = [
+      { id: 'agreement-1', agreementNumber: 'AGR-1', label: 'Agreement One' },
+      { id: 'agreement-2', agreementNumber: 'AGR-2', label: 'Agreement Two' }
+    ]
+    await setupState.refreshMaterializationFailures()
+    setupState.mappingFieldSearch = 'repeated'
+    setupState.failedMaterializationSearch = 'terminer cette correspondance'
+    setupState.matchSearchTerm = 'agreement two'
+    await nextTick()
+    expect(setupState.mappingFieldRows.length).toBeGreaterThan(0)
+    expect(Array.isArray(setupState.filteredFailedMaterializations)).toBe(true)
+    expect(Array.isArray(setupState.searchedAgreementSelectOptions)).toBe(true)
+
+    await setupState.refreshTemplate()
+    await setupState.syncSubmissions()
+    expect(setupState.statusMessage).toContain('Selectionnez')
+    setupState.isSaving = true
+    setupState.isDownloadingClaimTemplate = true
+    await setupState.saveConfiguration()
+    await setupState.downloadClaimTemplate()
+
+    setupState.selectedTab = 'failed-materializations'
+    await nextTick()
+    expect(fetchMock.mock.calls.map(([input]) => String(input)))
+      .toEqual(expect.arrayContaining([expect.stringContaining('/materialization-failures')]))
+    expect(setupState.failedMaterializations).not.toHaveLength(0)
+    setupState.openMatchModal(setupState.failedMaterializations[1]!)
+    await nextTick()
+    expect(wrapper.text()).toContain('Aucun outil de correspondance')
+    await setupState.resolveMaterializationFailure()
+
+    setupState.selectedTab = 'fundingcaseforecast'
+    await nextTick()
+    expect(wrapper.text()).toContain('En cours')
+    expect(wrapper.html()).toContain('gcforms-config-page-content')
     wrapper.unmount()
   })
 })

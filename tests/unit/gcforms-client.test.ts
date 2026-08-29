@@ -8,6 +8,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   decryptGcFormsSubmission,
   GcFormsApiClient,
+  GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_BYTES,
+  GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_COUNT,
   generateGcFormsAccessToken,
   signGcFormsJwt,
   verifyGcFormsIntegrity
@@ -134,6 +136,124 @@ describe('GC Forms API client', () => {
       { name: '05-09-09f4', createdAt: 1725553403512 }
     ])
   })
+
+  it('retains the single authentication retry after an unauthorized API response', async () => {
+    let tokenRequests = 0
+    const authorizationHeaders: string[] = []
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/oauth/v2/token')) {
+        tokenRequests += 1
+        return new Response(JSON.stringify({ access_token: `token-${tokenRequests}` }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      authorizationHeaders.push(String((init?.headers as Record<string, string>).authorization))
+      if (authorizationHeaders.length === 1) {
+        return new Response('{}', { status: 401 })
+      }
+      return new Response(JSON.stringify([
+        { name: 'retried-submission', createdAt: 1 }
+      ]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }) as unknown as typeof fetch
+    const client = new GcFormsApiClient({
+      apiUrl: 'https://api.example.test/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      privateApiKey: {
+        keyId: 'key-1',
+        key: privateKeyPem(),
+        userId: 'user-1',
+        formId: 'form-1'
+      },
+      fetchImpl: fetchMock
+    })
+
+    await expect(client.getNewSubmissions()).resolves.toEqual([
+      { name: 'retried-submission', createdAt: 1 }
+    ])
+    expect(tokenRequests).toBe(2)
+    expect(authorizationHeaders).toEqual(['Bearer token-1', 'Bearer token-2'])
+  })
+
+  it('rejects new-submission metadata over the stable response count before detail retrieval', async () => {
+    const requestedUrls: string[] = []
+    const fetchMock = vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.endsWith('/oauth/v2/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return new Response(JSON.stringify(Array.from(
+        { length: GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_COUNT + 1 },
+        (_, index) => ({ name: `submission-${index}`, createdAt: index })
+      )), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }) as unknown as typeof fetch
+    const client = new GcFormsApiClient({
+      apiUrl: 'https://api.example.test/v1',
+      identityProviderUrl: 'https://idp.example.test',
+      privateApiKey: {
+        keyId: 'key-1',
+        key: privateKeyPem(),
+        userId: 'user-1',
+        formId: 'form-1'
+      },
+      fetchImpl: fetchMock
+    })
+
+    await expect(client.getNewSubmissions()).rejects.toThrow()
+    expect(requestedUrls.filter(url => url.includes('/submission/'))).toEqual([
+      'https://api.example.test/v1/forms/form-1/submission/new'
+    ])
+  })
+
+  it.each(['declared', 'streamed'] as const)(
+    'rejects %s new-submission responses over the byte limit',
+    async kind => {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.endsWith('/oauth/v2/token')) {
+          return new Response(JSON.stringify({ access_token: 'token-1' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          })
+        }
+        return kind === 'declared'
+          ? new Response('[]', {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'content-length': String(GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_BYTES + 1)
+              }
+            })
+          : new Response('x'.repeat(GCFORMS_NEW_SUBMISSIONS_RESPONSE_MAX_BYTES + 1), {
+              status: 200,
+              headers: { 'content-type': 'application/json' }
+            })
+      }) as unknown as typeof fetch
+      const client = new GcFormsApiClient({
+        apiUrl: 'https://api.example.test/v1',
+        identityProviderUrl: 'https://idp.example.test',
+        privateApiKey: {
+          keyId: 'key-1',
+          key: privateKeyPem(),
+          userId: 'user-1',
+          formId: 'form-1'
+        },
+        fetchImpl: fetchMock
+      })
+
+      await expect(client.getNewSubmissions()).rejects.toMatchObject({
+        code: 'GCS_GCFORMS_RESPONSE_TOO_LARGE'
+      })
+    }
+  )
 
   it('rejects unsafe API and identity-provider endpoints before sending credentials', async () => {
     const fetchMock = vi.fn() as unknown as typeof fetch

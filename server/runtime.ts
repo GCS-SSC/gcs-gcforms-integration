@@ -22,6 +22,8 @@ import {
   parseGcFormsAgencyConfig,
   parseGcFormsStreamConfig,
   type GcsGcFormsStreamConfig,
+  type GcsGcFormsDiagnosticCode,
+  type GcsGcFormsDiagnosticParams,
   type GcFormsDecryptedSubmission,
   type GcFormsNewSubmission,
   type GcFormsPrivateApiKey
@@ -93,6 +95,75 @@ export type GcFormsSyncSessionIdentity = {
 type GcFormsTemplateChangedError = Error & {
   code: string
   gcFormsSyncSession: GcFormsSyncSessionIdentity
+}
+
+/**
+ * Stable operational cap for each synchronization phase. A run imports at most this many
+ * remote submissions and reconciles at most this many historical pending confirmations.
+ */
+export const GCFORMS_SYNC_BATCH_LIMIT = 25
+
+type PersistedRemoteSubmission = {
+  submission_name: string
+  status: GcFormsSubmissionStatus
+}
+
+type RemoteSubmissionBatch = {
+  selected: GcFormsNewSubmission[]
+  skippedCount: number
+  hasMore: boolean
+}
+
+const GCFORMS_FINAL_REMOTE_SUBMISSION_STATUSES = new Set<GcFormsSubmissionStatus>([
+  'imported',
+  'imported_pending_confirm',
+  'confirmed',
+  'skipped'
+])
+
+const compareRemoteSubmissionIdentity = (
+  left: GcFormsNewSubmission,
+  right: GcFormsNewSubmission
+): number => left.createdAt - right.createdAt
+  || (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+
+/**
+ * Selects a deterministic bounded batch. Never-seen identities precede retries so a remote
+ * service that retains completed rows cannot starve later submissions across sync runs.
+ */
+export const selectGcFormsRemoteSubmissionBatch = (
+  submissions: GcFormsNewSubmission[],
+  persisted: PersistedRemoteSubmission[],
+  limit = GCFORMS_SYNC_BATCH_LIMIT
+): RemoteSubmissionBatch => {
+  const persistedByName = new Map(persisted.map(row => [row.submission_name, row.status]))
+  const uniqueByName = new Map<string, GcFormsNewSubmission>()
+  for (const submission of [...submissions].sort(compareRemoteSubmissionIdentity)) {
+    if (!uniqueByName.has(submission.name)) {
+      uniqueByName.set(submission.name, submission)
+    }
+  }
+
+  const neverSeen: GcFormsNewSubmission[] = []
+  const retries: GcFormsNewSubmission[] = []
+  let skippedCount = submissions.length - uniqueByName.size
+  for (const submission of uniqueByName.values()) {
+    const status = persistedByName.get(submission.name)
+    if (status === undefined) {
+      neverSeen.push(submission)
+    } else if (GCFORMS_FINAL_REMOTE_SUBMISSION_STATUSES.has(status)) {
+      skippedCount += 1
+    } else {
+      retries.push(submission)
+    }
+  }
+
+  const candidates = [...neverSeen, ...retries]
+  return {
+    selected: candidates.slice(0, limit),
+    skippedCount,
+    hasMore: candidates.length > limit
+  }
 }
 
 const maybeString = (value: unknown): string | null =>
@@ -1018,6 +1089,25 @@ const createGcFormsImportRun = async (
     .executeTakeFirstOrThrow()
 }
 
+const getPersistedRemoteSubmissions = async (
+  db: GcFormsIntegrationDb,
+  connectionId: string,
+  submissions: GcFormsNewSubmission[]
+): Promise<PersistedRemoteSubmission[]> => {
+  const submissionNames = [...new Set(submissions.map(submission => submission.name))]
+  if (submissionNames.length === 0) {
+    return []
+  }
+
+  return await db
+    .selectFrom('extensions.gcs_gcforms_submissions')
+    .select(['submission_name', 'status'])
+    .where('connection_id', '=', connectionId)
+    .where('submission_name', 'in', submissionNames)
+    .where('_deleted', '=', false)
+    .execute()
+}
+
 /** Inserts a newly discovered submission or returns its existing active record after a conflict. */
 const getOrCreateGcFormsSubmission = async (
   db: GcFormsIntegrationDb,
@@ -1114,13 +1204,16 @@ const replaceGcFormsSubmissionAttachments = async (
 const updateGcFormsSubmissionProblem = async (
   db: GcFormsIntegrationDb,
   submissionId: string,
-  diagnostic = 'GC Forms submission processing failed.'
+  diagnosticCode: GcsGcFormsDiagnosticCode = 'submission_processing_failed',
+  diagnosticParams: GcsGcFormsDiagnosticParams = {}
 ) => {
   await db
     .updateTable('extensions.gcs_gcforms_submissions')
     .set({
       status: 'problem',
-      last_error: diagnostic,
+      mapping_issues: gcFormsJsonbValue([]),
+      diagnostic_code: diagnosticCode,
+      diagnostic_params: gcFormsJsonbValue(diagnosticParams),
       updated_at: new Date()
     })
     .where('id', '=', submissionId)
@@ -1200,7 +1293,8 @@ const importGcFormsSubmission = async (
       context.config.confirmSubmissions,
       materialization.status,
       issues
-      )
+    )
+    const primaryIssue = issues[0]
 
     await context.db
       .updateTable('extensions.gcs_gcforms_submissions')
@@ -1212,7 +1306,8 @@ const importGcFormsSubmission = async (
         answers_checksum: decrypted.checksum,
         mapped_values: gcFormsJsonbValue(preparedMaterialization.values),
         mapping_issues: gcFormsJsonbValue(issues),
-        last_error: issues[0]?.message ?? null,
+        diagnostic_code: primaryIssue?.code ?? null,
+        diagnostic_params: primaryIssue ? gcFormsJsonbValue(primaryIssue.params) : null,
         updated_at: new Date()
       })
       .where('id', '=', submissionId)
@@ -1234,11 +1329,16 @@ const importGcFormsSubmission = async (
 
     return { outcome: importResult }
   } catch (error) {
-    const diagnostic = isGcsExtensionUserError(error)
+    const invalidStatusCode = isGcsExtensionUserError(error)
       && error.code.startsWith('GCS_GCFORMS_SUBMISSION_STATUS_')
-      ? `GC Forms submission status configuration is invalid (${error.code}).`
-      : undefined
-    await updateGcFormsSubmissionProblem(context.db, submissionId, diagnostic)
+      ? error.code
+      : null
+    await updateGcFormsSubmissionProblem(
+      context.db,
+      submissionId,
+      invalidStatusCode ? 'submission_status_invalid' : 'submission_processing_failed',
+      invalidStatusCode ? { statusCode: invalidStatusCode } : {}
+    )
     return { outcome: 'problem' }
   }
 }
@@ -1277,7 +1377,7 @@ const finishGcFormsImportRun = async (
     .execute()
 }
 
-/** Marks an import run failed with its final counts and normalized error message. */
+/** Marks an import run failed with its final counts. */
 const failGcFormsImportRun = async (
   db: GcFormsIntegrationDb,
   runId: string,
@@ -1292,8 +1392,7 @@ const failGcFormsImportRun = async (
       finished_at: new Date(),
       discovered_count: submissions.length,
       imported_count: importedCount,
-      problem_count: problemCount,
-      error_message: 'GC Forms synchronization failed.'
+      problem_count: problemCount
     })
     .where('id', '=', runId)
     .execute()
@@ -1390,40 +1489,49 @@ const createHistoricalConnectionClient = async (
 const getHistoricalPendingConfirmations = async (
   db: GcFormsIntegrationDb,
   streamId: string
-): Promise<HistoricalPendingRow[]> => await db
-  .selectFrom('extensions.gcs_gcforms_submissions as submission')
-  .innerJoin(
-    'extensions.gcs_gcforms_connections as connection',
-    'connection.id',
-    'submission.connection_id'
-  )
-  .select([
-    'submission.id as id',
-    'submission.submission_name as submission_name',
-    'submission.connection_id as connection_id',
-    'connection.agency_id as agency_id',
-    'connection.credential_id as credential_id',
-    'connection.credential_revision as credential_revision',
-    'connection.secret_entry_id as secret_entry_id',
-    'connection.secret_updated_at as secret_updated_at',
-    'connection.form_id as form_id',
-    'connection.api_url as api_url',
-    'connection.identity_provider_url as identity_provider_url',
-    'connection.project_identifier as project_identifier'
-  ])
-  .where('connection.stream_id', '=', streamId)
-  .where('submission.status', '=', 'imported_pending_confirm')
-  .where('submission._deleted', '=', false)
-  .execute() as HistoricalPendingRow[]
+): Promise<{ items: HistoricalPendingRow[], hasMore: boolean }> => {
+  const rows = await db
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin(
+      'extensions.gcs_gcforms_connections as connection',
+      'connection.id',
+      'submission.connection_id'
+    )
+    .select([
+      'submission.id as id',
+      'submission.submission_name as submission_name',
+      'submission.connection_id as connection_id',
+      'connection.agency_id as agency_id',
+      'connection.credential_id as credential_id',
+      'connection.credential_revision as credential_revision',
+      'connection.secret_entry_id as secret_entry_id',
+      'connection.secret_updated_at as secret_updated_at',
+      'connection.form_id as form_id',
+      'connection.api_url as api_url',
+      'connection.identity_provider_url as identity_provider_url',
+      'connection.project_identifier as project_identifier'
+    ])
+    .where('connection.stream_id', '=', streamId)
+    .where('submission.status', '=', 'imported_pending_confirm')
+    .where('submission._deleted', '=', false)
+    .orderBy('submission.id', 'asc')
+    .limit(GCFORMS_SYNC_BATCH_LIMIT + 1)
+    .execute() as HistoricalPendingRow[]
+
+  return {
+    items: rows.slice(0, GCFORMS_SYNC_BATCH_LIMIT),
+    hasMore: rows.length > GCFORMS_SYNC_BATCH_LIMIT
+  }
+}
 
 /** Finalizes pending rows locally before remote preparation when confirmation is currently disabled. */
 export const reconcileDisabledGcFormsConfirmations = async (
   context: GcsExtensionRouteContext,
   streamId: string
-): Promise<number> => await runAuthorizedGcFormsWrite(context, async trx => {
+): Promise<{ processed: number, hasMore: boolean }> => await runAuthorizedGcFormsWrite(context, async trx => {
   const { config } = await resolveStreamConfig(trx, streamId)
   if (config.confirmSubmissions) {
-    return 0
+    return { processed: 0, hasMore: false }
   }
 
   const pendingRows = await trx
@@ -1437,10 +1545,12 @@ export const reconcileDisabledGcFormsConfirmations = async (
     .where('connection.stream_id', '=', streamId)
     .where('submission.status', '=', 'imported_pending_confirm')
     .where('submission._deleted', '=', false)
+    .orderBy('submission.id', 'asc')
+    .limit(GCFORMS_SYNC_BATCH_LIMIT)
     .forUpdate('submission')
     .execute()
   if (pendingRows.length === 0) {
-    return 0
+    return { processed: 0, hasMore: false }
   }
 
   const pendingIds = pendingRows.map(row => String(row.id))
@@ -1451,7 +1561,21 @@ export const reconcileDisabledGcFormsConfirmations = async (
     .where('status', '=', 'imported_pending_confirm')
     .where('_deleted', '=', false)
     .execute()
-  return pendingIds.length
+  const nextPending = await trx
+    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .innerJoin(
+      'extensions.gcs_gcforms_connections as connection',
+      'connection.id',
+      'submission.connection_id'
+    )
+    .select('submission.id')
+    .where('connection.stream_id', '=', streamId)
+    .where('submission.status', '=', 'imported_pending_confirm')
+    .where('submission._deleted', '=', false)
+    .orderBy('submission.id', 'asc')
+    .limit(1)
+    .executeTakeFirst()
+  return { processed: pendingIds.length, hasMore: Boolean(nextPending) }
 }, streamId)
 
 /** Re-authorizes and reconciles one durable pending confirmation using its historical connection. */
@@ -1544,7 +1668,7 @@ export const syncStream = async (
   context: GcsExtensionRouteContext,
   streamId: string
 ) => {
-  await reconcileDisabledGcFormsConfirmations(context, streamId)
+  const disabledRecovery = await reconcileDisabledGcFormsConfirmations(context, streamId)
   const session = await runAuthorizedGcFormsWrite(context, async trx => {
     const config = await getStreamConfig(trx, streamId)
     const connection = await ensureConnection(trx, streamId, config)
@@ -1566,23 +1690,21 @@ export const syncStream = async (
     currentTemplate,
     sessionIdentity
   )
-  const submissions = await client.getNewSubmissions()
-  const historicalPending = await getHistoricalPendingConfirmations(db, streamId)
-  const currentPendingNames = new Set(
-    historicalPending
-      .filter(pending => String(pending.connection_id) === String(session.connection.id))
-      .map(pending => pending.submission_name)
+  const remoteSubmissions = await client.getNewSubmissions()
+  const persistedRemoteSubmissions = await getPersistedRemoteSubmissions(
+    db,
+    String(session.connection.id),
+    remoteSubmissions
   )
-  const decryptedSubmissions = new Map<string, GcFormsDecryptedSubmission>()
-  for (const submission of submissions) {
-    if (currentPendingNames.has(submission.name)) {
-      continue
-    }
-    decryptedSubmissions.set(submission.name, await client.getDecryptedSubmission(submission.name))
-  }
+  const remoteBatch = selectGcFormsRemoteSubmissionBatch(
+    remoteSubmissions,
+    persistedRemoteSubmissions
+  )
+  const historicalPendingPage = await getHistoricalPendingConfirmations(db, streamId)
+  const historicalPending = historicalPendingPage.items
 
   const remoteNamesByConnection = new Map<string, Set<string>>([
-    [String(session.connection.id), new Set(submissions.map(submission => submission.name))]
+    [String(session.connection.id), new Set(remoteSubmissions.map(submission => submission.name))]
   ])
   for (const pending of historicalPending) {
     const pendingConnectionId = String(pending.connection_id)
@@ -1597,17 +1719,10 @@ export const syncStream = async (
     )
   }
 
-  const run = await runAuthorizedGcFormsWrite(context, async trx => {
-    await assertCurrentSyncSession(trx, streamId, sessionIdentity)
-    return await createGcFormsImportRun(
-      trx,
-      String(session.connection.id),
-      String(session.integration.id)
-    )
-  }, streamId)
   let importedCount = 0
-  let skippedCount = 0
+  let skippedCount = remoteBatch.skippedCount
   let problemCount = 0
+  let run: ImportRunRow | null = null
   const pendingConfirmations = new Map<string, PendingConfirmationDiscovery>()
   for (const pending of historicalPending) {
     pendingConfirmations.set(String(pending.id), {
@@ -1617,22 +1732,27 @@ export const syncStream = async (
   }
 
   try {
-    for (const submission of submissions) {
-      if (currentPendingNames.has(submission.name)) {
-        skippedCount += 1
-        continue
-      }
-      const decrypted = decryptedSubmissions.get(submission.name)
-      if (!decrypted) {
-        throw new Error('Prepared GC Forms submission data was not found.')
-      }
-      const result = await runAuthorizedGcFormsWrite(context, async trx => {
+    for (const submission of remoteBatch.selected) {
+      const decrypted = await client.getDecryptedSubmission(submission.name)
+      const existingRun: ImportRunRow | null = run
+      const phase: {
+        run: ImportRunRow
+        result: {
+          outcome: 'imported' | 'problem' | 'skipped'
+          pendingConfirmationId?: string
+        }
+      } = await runAuthorizedGcFormsWrite(context, async trx => {
         const config = await assertCurrentSyncSession(
           trx,
           streamId,
           sessionIdentity
         )
-        return await importGcFormsSubmission({
+        const currentRun: ImportRunRow = existingRun ?? await createGcFormsImportRun(
+          trx,
+          String(session.connection.id),
+          String(session.integration.id)
+        )
+        const result = await importGcFormsSubmission({
           db: trx,
           streamId,
           connection: session.connection,
@@ -1654,7 +1774,10 @@ export const syncStream = async (
             }
           }
         }, submission, decrypted)
+        return { run: currentRun, result }
       }, streamId)
+      run = phase.run
+      const { result } = phase
       if (result.pendingConfirmationId) {
         pendingConfirmations.set(result.pendingConfirmationId, {
           submissionId: result.pendingConfirmationId,
@@ -1670,23 +1793,56 @@ export const syncStream = async (
       }
     }
 
+    if (!run) {
+      run = await runAuthorizedGcFormsWrite(context, async trx => {
+        await assertCurrentSyncSession(trx, streamId, sessionIdentity)
+        return await createGcFormsImportRun(
+          trx,
+          String(session.connection.id),
+          String(session.integration.id)
+        )
+      }, streamId)
+    }
+    const completedRun = run
     await runAuthorizedGcFormsWrite(context, async trx => {
       await assertCurrentSyncSession(trx, streamId, sessionIdentity)
-      await finishGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount)
+      await finishGcFormsImportRun(
+        trx,
+        String(completedRun.id),
+        remoteBatch.selected,
+        importedCount,
+        problemCount
+      )
     }, streamId)
   } catch (error: unknown) {
-    await runAuthorizedGcFormsWrite(context, async trx => {
-      await failGcFormsImportRun(trx, String(run.id), submissions, importedCount, problemCount)
-    }, streamId)
+    if (run) {
+      const failedRun = run
+      await runAuthorizedGcFormsWrite(context, async trx => {
+        await failGcFormsImportRun(
+          trx,
+          String(failedRun.id),
+          remoteBatch.selected,
+          importedCount,
+          problemCount
+        )
+      }, streamId)
+    }
     throw error
   }
 
+  const completedRun = run
+  if (!completedRun) {
+    throw new Error('GC Forms import run was not created.')
+  }
   return {
-    runId: String(run.id),
-    discovered: submissions.length,
+    runId: String(completedRun.id),
+    discovered: remoteBatch.selected.length,
     imported: importedCount,
     skipped: skippedCount,
     problems: problemCount,
+    continuationRequired: disabledRecovery.hasMore
+      || historicalPendingPage.hasMore
+      || remoteBatch.hasMore,
     pendingConfirmations: [...pendingConfirmations.values()]
   }
 }

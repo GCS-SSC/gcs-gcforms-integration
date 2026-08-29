@@ -366,7 +366,8 @@ const createSchema = async () => {
       answers_checksum varchar(80),
       mapped_values jsonb,
       mapping_issues jsonb,
-      last_error text,
+      diagnostic_code varchar(100),
+      diagnostic_params jsonb,
       confirmed_at timestamptz,
       created_at timestamptz DEFAULT now() NOT NULL,
       updated_at timestamptz,
@@ -626,7 +627,10 @@ describe('GC Forms claim materialization', () => {
         sourceQuestionId: 'payload',
         destinationPath: 'payload',
         code: 'unsupported_destination',
-        message: 'Configured destination entity "source_record" is not supported by claim materialization.'
+        params: {
+          destinationEntity: 'source_record',
+          destinationPath: 'payload'
+        }
       }]
     })
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
@@ -787,7 +791,7 @@ describe('GC Forms claim materialization', () => {
     expect(result.issues).toEqual([
       expect.objectContaining({
         destinationPath: 'claim.egcs_fc_fiscalyear',
-        code: 'invalid_value'
+        code: 'claim_fiscal_year_invalid'
       })
     ])
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
@@ -805,7 +809,7 @@ describe('GC Forms claim materialization', () => {
     expect(result.issues).toEqual([
       expect.objectContaining({
         destinationPath: 'claim.egcs_fc_receiveddate',
-        code: 'missing_required_value'
+        code: 'claim_required_value_missing'
       })
     ])
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
@@ -1097,7 +1101,7 @@ describe('GC Forms claim materialization', () => {
     expect(result.issues).toEqual([
       expect.objectContaining({
         destinationPath: 'claim_line_item.egcs_fc_submittedlineitem',
-        code: 'missing_required_value'
+        code: 'claim_line_item_required_value_missing'
       })
     ])
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])

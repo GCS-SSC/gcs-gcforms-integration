@@ -100,7 +100,8 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
         status varchar(40) NOT NULL,
         mapped_values jsonb,
         mapping_issues jsonb,
-        last_error text,
+        diagnostic_code varchar(100),
+        diagnostic_params jsonb,
         updated_at timestamptz,
         _deleted boolean DEFAULT false NOT NULL
       )

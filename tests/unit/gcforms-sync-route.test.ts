@@ -43,6 +43,7 @@ describe('GC Forms sync route transaction phases', () => {
       imported: 1,
       skipped: 0,
       problems: 0,
+      continuationRequired: false,
       pendingConfirmations
     })
     const handler = (await import('../../server/api/sync.post')).default as any
@@ -53,7 +54,8 @@ describe('GC Forms sync route transaction phases', () => {
       discovered: 1,
       imported: 1,
       skipped: 0,
-      problems: 0
+      problems: 0,
+      continuationRequired: false
     })
     expect(syncStreamMock).toHaveBeenCalledWith(context, '31')
     expect(reconcileConfirmationMock.mock.calls).toEqual([
