@@ -1,7 +1,6 @@
 /* eslint-disable jsdoc/require-jsdoc -- executable extension-owned browser regression helpers */
 import { randomInt, randomUUID } from 'node:crypto'
 import { expect, test, type APIResponse, type Page } from '@playwright/test'
-import { recordUiActionObservation } from '../../../../.agents/skills/gcs-ssc/scripts/whole-review/ui-action-test-reporter'
 
 type Fixture = { agencyId: string; transferPaymentId: string; streamId: string }
 
@@ -202,17 +201,6 @@ test('keeps GC Forms mapping groups controlled by the host table runtime', async
       await expect(collapseClaimFields).toHaveCount(1)
       await expect(claimChild).toBeVisible()
       await expect(otherGroupChild).toBeVisible()
-      for (const [actionId, postconditionId] of [
-        ['ACTION-03b7b99f4fd4', 'POST-gcforms-expanded-update'],
-        ['ACTION-782ede21d7df', 'POST-gcforms-row-toggle']
-      ] as const) await recordUiActionObservation({
-        actionId,
-        filePath: 'extensions/gcs-gcforms-integration/tests/e2e/stream-mapping-grouping.spec.ts',
-        localeId: cell.localeId,
-        postconditions: [{ id: postconditionId, oracle: 'rendered-dom', persistence: { kind: 'not-applicable' } }],
-        title: 'keeps GC Forms mapping groups controlled by the host table runtime',
-        viewportId: cell.viewportId
-      })
     }
   } finally {
     await cleanupFixture(page, fixtureState)
