@@ -1,7 +1,7 @@
 /* eslint-disable jsdoc/require-jsdoc -- executable extension-owned browser regression helpers */
 import { randomInt, randomUUID } from 'node:crypto'
 import { expect, test, type APIResponse, type Page } from '@playwright/test'
-import { recordUiActionObservation } from '../../../../.agent/reports/whole/ui-action-test-reporter'
+import { recordUiActionObservation } from '../../../../.agents/skills/gcs-ssc/scripts/whole-review/ui-action-test-reporter'
 
 type Fixture = { agencyId: string; transferPaymentId: string; streamId: string }
 
