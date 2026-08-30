@@ -118,7 +118,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     egcs_fc_submittedcostsubsection: string | null
     egcs_fc_submittedlineitem: string | null
     egcs_fc_description: string
-    egcs_fc_amount: number
+    egcs_fc_amount: string
     egcs_fc_currency: string
     _deleted: Generated<boolean>
   }

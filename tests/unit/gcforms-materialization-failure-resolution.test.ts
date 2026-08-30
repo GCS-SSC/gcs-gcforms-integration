@@ -220,6 +220,12 @@ const createContext = () => {
   const lockAuthState = vi.fn(async () => undefined)
   const authorizeCurrentScope = vi.fn(async () => undefined)
   const lockAndAuthorizeAgreement = vi.fn(async () => true)
+  const createAgreementClaim = vi.fn(async () => ({
+    status: 'created' as const,
+    claimId: '501',
+    lineItemIds: [],
+    draftStatusId: '91'
+  }))
   return {
     context: {
       db,
@@ -229,12 +235,14 @@ const createContext = () => {
         lockAuthState,
         authorizeCurrentScope,
         authorizeCurrentEntity: authorizeCurrentScope,
-        lockAndAuthorizeAgreement
+        lockAndAuthorizeAgreement,
+        createAgreementClaim
       }
     } as any,
     lockAuthState,
     authorizeCurrentScope,
-    lockAndAuthorizeAgreement
+    lockAndAuthorizeAgreement,
+    createAgreementClaim
   }
 }
 
@@ -290,6 +298,22 @@ describe('GC Forms materialization failure resolution', () => {
     await expect(resolveClaimMaterializationFailure(context, '30', '901', '101'))
       .rejects.toThrow('GC Forms recovery requires host-provided agreement write authorization.')
     expect(materializeMock).not.toHaveBeenCalled()
+  })
+
+  it('requires the host Claim-create capability before materializing a retry', async () => {
+    await seedSubmission('materialization_failed')
+    const { context } = createContext()
+    delete context.writeAuthorization.createAgreementClaim
+    materializeMock.mockImplementationOnce(async (_trx, input) => await input.createAgreementClaim({
+      agreementId: '101'
+    }))
+
+    await expect(resolveClaimMaterializationFailure(context, '30', '901', '101'))
+      .rejects.toThrow('GC Forms recovery requires host-provided Claim creation.')
+    await expect(db
+      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .select('id')
+      .execute()).resolves.toEqual([])
   })
 
   it('does not mutate recovery state when fresh agreement update authorization is denied', async () => {
@@ -429,7 +453,7 @@ describe('GC Forms materialization failure resolution', () => {
   it('rolls back when materialization resolves a different agreement than the selected override', async () => {
     await seedSubmission('materialization_failed')
     materializeMock.mockImplementationOnce(async (_trx, input) => {
-      await input.authorizeAgreementUpdate('102')
+      await input.createAgreementClaim({ agreementId: '102' })
       return { status: 'created', claimId: '501', lineItemIds: [], issues: [] }
     })
 
@@ -504,7 +528,7 @@ describe('GC Forms materialization failure resolution', () => {
       })
       .execute()
     materializeMock.mockImplementationOnce(async (_trx, input) => {
-      await input.authorizeAgreementUpdate('101')
+      await input.createAgreementClaim({ agreementId: '101' })
       return {
         status: 'created',
         claimId: '501',

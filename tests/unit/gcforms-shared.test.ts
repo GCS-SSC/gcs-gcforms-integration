@@ -216,7 +216,7 @@ describe('GC Forms shared mapping utilities', () => {
     expect(preview.values).toEqual([
       expect.objectContaining({
         mappingId: 'map-amount',
-        value: 1234.56
+        value: '1234.56'
       })
     ])
     expect(preview.issues).toEqual([
@@ -387,9 +387,35 @@ describe('GC Forms shared mapping utilities', () => {
       }),
       expect.objectContaining({
         mappingId: 'submitted-amount',
-        value: [30, 75]
+        value: ['30.00', '75.00']
       })
     ])
+  })
+
+  it.each([
+    ['exponent notation', '1e2'],
+    ['excess scale', '1.234'],
+    ['non-finite numeric input', Number.POSITIVE_INFINITY],
+    ['out-of-range text', '100000000000000000.00'],
+    ['unsafe historic numeric input', 90_071_992_547_409.92]
+  ])('rejects %s money without rounding', (_label, amount) => {
+    const config = parseGcFormsStreamConfig({
+      mappings: [{
+        id: 'amount',
+        sourceQuestionId: 'amount',
+        destinationEntity: 'claim_line_item',
+        destinationPath: 'egcs_fc_amount',
+        transform: 'money',
+        required: true,
+        onMissing: 'block',
+        onInvalid: 'block'
+      }]
+    })
+
+    expect(previewGcFormsMapping({ amount }, config.mappings)).toEqual(expect.objectContaining({
+      values: [],
+      issues: [expect.objectContaining({ mappingId: 'amount', code: 'invalid_value' })]
+    }))
   })
 
   it('parses agency-level GC Forms base URL configuration', () => {

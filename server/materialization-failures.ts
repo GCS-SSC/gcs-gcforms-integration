@@ -342,10 +342,13 @@ export const resolveClaimMaterializationFailure = async (
     submissionStatusId: streamConfig.submissionStatusId,
     mappings: streamConfig.mappings,
     mappedValues: mappedValues(submission.mapped_values),
-    authorizeAgreementUpdate: async resolvedAgreementId => {
-      if (resolvedAgreementId !== agreementId) {
-        throw createAgreementOverrideInvalidError()
+    createAgreementClaim: async input => {
+      if (input.agreementId !== agreementId) throw createAgreementOverrideInvalidError()
+      const createAgreementClaim = context.writeAuthorization?.createAgreementClaim
+      if (!createAgreementClaim) {
+        throw new Error('GC Forms recovery requires host-provided Claim creation.')
       }
+      return await createAgreementClaim(trx, input)
     }
   })
   const shouldConfirm = shouldConfirmGcFormsSubmission(

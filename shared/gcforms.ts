@@ -763,6 +763,40 @@ const coerceMappedNumber = (value: unknown): number => {
   return numberValue
 }
 
+const GCFORMS_MONEY_PATTERN = /^(-?)(\d+)(?:\.(\d{1,2}))?$/
+const GCFORMS_MONEY_MAX_CENTS = 9_999_999_999_999_999_999n
+const GCFORMS_MONEY_MAX_SAFE_NUMBER_CENTS = BigInt(Number.MAX_SAFE_INTEGER)
+
+/** Canonicalizes a GC Forms money answer without rounding or binary-float arithmetic. */
+export const coerceGcFormsMoney = (value: unknown): string => {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new Error('invalid money')
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error('invalid money')
+  }
+
+  const normalized = (typeof value === 'string' ? value.trim().replace(/,/g, '') : String(value))
+  const match = GCFORMS_MONEY_PATTERN.exec(normalized)
+  if (!match) {
+    throw new Error('invalid money')
+  }
+
+  const units = match[2]
+  if (units === undefined) {
+    throw new Error('invalid money')
+  }
+  const fraction = (match[3] ?? '').padEnd(2, '0')
+  const unsignedCents = BigInt(units) * 100n + BigInt(fraction)
+  if (unsignedCents > GCFORMS_MONEY_MAX_CENTS
+    || (typeof value === 'number' && unsignedCents > GCFORMS_MONEY_MAX_SAFE_NUMBER_CENTS)) {
+    throw new Error('invalid money')
+  }
+
+  const sign = match[1] === '-' && unsignedCents !== 0n ? '-' : ''
+  return `${sign}${unsignedCents / 100n}.${String(unsignedCents % 100n).padStart(2, '0')}`
+}
+
 const coerceMappedBoolean = (value: unknown): boolean => {
   if (typeof value === 'boolean') {
     return value
@@ -791,7 +825,7 @@ const coerceMappedDate = (value: unknown): string => {
 const MAPPED_VALUE_COERCERS: Record<GcsGcFormsTransform, (value: unknown) => JsonValue> = {
   string: (value: unknown) => String(value),
   number: coerceMappedNumber,
-  money: coerceMappedNumber,
+  money: coerceGcFormsMoney,
   boolean: coerceMappedBoolean,
   date: coerceMappedDate,
   enum: (value: unknown) => String(value),

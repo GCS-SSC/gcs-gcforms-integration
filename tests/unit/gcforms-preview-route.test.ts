@@ -53,7 +53,7 @@ describe('GC Forms preview route', () => {
       ok: true,
       values: [expect.objectContaining({
         mappingId: 'map-amount',
-        value: 1234.56
+        value: '1234.56'
       })],
       issues: []
     }))

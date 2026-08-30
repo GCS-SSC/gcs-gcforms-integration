@@ -1,17 +1,19 @@
-import { sql, type Insertable } from 'kysely'
+import { sql } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
-import { createGcsExtensionUserError } from '@gcs-ssc/extensions/server'
+import {
+  createGcsExtensionUserError,
+  type GcsExtensionAgreementClaimCreateInput,
+  type GcsExtensionAgreementClaimCreateResult
+} from '@gcs-ssc/extensions/server'
 import type {
   GcsDestinationEntity,
   GcsGcFormsFieldMapping,
   GcsGcFormsMappedValue,
   GcsGcFormsMappingIssue
 } from '../shared/gcforms.ts'
-import { asGcFormsIntegrationDb, executeGcFormsTransaction, type GcFormsIntegrationHostDatabase } from './db.ts'
+import { coerceGcFormsMoney } from '../shared/gcforms.ts'
+import { asGcFormsIntegrationDb, executeGcFormsTransaction } from './db.ts'
 import { gcFormsJsonbValue } from './jsonb.ts'
-
-type ClaimInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim']>
-type ClaimLineItemInsert = Insertable<GcFormsIntegrationHostDatabase['Funding_Case_Agreement_Claim_Line_Item']>
 
 type DestinationOwnerType =
   | 'fundingcaseagreement'
@@ -34,7 +36,9 @@ interface ClaimMaterializationInput {
   submissionStatusId: string
   mappings: GcsGcFormsFieldMapping[]
   mappedValues: GcsGcFormsMappedValue[]
-  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
+  createAgreementClaim: (
+    input: GcsExtensionAgreementClaimCreateInput
+  ) => Promise<GcsExtensionAgreementClaimCreateResult>
 }
 
 interface PreparedClaim {
@@ -55,7 +59,7 @@ interface PreparedClaimLineItem {
   submittedCostSubsection: string | null
   submittedLineItem: string | null
   description: string
-  amount: number
+  amount: string
   currency: string
 }
 
@@ -99,40 +103,32 @@ const createSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
   }
 })
 
-/** Locks and validates the exact live Agency status used by this materialization transaction. */
-const lockGcFormsSubmissionStatus = async (
-  db: ReturnType<typeof asGcFormsIntegrationDb>,
-  agencyId: string,
-  statusId: string
-): Promise<string> => {
-  const status = await db
-    .selectFrom('Common_Status')
-    .select(['id', 'egcs_cn_isdraft'])
-    .where('id', '=', sql<string>`${statusId}::bigint`)
-    .where('egcs_cn_agency', '=', sql<string>`${agencyId}::bigint`)
-    .where('_deleted', '=', false)
-    .forUpdate()
-    .executeTakeFirst()
-  if (!status) {
-    throw createSubmissionStatusUnavailableError()
+const createClaimAgreementUnavailableError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_AGREEMENT_UNAVAILABLE',
+  message: {
+    en: 'The selected agreement is no longer available for this stream.',
+    fr: 'L’entente sélectionnée n’est plus disponible pour ce volet.'
   }
-  if (!status.egcs_cn_isdraft) {
-    throw createSubmissionStatusNotDraftError()
-  }
-  return String(status.id)
-}
+})
 
-/** Authorizes each distinct agreement target in a stable lock order. */
-export const authorizeGcFormsAgreementUpdates = async (
-  agreementIds: string[],
-  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
-): Promise<void> => {
-  const orderedAgreementIds = [...new Set(agreementIds)].sort((left, right) => left.localeCompare(right, undefined, {
-    numeric: true
-  }))
-  for (const agreementId of orderedAgreementIds) {
-    await authorizeAgreementUpdate(agreementId)
+const createClaimFiscalYearUnavailableError = () => createGcsExtensionUserError({
+  statusCode: 409,
+  code: 'GCS_GCFORMS_CLAIM_FISCAL_YEAR_UNAVAILABLE',
+  message: {
+    en: 'The selected claim fiscal year is no longer available for this agreement.',
+    fr: 'L’exercice financier sélectionné pour la réclamation n’est plus disponible pour cette entente.'
   }
+})
+
+const requireCreatedAgreementClaim = (
+  result: GcsExtensionAgreementClaimCreateResult
+): Extract<GcsExtensionAgreementClaimCreateResult, { status: 'created' }> => {
+  if (result.status === 'created') return result
+  if (result.status === 'agreement_unavailable') throw createClaimAgreementUnavailableError()
+  if (result.status === 'fiscal_year_unavailable') throw createClaimFiscalYearUnavailableError()
+  if (result.status === 'requested_status_not_draft') throw createSubmissionStatusNotDraftError()
+  throw createSubmissionStatusUnavailableError()
 }
 
 const CLAIM_ENTITY: GcsDestinationEntity = 'claim'
@@ -330,6 +326,18 @@ const requiredNumber = (value: JsonValue | undefined): number | null => {
     : Number(String(value).replace(/,/g, '').trim())
 
   return Number.isFinite(parsed) ? parsed : null
+}
+
+const requiredMoney = (value: JsonValue | undefined): string | null => {
+  if (!hasPresentValue(value)) {
+    return null
+  }
+
+  try {
+    return coerceGcFormsMoney(value)
+  } catch {
+    return null
+  }
 }
 
 const requiredInteger = (value: JsonValue | undefined): number | null => {
@@ -647,7 +655,7 @@ const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number)
   submittedCostSubsection: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostsubsection', index)),
   submittedLineItem: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedlineitem', index)),
   description: requiredString(claimLineItemFieldValue(values, 'egcs_fc_description', index)),
-  amount: requiredNumber(claimLineItemFieldValue(values, 'egcs_fc_amount', index)),
+  amount: requiredMoney(claimLineItemFieldValue(values, 'egcs_fc_amount', index)),
   currency: requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency', index))
 })
 
@@ -928,35 +936,34 @@ export const materializeGcFormsClaimSubmission = async (
     }
   }
 
-  await authorizeGcFormsAgreementUpdates([claimInput.agreementId], input.authorizeAgreementUpdate)
-
   const db = asGcFormsIntegrationDb(rawDb)
   const mappingIdsByKey = await fieldMappingIdsByKey(rawDb, input.integrationId)
 
   return await executeGcFormsTransaction(db, async trx => {
-    const submissionStatusId = await lockGcFormsSubmissionStatus(
-      trx,
-      input.agencyId,
-      input.submissionStatusId
-    )
-    const claimValues: ClaimInsert = {
-      egcs_fc_fundingagreement: claimInput.agreementId,
-      egcs_fc_fiscalyear: claimInput.fiscalYearId,
-      egcs_fc_isfinalforyear: claimInput.isFinalForYear,
-      egcs_fc_periodstart: claimInput.periodStart,
-      egcs_fc_periodend: claimInput.periodEnd,
-      egcs_fc_receiveddate: claimInput.receivedDate,
-      egcs_fc_gcformssubmissionuuid: input.submissionUuid,
-      egcs_fc_status: submissionStatusId
+    const created = requireCreatedAgreementClaim(await input.createAgreementClaim({
+      agreementId: claimInput.agreementId,
+      streamId: input.streamId,
+      fiscalYearId: claimInput.fiscalYearId,
+      isFinalForYear: claimInput.isFinalForYear,
+      periodStart: claimInput.periodStart,
+      periodEnd: claimInput.periodEnd,
+      receivedDate: claimInput.receivedDate,
+      submissionUuid: input.submissionUuid,
+      expectedDraftStatusId: input.submissionStatusId,
+      lineItems: preparedLineItems.lineItems.map(lineItem => ({
+        budgetLineItemId: lineItem.budgetLineItemId,
+        submittedCostCategory: lineItem.submittedCostCategory,
+        submittedCostSubsection: lineItem.submittedCostSubsection,
+        submittedLineItem: lineItem.submittedLineItem,
+        description: lineItem.description,
+        amount: lineItem.amount,
+        currency: lineItem.currency
+      }))
+    }))
+    if (created.lineItemIds.length !== preparedLineItems.lineItems.length) {
+      throw new Error('Host Claim creation returned an invalid line-item identity list.')
     }
-
-    const claim = await trx
-      .insertInto('Funding_Case_Agreement_Claim')
-      .values(claimValues)
-      .returningAll()
-      .executeTakeFirstOrThrow()
-
-    const claimId = String(claim.id)
+    const claimId = created.claimId
     await trx
       .insertInto('extensions.gcs_gcforms_destination_links')
       .values({
@@ -970,27 +977,11 @@ export const materializeGcFormsClaimSubmission = async (
       })
       .execute()
 
-    const lineItemIds: string[] = []
-    for (const preparedLineItem of preparedLineItems.lineItems) {
-      const lineValues: ClaimLineItemInsert = {
-        egcs_fc_fundingagreementclaim: claimId,
-        egcs_fc_fundingagreementbudgetlineitem: preparedLineItem.budgetLineItemId,
-        egcs_fc_submittedcostcategory: preparedLineItem.submittedCostCategory,
-        egcs_fc_submittedcostsubsection: preparedLineItem.submittedCostSubsection,
-        egcs_fc_submittedlineitem: preparedLineItem.submittedLineItem,
-        egcs_fc_description: preparedLineItem.description,
-        egcs_fc_amount: preparedLineItem.amount,
-        egcs_fc_currency: preparedLineItem.currency
+    for (const [index, preparedLineItem] of preparedLineItems.lineItems.entries()) {
+      const lineItemId = created.lineItemIds[index]
+      if (!lineItemId) {
+        throw new Error('Host Claim creation returned an incomplete line-item identity list.')
       }
-
-      const lineItem = await trx
-        .insertInto('Funding_Case_Agreement_Claim_Line_Item')
-        .values(lineValues)
-        .returningAll()
-        .executeTakeFirstOrThrow()
-
-      const lineItemId = String(lineItem.id)
-      lineItemIds.push(lineItemId)
       await trx
         .insertInto('extensions.gcs_gcforms_destination_links')
         .values({
@@ -1008,7 +999,7 @@ export const materializeGcFormsClaimSubmission = async (
     return {
       status: 'created',
       claimId,
-      lineItemIds,
+      lineItemIds: created.lineItemIds,
       issues: []
     }
   })

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import type { GcsGcFormsFieldMapping, GcsGcFormsMappedValue } from '../../shared/gcforms'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
-import { authorizeGcFormsAgreementUpdates, materializeGcFormsClaimSubmission } from '../../server/materialize-claims'
+import { materializeGcFormsClaimSubmission } from '../../server/materialize-claims'
 
 type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 
@@ -568,7 +568,41 @@ const materialize = async (
   mappedValues: GcsGcFormsMappedValue[],
   submissionId = '901',
   submissionUuid = '05-09-09f4',
-  authorizeAgreementUpdate: (agreementId: string) => Promise<void> = async () => undefined,
+  createAgreementClaim: NonNullable<NonNullable<Parameters<typeof materializeGcFormsClaimSubmission>[1]>['createAgreementClaim']> = async input => {
+    const status = await db.selectFrom('Common_Status')
+      .select(['id', 'egcs_cn_isdraft'])
+      .where('id', '=', input.expectedDraftStatusId ?? '')
+      .where('egcs_cn_agency', '=', '20')
+      .where('_deleted', '=', false)
+      .executeTakeFirst()
+    if (!status) return { status: 'requested_status_unavailable' }
+    if (!status.egcs_cn_isdraft) return { status: 'requested_status_not_draft' }
+    const claim = await db.insertInto('Funding_Case_Agreement_Claim').values({
+      egcs_fc_fundingagreement: input.agreementId,
+      egcs_fc_fiscalyear: input.fiscalYearId,
+      egcs_fc_isfinalforyear: input.isFinalForYear,
+      egcs_fc_periodstart: input.periodStart,
+      egcs_fc_periodend: input.periodEnd,
+      egcs_fc_receiveddate: input.receivedDate,
+      egcs_fc_gcformssubmissionuuid: input.submissionUuid,
+      egcs_fc_status: String(status.id)
+    }).returning('id').executeTakeFirstOrThrow()
+    const lineItemIds: string[] = []
+    for (const lineItem of input.lineItems) {
+      const created = await db.insertInto('Funding_Case_Agreement_Claim_Line_Item').values({
+        egcs_fc_fundingagreementclaim: String(claim.id),
+        egcs_fc_fundingagreementbudgetlineitem: lineItem.budgetLineItemId,
+        egcs_fc_submittedcostcategory: lineItem.submittedCostCategory,
+        egcs_fc_submittedcostsubsection: lineItem.submittedCostSubsection,
+        egcs_fc_submittedlineitem: lineItem.submittedLineItem,
+        egcs_fc_description: lineItem.description,
+        egcs_fc_amount: lineItem.amount,
+        egcs_fc_currency: lineItem.currency
+      }).returning('id').executeTakeFirstOrThrow()
+      lineItemIds.push(String(created.id))
+    }
+    return { status: 'created', claimId: String(claim.id), lineItemIds, draftStatusId: String(status.id) }
+  },
   submissionStatusId = '91',
   agencyId = '20'
 ) => await materializeGcFormsClaimSubmission(db, {
@@ -580,7 +614,7 @@ const materialize = async (
   submissionStatusId,
   mappings,
   mappedValues,
-  authorizeAgreementUpdate
+  createAgreementClaim
 })
 
 beforeEach(async () => {
@@ -595,16 +629,6 @@ afterEach(async () => {
 })
 
 describe('GC Forms claim materialization', () => {
-  it('authorizes distinct agreement targets in deterministic order', async () => {
-    const authorizationOrder: string[] = []
-
-    await authorizeGcFormsAgreementUpdates(['20', '10', '20', '3'], async agreementId => {
-      authorizationOrder.push(agreementId)
-    })
-
-    expect(authorizationOrder).toEqual(['3', '10', '20'])
-  })
-
   it('fails materialization when configured mappings target unsupported destinations', async () => {
     const result = await materialize([
       {
@@ -705,6 +729,64 @@ describe('GC Forms claim materialization', () => {
     }))
   })
 
+  it('delegates core Claim creation to the host and links only the returned identities', async () => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+    const createAgreementClaim = vi.fn(async () => ({
+      status: 'created' as const,
+      claimId: '501',
+      lineItemIds: ['701'],
+      draftStatusId: '91'
+    }))
+
+    const result = await materialize(
+      [...claimMappings, ...lineItemMappings],
+      [...claimValues, ...lineItemValues],
+      '901',
+      '05-09-09f4',
+      createAgreementClaim
+    )
+
+    expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({
+      agreementId: '101',
+      streamId: '31',
+      fiscalYearId: '501',
+      expectedDraftStatusId: '91',
+      submissionUuid: '05-09-09f4',
+      lineItems: [expect.objectContaining({
+        budgetLineItemId: '701',
+        amount: '1234.56',
+        currency: 'cad'
+      })]
+    }))
+    expect(result).toEqual({ status: 'created', claimId: '501', lineItemIds: ['701'], issues: [] })
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim_Line_Item').selectAll().execute()).resolves.toEqual([])
+    const links = await db.selectFrom('extensions.gcs_gcforms_destination_links')
+      .select(['owner_type', 'owner_id'])
+      .orderBy('id')
+      .execute()
+    expect(links).toEqual([
+      { owner_type: 'fundingcaseagreementclaim', owner_id: 501 },
+      { owner_type: 'fundingcaseagreementclaimlineitem', owner_id: 701 }
+    ])
+  })
+
+  it.each([
+    { label: 'missing', lineItemIds: [] },
+    { label: 'extra', lineItemIds: ['701', '702'] }
+  ])('rejects a $label host line-item identity before writing links', async ({ lineItemIds }) => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+
+    await expect(materialize(
+      [...claimMappings, ...lineItemMappings],
+      [...claimValues, ...lineItemValues],
+      '901',
+      '05-09-09f4',
+      async () => ({ status: 'created', claimId: '501', lineItemIds, draftStatusId: '91' })
+    )).rejects.toThrow('invalid line-item identity list')
+    await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toEqual([])
+  })
+
   it.each([
     ['another Agency', '92'],
     ['a deleted status', '93']
@@ -716,7 +798,7 @@ describe('GC Forms claim materialization', () => {
       claimValues,
       '901',
       '05-09-09f4',
-      async () => undefined,
+      undefined,
       statusId
     )).rejects.toMatchObject({
       statusCode: 409,
@@ -734,7 +816,7 @@ describe('GC Forms claim materialization', () => {
       claimValues,
       '901',
       '05-09-09f4',
-      async () => undefined,
+      undefined,
       '94'
     )).rejects.toMatchObject({
       statusCode: 409,
@@ -926,8 +1008,64 @@ describe('GC Forms claim materialization', () => {
       egcs_fc_description: 'Operating Costs / Delivery / Travel',
       egcs_fc_currency: 'cad'
     }))
-    expect(Number(lineItem.egcs_fc_amount)).toBe(1234.56)
+    expect(lineItem.egcs_fc_amount).toBe('1234.56')
+    const lineEvidence = await db
+      .selectFrom('extensions.gcs_gcforms_destination_links')
+      .select('value')
+      .where('owner_type', '=', 'fundingcaseagreementclaimlineitem')
+      .executeTakeFirstOrThrow()
+    expect(lineEvidence.value).toEqual(expect.objectContaining({ amount: '1234.56' }))
   })
+
+  it('emits full-range canonical money to the host hook', async () => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+    const createAgreementClaim = vi.fn(async () => ({
+      status: 'created' as const,
+      claimId: '501',
+      lineItemIds: ['701'],
+      draftStatusId: '91'
+    }))
+    const maxValues = lineItemValues.map(value => value.destinationPath === 'egcs_fc_amount'
+      ? { ...value, value: '99,999,999,999,999,999.99' }
+      : value)
+
+    await materialize(
+      [...claimMappings, ...lineItemMappings],
+      [...claimValues, ...maxValues],
+      '901',
+      '05-09-09f4',
+      createAgreementClaim
+    )
+
+    expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({
+      lineItems: [expect.objectContaining({ amount: '99999999999999999.99' })]
+    }))
+  })
+
+  it.each(['1e2', '1.234', '100000000000000000.00'])(
+    'rejects invalid exact money %s before calling the host hook',
+    async amount => {
+      await seedMappings([...claimMappings, ...lineItemMappings])
+      const createAgreementClaim = vi.fn()
+      const invalidValues = lineItemValues.map(value => value.destinationPath === 'egcs_fc_amount'
+        ? { ...value, value: amount }
+        : value)
+
+      const result = await materialize(
+        [...claimMappings, ...lineItemMappings],
+        [...claimValues, ...invalidValues],
+        '901',
+        '05-09-09f4',
+        createAgreementClaim
+      )
+
+      expect(result).toEqual(expect.objectContaining({
+        status: 'failed',
+        issues: [expect.objectContaining({ code: 'claim_line_item_values_invalid' })]
+      }))
+      expect(createAgreementClaim).not.toHaveBeenCalled()
+    }
+  )
 
   it('creates multiple claim line items from repeated GC Forms line item answers', async () => {
     await seedMappings([...claimMappings, ...lineItemMappings])

@@ -6,6 +6,8 @@ import {
   getEncryptedExtensionSecret,
   isGcsExtensionUserError,
   lockGcsExtensionLifecycleScope,
+  type GcsExtensionAgreementClaimCreateInput,
+  type GcsExtensionAgreementClaimCreateResult,
   type GcsExtensionRouteContext,
   resolveExtensionStreamContext
 } from '@gcs-ssc/extensions/server'
@@ -80,7 +82,9 @@ type SyncSubmissionContext = {
   integration: IntegrationRow
   config: GcsGcFormsStreamConfig
   currentTemplate: unknown
-  authorizeAgreementUpdate: (agreementId: string) => Promise<void>
+  createAgreementClaim: (
+    input: GcsExtensionAgreementClaimCreateInput
+  ) => Promise<GcsExtensionAgreementClaimCreateResult>
 }
 
 export type GcFormsSyncSessionIdentity = {
@@ -1220,15 +1224,6 @@ const updateGcFormsSubmissionProblem = async (
     .execute()
 }
 
-const createGcFormsAgreementUnavailableError = () => createGcsExtensionUserError({
-  statusCode: 403,
-  code: 'GCS_GCFORMS_AGREEMENT_UPDATE_FORBIDDEN',
-  message: {
-    en: 'The resolved agreement is no longer available for this import.',
-    fr: 'L entente resolue n est plus disponible pour cette importation.'
-  }
-})
-
 /** Decrypts, verifies, maps, materializes, stores, and optionally confirms one discovered submission. */
 const importGcFormsSubmission = async (
   context: SyncSubmissionContext,
@@ -1277,7 +1272,7 @@ const importGcFormsSubmission = async (
           submissionStatusId: assertConfiguredSubmissionStatus(context.config),
           mappings: context.config.mappings,
           mappedValues: preparedMaterialization.values,
-          authorizeAgreementUpdate: context.authorizeAgreementUpdate
+          createAgreementClaim: context.createAgreementClaim
         })
       : {
           status: 'failed' as const,
@@ -1759,19 +1754,12 @@ export const syncStream = async (
           integration: session.integration,
           config,
           currentTemplate,
-          authorizeAgreementUpdate: async agreementId => {
-            const lockAndAuthorizeAgreement = context.writeAuthorization?.lockAndAuthorizeAgreement
-            if (!lockAndAuthorizeAgreement) {
-              throw new Error('GC Forms claim imports require host-provided agreement write authorization.')
+          createAgreementClaim: async input => {
+            const createAgreementClaim = context.writeAuthorization?.createAgreementClaim
+            if (!createAgreementClaim) {
+              throw new Error('GC Forms claim imports require host-provided Claim creation.')
             }
-            const available = await lockAndAuthorizeAgreement(trx, {
-              agreementId,
-              streamId,
-              action: 'update'
-            })
-            if (!available) {
-              throw createGcFormsAgreementUnavailableError()
-            }
+            return await createAgreementClaim(trx, input)
           }
         }, submission, decrypted)
         return { run: currentRun, result }
