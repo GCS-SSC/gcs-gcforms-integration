@@ -29,6 +29,7 @@
     "jsdom": "^28.1.0",
     "kysely": "^0.28.11",
     "kysely-pglite": "^0.6.1",
+    "nanoid": "^5.1.6",
     "pg": "^8.18.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18",

@@ -1,5 +1,6 @@
 /* eslint-disable jsdoc/require-jsdoc -- executable extension-owned browser regression helpers */
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt } from 'node:crypto'
+import { nanoid } from 'nanoid'
 import { expect, test, type APIResponse, type Page } from '@playwright/test'
 
 type Fixture = { agencyId: string; transferPaymentId: string; streamId: string }
@@ -85,7 +86,7 @@ const login = async (page: Page): Promise<void> => {
 }
 
 const createFixture = async (page: Page, fixture: Partial<Fixture>): Promise<Fixture> => {
-  const token = randomUUID()
+  const token = nanoid()
   const agency = await page.request.post('/api/agency', { data: {
     egcs_ay_gwcoa_number: '100',
     egcs_ay_agencyfinancialsystemid: `${Date.now()}${randomInt(100_000, 1_000_000)}`,
