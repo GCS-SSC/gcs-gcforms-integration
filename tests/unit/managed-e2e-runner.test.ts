@@ -59,6 +59,7 @@ describe('GC Forms managed E2E runner', () => {
     expect(state.dependencies.prepareHost).toHaveBeenCalledOnce()
     const preparedEnvironment = vi.mocked(state.dependencies.prepareHost).mock.calls[0]![0]
     expect(preparedEnvironment).toMatchObject({
+      ENVIRONMENT_TYPE: 'demo',
       GCS_LOCAL_FILE_STORAGE_DIR: '/tmp/gcforms-files-owned',
       GCS_UI_ACTION_RUN_ID: 'RUN-extension-observation',
       PGLITE_DATA_DIR: '/tmp/gcforms-pglite-owned',
