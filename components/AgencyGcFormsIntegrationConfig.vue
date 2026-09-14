@@ -344,23 +344,24 @@ onMounted(async () => {
     </div>
 
     <div v-if="credentialForm" class="grid gap-4 md:grid-cols-2">
-      <ExtensionFormField :label="tLocal('nameEn')">
+      <ExtensionFormField :label="tLocal('nameEn')" required>
         <ExtensionInput v-model="credentialForm.name_en" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('nameFr')">
+      <ExtensionFormField :label="tLocal('nameFr')" required>
         <ExtensionInput v-model="credentialForm.name_fr" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('keyId')">
+      <ExtensionFormField :label="tLocal('keyId')" required>
         <ExtensionInput v-model="credentialForm.keyId" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('userId')">
+      <ExtensionFormField :label="tLocal('userId')" required>
         <ExtensionInput v-model="credentialForm.userId" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('formId')">
+      <ExtensionFormField :label="tLocal('formId')" required>
         <ExtensionInput v-model="credentialForm.formId" />
       </ExtensionFormField>
       <ExtensionFormField
         :label="tLocal('privateKey')"
+        :required="!credentialForm.id"
         :description="credentialForm.id ? tLocal('privateKeyEditHelp') : undefined"
         class="md:col-span-2">
         <ExtensionRawTextarea v-model="credentialForm.key" :rows="8" />

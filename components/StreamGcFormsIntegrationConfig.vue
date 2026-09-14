@@ -1183,7 +1183,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <ExtensionFormField :label="tLocal('credential')" class="max-w-xl">
+      <ExtensionFormField :label="tLocal('credential')" :help="tLocal('credentialRequired')" class="max-w-xl">
         <ExtensionSelectMenu
           v-model="localConfig.credentialId"
           :items="credentialOptions"
@@ -1285,11 +1285,13 @@ onMounted(async () => {
             <ExtensionSelect
               v-else-if="rowIsRepeatedClaimMappingField(row.original)"
               :model-value="mappingRowSourceValue(row.original)"
+              :aria-label="`${tLocal('sourceField')}: ${getMappingFieldRowLabel(row.original)}`"
               :items="repeatedSourceOptions"
               @update:model-value="(value: unknown) => upsertMappingRow(row.original, value)" />
             <ExtensionSelect
               v-else-if="rowIsClaimMappingField(row.original)"
               :model-value="mappingRowSelectValue(row.original)"
+              :aria-label="`${tLocal('sourceField')}: ${getMappingFieldRowLabel(row.original)}`"
               :items="sourceOptionsForMappingRow(row.original)"
               @update:model-value="(value: unknown) => upsertMappingRow(row.original, value)" />
           </template>
@@ -1338,7 +1340,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <ExtensionFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')">
+          <ExtensionFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')" required>
             <ExtensionSelectMenu
               v-model:search-term="matchSearchTerm"
               v-model="selectedMatchId"
