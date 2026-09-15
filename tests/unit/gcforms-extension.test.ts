@@ -1,3 +1,4 @@
+import { StreamGcFormsIntegrationConfigMessages } from '../../i18n/StreamGcFormsIntegrationConfig'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,8 +79,8 @@ describe('GC Forms extension manifest and entity tab contract', () => {
       'utf8'
     )
 
-    expect(source).toContain('downloadClaimForm: \'Download claim form\'')
-    expect(source).toContain('downloadClaimForm: \'Telecharger le formulaire de reclamation\'')
+    expect(StreamGcFormsIntegrationConfigMessages.en.downloadClaimForm).toBe('Download claim form')
+    expect(StreamGcFormsIntegrationConfigMessages.fr.downloadClaimForm).toBe('Telecharger le formulaire de reclamation')
     expect(source).toContain('getJson(`/streams/${streamId}/claim-template`)')
     expect(source).toContain('gcs-claim-form-stream-${streamId}.json')
   })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { GcFormsEntitySourceTabStatusMessages, GcFormsEntitySourceTabMessages } from '../i18n/GcFormsEntitySourceTab'
+
 import { computed, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { FetchResponseError } from '@gcs-ssc/extensions'
@@ -22,89 +24,11 @@ const {
   rbac: GcsExtensionRbacRequirement
 }>()
 
-const { locale } = useExtensionI18n()
+const { locale, t: tLocal } = useExtensionI18n(GcFormsEntitySourceTabMessages)
+const { t: statusText } = useExtensionI18n(GcFormsEntitySourceTabStatusMessages)
 const api = useExtensionApi(extensionKey)
 
-const labels = {
-  en: {
-    title: 'GC Forms source data',
-    empty: 'No GC Forms submissions have been linked to this record yet.',
-    loading: 'Loading GC Forms source data…',
-    submission: 'Submission',
-    status: 'Status',
-    received: 'Received',
-    mappings: 'Mapped values',
-    mappedValuesFor: 'Mapped values for {submission}',
-    value: 'Value',
-    notAvailable: 'Not available',
-    yes: 'Yes',
-    no: 'No',
-    noMappedValues: 'No mapped values',
-    unknownStatus: 'Unknown',
-    errorTitle: 'GC Forms source data could not be loaded.',
-    errorForbidden: 'You do not have permission to view GC Forms source data for this record.',
-    errorDefault: 'An error occurred while loading GC Forms source data.',
-    retry: 'Retry'
-  },
-  fr: {
-    title: 'Données sources de GC Forms',
-    empty: "Aucune soumission de GC Forms n’est encore liée à cet enregistrement.",
-    loading: 'Chargement des données sources de GC Forms…',
-    submission: 'Soumission',
-    status: 'Statut',
-    received: 'Reçue',
-    mappings: 'Valeurs mises en correspondance',
-    mappedValuesFor: 'Valeurs mises en correspondance pour {submission}',
-    value: 'Valeur',
-    notAvailable: 'Non disponible',
-    yes: 'Oui',
-    no: 'Non',
-    noMappedValues: 'Aucune valeur mise en correspondance',
-    unknownStatus: 'Inconnu',
-    errorTitle: 'Impossible de charger les données sources de GC Forms.',
-    errorForbidden: 'Vous n’avez pas l’autorisation de consulter les données sources de GC Forms pour cet enregistrement.',
-    errorDefault: 'Une erreur s’est produite pendant le chargement des données sources de GC Forms.',
-    retry: 'Réessayer'
-  }
-}
-
-const statusLabels = {
-  en: {
-    discovered: 'Discovered',
-    downloaded: 'Downloaded',
-    mapped: 'Mapped',
-    materialization_failed: 'Materialization failed',
-    imported: 'Imported',
-    imported_pending_confirm: 'Imported; confirmation pending',
-    confirmed: 'Confirmed',
-    skipped: 'Skipped',
-    problem: 'Problem',
-    mapping_failed: 'Mapping failed'
-  },
-  fr: {
-    discovered: 'Détectée',
-    downloaded: 'Téléchargée',
-    mapped: 'Mise en correspondance',
-    materialization_failed: 'Échec de la matérialisation',
-    imported: 'Importée',
-    imported_pending_confirm: 'Importée; confirmation en attente',
-    confirmed: 'Confirmée',
-    skipped: 'Ignorée',
-    problem: 'Problème',
-    mapping_failed: 'Échec de la mise en correspondance'
-  }
-} as const
-
-type LocalLabelKey = keyof typeof labels.en
-type StatusCode = keyof typeof statusLabels.en
-
-const tLocal = (key: LocalLabelKey): string => locale.value === 'fr' ? labels.fr[key] : labels.en[key]
-
-const interpolateLocal = (key: LocalLabelKey, values: Record<string, string>): string =>
-  Object.entries(values).reduce(
-    (message, [name, value]) => message.replace(`{${name}}`, value),
-    tLocal(key)
-  )
+type StatusCode = keyof typeof GcFormsEntitySourceTabStatusMessages.en
 
 interface LinkedSubmission {
   id: string
@@ -213,8 +137,7 @@ const mappedDisplayRows = (mappedValues: unknown): MappedDisplayRow[] => {
 
 const localizedStatus = (status: string): string => {
   const statusCode = status as StatusCode
-  const localizedStatuses = locale.value === 'fr' ? statusLabels.fr : statusLabels.en
-  return localizedStatuses[statusCode] ?? tLocal('unknownStatus')
+  return Object.prototype.hasOwnProperty.call(GcFormsEntitySourceTabStatusMessages.en, statusCode) ? statusText(statusCode) : tLocal('unknownStatus')
 }
 
 const formatReceivedDate = (value: string | null | undefined): string => {
@@ -227,7 +150,7 @@ const formatReceivedDate = (value: string | null | undefined): string => {
 }
 
 const mappedValuesLabel = (submissionName: string): string =>
-  interpolateLocal('mappedValuesFor', { submission: submissionName })
+  tLocal('mappedValuesFor', { submission: submissionName })
 
 const errorDescription = computed(() => loadError.value?.statusCode === 403
   ? tLocal('errorForbidden')

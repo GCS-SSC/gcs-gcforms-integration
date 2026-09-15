@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { AgencyGcFormsIntegrationConfigMessages } from '../i18n/AgencyGcFormsIntegrationConfig'
+
 import { onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
@@ -30,76 +32,7 @@ const { agencyId, extension } = defineProps<{
 }>()
 
 const config = defineModel<GcsExtensionJsonConfig>({ required: true })
-const { locale } = useExtensionI18n()
-
-const labels = {
-  en: {
-    connection: 'GC Forms instance',
-    description: 'Set the trusted public HTTPS GC Forms API base URL for this agency.',
-    apiUrl: 'API base URL',
-    apiUrlHelp: 'HTTPS URL for the trusted public GC Forms API. Local and private-network endpoints are not allowed.',
-    identityProviderUrl: 'Identity provider URL',
-    identityProviderUrlHelp: 'Token issuer URL for the configured GC Forms instance.',
-    confirmSubmissions: 'Confirm submissions after successful sync',
-    submissionStatus: 'Imported claim status',
-    submissionStatusHelp: 'The Agency Draft status assigned to claims materialized from GC Forms submissions.',
-    defaultUrl: 'Hosted GC Forms default',
-    credentials: 'Credentials',
-    credentialsDescription: 'Store GC Forms private API keys for this agency. Private keys are encrypted and are never shown after saving.',
-    nameEn: 'English name',
-    nameFr: 'French name',
-    name: 'Name',
-    keyId: 'Key ID',
-    userId: 'User ID',
-    formId: 'Form ID',
-    privateKey: 'Private key',
-    privateKeyEditHelp: 'Leave blank to keep the saved private key.',
-    updatedAt: 'Updated',
-    actions: 'Actions',
-    edit: 'Edit',
-    newCredential: 'New credential',
-    saveCredential: 'Save credential',
-    saved: 'Credential saved.',
-    deleted: 'Credential deleted.',
-    failed: 'Credential action failed.',
-    noCredentials: 'No credentials have been saved yet.',
-    remove: 'Remove'
-  },
-  fr: {
-    connection: 'Instance GC Forms',
-    description: 'Définissez l’URL HTTPS publique de confiance de l’API GC Forms pour cette organisation.',
-    apiUrl: 'URL de base de l’API',
-    apiUrlHelp: 'URL HTTPS de l’API publique GC Forms de confiance. Les points de terminaison locaux et de réseau privé ne sont pas autorisés.',
-    identityProviderUrl: 'URL du fournisseur d’identité',
-    identityProviderUrlHelp: 'URL de l’émetteur de jetons pour l’instance GC Forms configurée.',
-    confirmSubmissions: 'Confirmer les soumissions après une synchronisation réussie',
-    submissionStatus: 'Statut des réclamations importées',
-    submissionStatusHelp: 'Le statut Brouillon de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms.',
-    defaultUrl: 'Valeur par défaut de GC Forms hébergé',
-    credentials: 'Identifiants',
-    credentialsDescription: 'Enregistrez les clés API privées GC Forms pour cette organisation. Les clés privées sont chiffrées et ne sont jamais affichées après l’enregistrement.',
-    nameEn: 'Nom anglais',
-    nameFr: 'Nom français',
-    name: 'Nom',
-    keyId: 'ID de la clé',
-    userId: 'ID utilisateur',
-    formId: 'ID du formulaire',
-    privateKey: 'Clé privée',
-    privateKeyEditHelp: 'Laissez vide pour conserver la clé privée enregistrée.',
-    updatedAt: 'Mis à jour',
-    actions: 'Actions',
-    edit: 'Modifier',
-    newCredential: 'Nouvel identifiant',
-    saveCredential: 'Enregistrer l’identifiant',
-    saved: 'Identifiant enregistré.',
-    deleted: 'Identifiant supprimé.',
-    failed: 'Échec de l’action sur l’identifiant.',
-    noCredentials: 'Aucun identifiant n’a encore été enregistré.',
-    remove: 'Supprimer'
-  }
-}
-
-const tLocal = (key: keyof typeof labels.en) => locale.value === 'fr' ? labels.fr[key] : labels.en[key]
+const { locale, t: tLocal } = useExtensionI18n(AgencyGcFormsIntegrationConfigMessages)
 
 const localConfig: Ref<GcsGcFormsAgencyConfig> = ref(parseGcFormsAgencyConfig(config.value))
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])

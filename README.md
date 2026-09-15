@@ -93,3 +93,13 @@ Optional claim line-item mappings become active when at least one line-item valu
 ## Future Work
 
 The extension does not yet materialize agreements, proponents, monitors, attachments, or richer update/upsert flows. Current behavior is create-and-link for claims and claim line items only. Future materializers should keep host ownership boundaries explicit and should add destination links for every host record they create or update.
+
+## Translation ownership
+
+Requires SDK 0.3.0. Interface catalogs live in this package's `i18n/` directory.
+Define matching English/French keys and named placeholders with
+`defineGcsExtensionMessages`, then use `useExtensionI18n(catalog)` in UI or
+`translateGcsExtensionMessage` in shared/server code. There is no host message
+lookup or fallback. Keep extension-authored common labels and validation text in
+this package; treat bilingual domain values and already-localized errors as data.
+The package owns translation tests and includes catalogs in its coverage inventory.

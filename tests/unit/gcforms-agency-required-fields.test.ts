@@ -1,3 +1,4 @@
+import { translateGcsExtensionMessage, type GcsExtensionMessages } from '@gcs-ssc/extensions'
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
@@ -11,7 +12,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     setup: (props, { emit }) => () => h('button', { onClick: () => emit('click') }, props.label)
   })
   return {
-    useExtensionI18n: () => ({ locale: { value: 'en' } }),
+    useExtensionI18n: (messages: GcsExtensionMessages) => ({ locale: { value: 'en' }, t: (key: string) => translateGcsExtensionMessage(messages, 'en', key) }),
     useExtensionApi: () => ({ get: async () => ({ items: [{ id: '1', name_en: 'Name', name_fr: 'Nom', keyId: 'key', userId: 'user', formId: 'form' }] }) }),
     ExtensionButton: button, ExtensionSaveButton: button, ExtensionFormField: field,
     ExtensionInput: input, ExtensionRawTextarea: input, ExtensionCheckbox: input, ExtensionStatusSelect: input
