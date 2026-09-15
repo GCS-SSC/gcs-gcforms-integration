@@ -116,7 +116,7 @@ const createFixture = async (page: Page, fixture: Partial<Fixture>): Promise<Fix
     egcs_tp_description_fr: 'Donnee jetable de regroupement GC Forms.',
     egcs_tp_purpose_en: 'Browser regression coverage',
     egcs_tp_purpose_fr: 'Couverture de regression navigateur',
-    egcs_tp_tclink: 'https://example.com/gcforms-grouping',
+    egcs_tp_tclink_en: 'https://example.com/gcforms-grouping', egcs_tp_tclink_fr: 'https://example.com/gcforms-grouping',
     egcs_tp_active: true
   } })
   await expectOk(transferPayment, 'Create disposable transfer payment')
