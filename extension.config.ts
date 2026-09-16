@@ -1,9 +1,93 @@
-import { defineGcsExtension } from '@gcs-ssc/extensions'
+import { defineGcsExtension, defineGcsAuditOwnership } from '@gcs-ssc/extensions'
 
 export default defineGcsExtension({
+  // Host-managed configuration, KV and secrets keep their host ownership rules.
+  auditOwnership: defineGcsAuditOwnership([
+    {
+      table: 'extensions.gcs_gcforms_credentials',
+      owner: {
+        kind: 'owner',
+        owner: 'agency',
+        column: 'agency_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_connections',
+      owner: {
+        kind: 'owner',
+        owner: 'stream',
+        column: 'stream_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_integrations',
+      owner: {
+        kind: 'owner',
+        owner: 'stream',
+        column: 'stream_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_templates',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_connections',
+        column: 'connection_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_field_mappings',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_integrations',
+        column: 'integration_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_submissions',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_connections',
+        column: 'connection_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_attachments',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_submissions',
+        column: 'submission_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_import_runs',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_connections',
+        column: 'connection_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_destination_links',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_submissions',
+        column: 'submission_id'
+      }
+    },
+    {
+      table: 'extensions.gcs_gcforms_materialization_overrides',
+      owner: {
+        kind: 'parent',
+        table: 'extensions.gcs_gcforms_submissions',
+        column: 'submission_id'
+      }
+    }
+  ]),
   key: 'gcs-gcforms-integration',
-  sdkVersion: '^0.3.0',
+  sdkVersion: '^0.3.2',
   requiredHostCapabilities: [
+    'audit-ownership',
     'agency-config',
     'stream-config-modal',
     'stream-config-page',

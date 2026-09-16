@@ -37,7 +37,7 @@ describe('GC Forms preview route', () => {
       }
     })
     const handler = (await import('../../server/api/preview.post')).default
-    const event = { context: { $db: {}, params: { streamId: 'stream-1' } } } as never
+    const event = { node: { req: { headers: {} } }, context: { $db: {}, params: { streamId: 'stream-1' } } } as never
 
     const result = await handler(event)
 
@@ -77,7 +77,7 @@ describe('GC Forms preview route', () => {
     })
     const handler = (await import('../../server/api/preview.post')).default
 
-    const result = await handler({ context: { $db: {}, params: { streamId: 'stream-1' } } } as never)
+    const result = await handler({ node: { req: { headers: {} } }, context: { $db: {}, params: { streamId: 'stream-1' } } } as never)
 
     expect(result).toEqual(expect.objectContaining({
       ok: true,

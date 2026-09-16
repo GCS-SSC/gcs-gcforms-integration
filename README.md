@@ -103,3 +103,19 @@ Define matching English/French keys and named placeholders with
 lookup or fallback. Keep extension-authored common labels and validation text in
 this package; treat bilingual domain values and already-localized errors as data.
 The package owns translation tests and includes catalogs in its coverage inventory.
+
+## Audit ownership
+
+Credentials follow `agency_id`. Connections and integrations follow their Program stream. Templates, submissions and import runs follow their connection; field mappings follow their integration; attachments, destination links and materialization overrides follow their submission. A destination Proponent does not replace the originating submission agency.
+
+The manifest targets SDK 0.3.2 and explicitly declares its dedicated tables (an empty
+list when there are none). Extension migration journals remain global infrastructure.
+
+Run `bun run test:audit` from this extension inside a GCS-SSC host checkout with
+`tooling/gcs-ssc` available. The extension owns its concrete fixtures; the private
+host adapter exercises the real audit migrations, declaration publication, row
+triggers, both ownership interpreters, rollback and immutable historical audiences.
+These reduced-schema ownership fixtures complement the extension’s normal tests.
+Set `AUDIT_EXTENSION_POSTGRES_URL` to a disposable PostgreSQL database URL ending
+in `_test` to run the same suite on PostgreSQL; the adapter creates and removes an
+isolated database. Without that variable, the suite uses in-memory PGlite.
