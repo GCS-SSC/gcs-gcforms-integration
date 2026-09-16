@@ -809,7 +809,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
       agreementOptions: Array<Record<string, unknown>>
       mappingFieldRows: unknown[]
       filteredFailedMaterializations: unknown[]
-      searchedAgreementSelectOptions: unknown[]
+      agreementSelectOptions: unknown[]
       refreshTemplate: () => Promise<void>
       syncSubmissions: () => Promise<void>
       saveConfiguration: () => Promise<void>
@@ -883,7 +883,10 @@ describe('StreamGcFormsIntegrationConfig', () => {
     await nextTick()
     expect(setupState.mappingFieldRows.length).toBeGreaterThan(0)
     expect(Array.isArray(setupState.filteredFailedMaterializations)).toBe(true)
-    expect(Array.isArray(setupState.searchedAgreementSelectOptions)).toBe(true)
+    expect(setupState.agreementSelectOptions).toEqual([
+      { value: 'agreement-1', label: 'Agreement One' },
+      { value: 'agreement-2', label: 'Agreement Two' }
+    ])
 
     await setupState.refreshTemplate()
     await setupState.syncSubmissions()

@@ -495,17 +495,6 @@ const agreementSelectOptions = computed(() => agreementOptions.value.map(agreeme
   label: agreement.label,
   value: agreement.id
 })))
-const searchedAgreementSelectOptions = computed(() => {
-  const search = matchSearchTerm.value.trim().toLowerCase()
-  if (!search) {
-    return agreementSelectOptions.value
-  }
-
-  return agreementSelectOptions.value.filter(agreement =>
-    agreement.label.toLowerCase().includes(search)
-    || agreement.value.toLowerCase().includes(search)
-  )
-})
 const credentialOptions = computed(() => credentials.value.map(credential => ({
   label: `${isFrench.value ? credential.name_fr : credential.name_en} (${credential.formId}, ${credential.keyId})`,
   value: credential.id
@@ -1148,7 +1137,8 @@ onMounted(async () => {
             <ExtensionSelectMenu
               v-model:search-term="matchSearchTerm"
               v-model="selectedMatchId"
-              :items="searchedAgreementSelectOptions"
+              :items="agreementSelectOptions"
+              :filter-fields="['label', 'value']"
               value-key="value"
               label-key="label"
               searchable

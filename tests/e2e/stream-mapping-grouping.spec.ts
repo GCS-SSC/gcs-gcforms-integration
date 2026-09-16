@@ -256,7 +256,10 @@ test('renders a French materialization diagnostic and retries without leaking ra
                   }],
                   createdAt: '2026-07-24T12:00:00.000Z'
                 }],
-            agreements: [{ id: '101', agreementNumber: 'AGR-001', label: 'AGR-001' }]
+            agreements: [
+              { id: '101', agreementNumber: 'AGR-FIRST', label: 'Première entente' },
+              { id: '102', agreementNumber: 'AGR-SECOND', label: 'Deuxième entente' }
+            ]
           })
         })
       }
@@ -277,6 +280,22 @@ test('renders a French materialization diagnostic and retries without leaking ra
     await expect(matchButtons).toHaveCount(1)
     await matchButtons.first().click()
     await expect(page.getByText(/Associer la soumission: Réclamation française/)).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    const agreementTrigger = dialog.locator('button[aria-haspopup="listbox"]')
+    await expect(agreementTrigger).toContainText('Première entente')
+    await agreementTrigger.click()
+    await page.locator('input[role="combobox"]').last().fill('102')
+    await expect(page.getByRole('option', { name: 'Deuxième entente', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Première entente', exact: true })).toHaveCount(0)
+    await expect(agreementTrigger).toContainText('Première entente')
+    await page.getByRole('option', { name: 'Deuxième entente', exact: true }).click()
+    await expect(agreementTrigger).toContainText('Deuxième entente')
+    await agreementTrigger.click()
+    await page.locator('input[role="combobox"]').last().fill('Première')
+    await expect(page.getByRole('option', { name: 'Première entente', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Deuxième entente', exact: true })).toHaveCount(0)
+    await expect(agreementTrigger).toContainText('Deuxième entente')
+    await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'Associer', exact: true }).last().click()
 
     await expect(page.getByText(

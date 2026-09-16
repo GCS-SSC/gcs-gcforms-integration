@@ -87,7 +87,7 @@ const defaultDependencies = (): ManagedGcFormsE2eDependencies => ({
   prepareHost: async environment => {
     await prepareManagedProductionServer(
       'production',
-      'development',
+      environment.ENVIRONMENT_TYPE,
       command => runRootCommand(command, environment)
     )
   },
