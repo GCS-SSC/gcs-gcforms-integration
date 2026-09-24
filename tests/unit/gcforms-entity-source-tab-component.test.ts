@@ -18,7 +18,8 @@ const componentProps = {
   extensionKey: 'gcs-gcforms-integration',
   context: {
     target: 'proponent',
-    applicantRecipientId: '42'
+    applicantRecipientId: '42',
+    agencyId: '7'
   },
   config: {},
   rbac: {
@@ -53,6 +54,34 @@ afterEach(() => {
 })
 
 describe('GcFormsEntitySourceTab', () => {
+  it('reloads for a changed agency and ignores the prior agency response', async () => {
+    let releaseOldResponse: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn<typeof fetch>(async input => {
+      if (String(input).includes('agencyId=7')) {
+        return await new Promise<Response>(resolve => { releaseOldResponse = resolve })
+      }
+      return jsonResponse({ items: [] })
+    })
+    const wrapper = await mountTab('en', fetchMock)
+
+    await wrapper.setProps({
+      context: { target: 'proponent', applicantRecipientId: '42', agencyId: '8' }
+    } as never)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions?agencyId=8',
+      expect.objectContaining({ method: 'GET' }))
+    expect(wrapper.get('[data-testid="gcforms-empty-state"]').exists()).toBe(true)
+
+    releaseOldResponse?.(jsonResponse({ items: [{ id: 'stale-submission', submission_name: 'stale-submission', status: 'imported' }] }))
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('stale-submission')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([
     {
       localeId: 'en' as const,
@@ -109,7 +138,7 @@ describe('GcFormsEntitySourceTab', () => {
     const text = wrapper.text()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions',
+      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions?agencyId=7',
       expect.objectContaining({ method: 'GET' })
     )
     expect(text).toContain(title)

@@ -17,7 +17,7 @@ type AgencyExtensionRegistry = {
 
 const extensionKey = 'gcs-gcforms-integration'
 const proponentId = '1'
-const sourceApiPattern = `**/api/extensions/${extensionKey}/proponents/${proponentId}/submissions`
+const sourceApiPattern = new RegExp(`/api/extensions/${extensionKey}/proponents/${proponentId}/submissions[?]agencyId=[^&]+(?:&|$)`)
 const longMappedValue = `LONG-${'x'.repeat(720)}`
 
 const expectOk = async (response: APIResponse, label: string): Promise<void> => {
@@ -75,13 +75,18 @@ const sourceTabPath = (localeId: 'en' | 'fr'): string => {
 const openSourceTab = async (
   page: Page,
   localeId: 'en' | 'fr',
-  viewport: { width: number, height: number }
+  viewport: { width: number, height: number },
+  agencyId: string
 ): Promise<void> => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(sourceTabPath(localeId))
+  await page.locator('#proponent-extension-agency-context').click()
+  await page.getByRole('option', { name: new RegExp(`^${agencyId}:`) }).first().click()
   const sourceTab = page.getByRole('tab', { name: 'GC Forms', exact: true })
   await expect(sourceTab).toBeVisible()
+  const sourceRequest = page.waitForRequest(request => request.url().includes(`/proponents/${proponentId}/submissions`))
   await sourceTab.click()
+  expect(new URL((await sourceRequest).url()).searchParams.get('agencyId')).toBe(agencyId)
   await expect(page.getByRole('heading', {
     level: 2,
     name: localeId === 'fr' ? 'Données sources de GC Forms' : 'GC Forms source data'
@@ -146,6 +151,13 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
   try {
     await patchExtensionState(page, agencyId, { ...initialState, enabled: true })
 
+    await test.step('loads the real empty source response in the selected agency context', async () => {
+      await openSourceTab(page, 'en', { width: 1440, height: 900 }, agencyId)
+      await expect(page.getByTestId('gcforms-empty-state'))
+        .toHaveText('No GC Forms submissions have been linked to this record yet.')
+      await expect(page.getByRole('alert')).toHaveCount(0)
+    })
+
     for (const [name, viewport] of [
       ['desktop', { width: 1440, height: 900 }],
       ['mobile', { width: 390, height: 844 }]
@@ -158,7 +170,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
             body: JSON.stringify(populatedPayload)
           })
         })
-        await openSourceTab(page, 'en', viewport)
+        await openSourceTab(page, 'en', viewport, agencyId)
 
         const sourceSection = page.getByRole('heading', { name: 'GC Forms source data' }).locator('..').locator('..')
         await expect(page.getByText('Imported; confirmation pending', { exact: true })).toBeVisible()
@@ -182,7 +194,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
       await page.route(sourceApiPattern, async route => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' })
       })
-      await openSourceTab(page, 'fr', viewport)
+      await openSourceTab(page, 'fr', viewport, agencyId)
 
       await expect(page.getByTestId('gcforms-empty-state'))
         .toHaveText('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
@@ -208,7 +220,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
               body: '{"items":[]}'
             })
       })
-      await openSourceTab(page, 'fr', viewport)
+      await openSourceTab(page, 'fr', viewport, agencyId)
 
       const alert = page.getByRole('alert')
       await expect(alert).toContainText('Impossible de charger les données sources de GC Forms.')
@@ -233,7 +245,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
           body: JSON.stringify({ data: { message: 'Forbidden' } })
         })
       })
-      await openSourceTab(page, 'en', viewport)
+      await openSourceTab(page, 'en', viewport, agencyId)
 
       const alert = page.getByRole('alert')
       await expect(alert).toContainText('GC Forms source data could not be loaded.')

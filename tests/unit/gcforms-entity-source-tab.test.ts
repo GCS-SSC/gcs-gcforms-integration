@@ -5,8 +5,8 @@ describe('GC Forms entity source tab helpers', () => {
   it.each([
     [
       'proponent',
-      { target: 'proponent', applicantRecipientId: 'recipient-1' },
-      '/proponents/recipient-1/submissions'
+      { target: 'proponent', applicantRecipientId: 'recipient-1', agencyId: 'agency 1' },
+      '/proponents/recipient-1/submissions?agencyId=agency%201'
     ],
     [
       'claim',

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { GcFormsEntitySourceTabStatusMessages, GcFormsEntitySourceTabMessages } from '../i18n/GcFormsEntitySourceTab'
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
@@ -51,6 +51,7 @@ interface MappedDisplayRow {
 const items: Ref<LinkedSubmission[]> = ref([])
 const isLoading: Ref<boolean> = ref(true)
 const loadError: Ref<LoadError | null> = ref(null)
+let activeRequestVersion = 0
 
 const endpoint = computed(() => buildGcFormsEntitySourceEndpoint(context))
 const localeCode = computed(() => locale.value === 'fr' ? 'fr-CA' : 'en-CA')
@@ -157,27 +158,31 @@ const errorDescription = computed(() => loadError.value?.statusCode === 403
   : tLocal('errorDefault'))
 
 const refresh = async () => {
+  const requestVersion = ++activeRequestVersion
+  const requestedEndpoint = endpoint.value
   try {
     isLoading.value = true
     loadError.value = null
-    if (!endpoint.value) {
+    if (!requestedEndpoint) {
       items.value = []
       return
     }
 
-    const payload = await api.get<{ items?: LinkedSubmission[] }>(endpoint.value)
+    const payload = await api.get<{ items?: LinkedSubmission[] }>(requestedEndpoint)
+    if (requestVersion !== activeRequestVersion) return
     items.value = payload.items ?? []
   } catch (error: unknown) {
+    if (requestVersion !== activeRequestVersion) return
     items.value = []
     loadError.value = {
       statusCode: error instanceof FetchResponseError ? error.response.status : null
     }
   } finally {
-    isLoading.value = false
+    if (requestVersion === activeRequestVersion) isLoading.value = false
   }
 }
 
-onMounted(refresh)
+watch(endpoint, () => { void refresh() }, { immediate: true })
 
 const hasItems = computed(() => items.value.length > 0)
 </script>

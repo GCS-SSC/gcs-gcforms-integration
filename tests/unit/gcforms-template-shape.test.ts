@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { generateKeyPairSync } from 'node:crypto'
+import { createCipheriv, createHash, createPublicKey, generateKeyPairSync, publicEncrypt, randomBytes } from 'node:crypto'
 import { Kysely, PostgresDialect, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
@@ -27,6 +27,7 @@ type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 
 let db: TestDb
 let previousRootKey: string | undefined
+let seededPrivateKey = ''
 const rootKey = Buffer.from(Uint8Array.from({ length: 32 }, (_, index) => index + 1)).toString('base64')
 
 const createSyncContext = () => ({
@@ -439,6 +440,7 @@ const seedConfig = async () => {
       _deleted: false
     })
     .execute()
+  seededPrivateKey = privateKeyPem()
   await setEncryptedExtensionSecret(db, {
     rootKey,
     extensionKey: GCFORMS_EXTENSION_KEY,
@@ -446,7 +448,7 @@ const seedConfig = async () => {
     ownerId: '20',
     secretKey: '1',
     value: {
-      key: privateKeyPem()
+      key: seededPrivateKey
     }
   })
 }
@@ -528,6 +530,119 @@ afterEach(async () => {
 })
 
 describe('GC Forms template shape guard', () => {
+  it('syncs a discovered submission into an agreement claim and line item exactly once', async () => {
+    const tables = [
+      `CREATE TABLE "Common_Status" (id bigserial PRIMARY KEY, egcs_cn_agency bigint NOT NULL, egcs_cn_isdraft boolean NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Profile" (id bigserial PRIMARY KEY, egcs_fc_agreementnumber varchar(30) NOT NULL, egcs_fc_transferpaymentstream bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Agency_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_ay_fiscalyeardisplay varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Agency_Cost_Category" (id bigserial PRIMARY KEY, egcs_ay_name_en text NOT NULL, egcs_ay_name_fr text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_ay_name_en text NOT NULL, egcs_ay_name_fr text NOT NULL, egcs_ay_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_tp_transferpaymentstream bigint NOT NULL, egcs_tp_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL, egcs_fc_organizationcostcategory bigint NOT NULL, egcs_fc_costsubsection text NOT NULL, egcs_fc_description text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE extensions.gcs_gcforms_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE extensions.gcs_gcforms_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`
+    ]
+    for (const statement of tables) await sql.raw(statement).execute(db)
+    await sql`INSERT INTO "Common_Status" VALUES (91, 20, true, false)`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Profile" VALUES (101, 'AGR-SYNC', 30, false)`.execute(db)
+    await sql`INSERT INTO "Agency_Fiscal_Year" VALUES (401, '2025-2026', false)`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Budget_Fiscal_Year" VALUES (501, 101, 401, false)`.execute(db)
+    await sql`INSERT INTO "Agency_Cost_Category" VALUES (301, 'Operating Costs', 'Frais de fonctionnement', false)`.execute(db)
+    await sql`INSERT INTO "Agency_Cost_Category_Line_Item" VALUES (601, 'Travel', 'Déplacement', 301, false)`.execute(db)
+    await sql`INSERT INTO "Transfer_Payment_Stream_Cost_Category_Line_Item" VALUES (801, 30, 601, false)`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (701, 501, 801, 'Delivery', 'Travel', false)`.execute(db)
+
+    const mapping = (id: string, sourceQuestionId: string, destinationEntity: string, destinationPath: string, transform: string) => ({
+      id, sourceQuestionId, destinationEntity, destinationPath, transform, required: true, onMissing: 'block', onInvalid: 'block'
+    })
+    const mappings = [
+      mapping('agreement', 'agreement_number', 'claim', 'egcs_fc_fundingagreement', 'string'),
+      mapping('year', 'fiscal_year', 'claim', 'egcs_fc_fiscalyear', 'string'),
+      mapping('start', 'claim_period_start_month', 'claim', 'egcs_fc_periodstart', 'number'),
+      mapping('end', 'claim_period_end_month', 'claim', 'egcs_fc_periodend', 'number'),
+      mapping('received', '__gcforms_created_at', 'claim', 'egcs_fc_receiveddate', 'date'),
+      mapping('category', 'submitted_cost_category', 'claim_line_item', 'egcs_fc_submittedcostcategory', 'string'),
+      mapping('subsection', 'submitted_cost_subsection', 'claim_line_item', 'egcs_fc_submittedcostsubsection', 'string'),
+      mapping('line', 'submitted_line_item', 'claim_line_item', 'egcs_fc_submittedlineitem', 'string'),
+      mapping('amount', 'submitted_amount', 'claim_line_item', 'egcs_fc_amount', 'money')
+    ]
+    await db.updateTable('extensions.stream_configuration').set({ config: { credentialId: '1', mappings } }).where('stream_id', '=', '30').execute()
+    const answers = JSON.stringify({ agreement_number: 'AGR-SYNC', fiscal_year: '501', claim_period_start_month: '0', claim_period_end_month: '2', submitted_line_items: [{ submitted_cost_category: 'Operating Costs', submitted_cost_subsection: 'Delivery', submitted_line_item: 'Travel', submitted_amount: '1234.56' }] })
+    const encryptionKey = randomBytes(32)
+    const nonce = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce)
+    const plaintext = JSON.stringify({
+      createdAt: 1725553403512, status: 'New', confirmationCode: 'confirm-1', answers,
+      checksum: createHash('md5').update(answers).digest('hex')
+    })
+    const encryptedResponses = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]).toString('base64')
+    const publicKey = createPublicKey(seededPrivateKey)
+    const wrap = (value: Buffer) => publicEncrypt({ key: publicKey, oaepHash: 'sha256' }, value).toString('base64')
+    const encryptedSubmission = {
+      encryptedKey: wrap(encryptionKey), encryptedNonce: wrap(nonce),
+      encryptedAuthTag: wrap(cipher.getAuthTag()), encryptedResponses
+    }
+    const remoteFetch = vi.fn(async (url: string) => {
+      const body = url.endsWith('/oauth/v2/token') ? { access_token: 'test-token' }
+        : url.endsWith('/forms/form-1/template') ? initialTemplate
+        : url.endsWith('/forms/form-1/submission/new') ? [{ name: 'submission-sync-1', createdAt: 1725553403512 }]
+        : url.endsWith('/forms/form-1/submission/submission-sync-1') ? encryptedSubmission
+        : null
+      return new Response(JSON.stringify(body), { status: body === null ? 404 : 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', remoteFetch)
+    await refreshTemplate(db, '30')
+    const context = createSyncContext()
+    context.writeAuthorization.createAgreementClaim = async (trx: TestDb, input: any) => {
+      const claim = await trx.insertInto('Funding_Case_Agreement_Claim').values({
+        egcs_fc_fundingagreement: input.agreementId, egcs_fc_fiscalyear: input.fiscalYearId,
+        egcs_fc_isfinalforyear: input.isFinalForYear, egcs_fc_periodstart: input.periodStart,
+        egcs_fc_periodend: input.periodEnd, egcs_fc_receiveddate: input.receivedDate,
+        egcs_fc_gcformssubmissionuuid: input.submissionUuid, egcs_fc_status: input.expectedDraftStatusId
+      }).returning('id').executeTakeFirstOrThrow()
+      const lineItemIds: string[] = []
+      for (const line of input.lineItems) {
+        const item = await trx.insertInto('Funding_Case_Agreement_Claim_Line_Item').values({
+          egcs_fc_fundingagreementclaim: String(claim.id), egcs_fc_fundingagreementbudgetlineitem: line.budgetLineItemId,
+          egcs_fc_submittedcostcategory: line.submittedCostCategory, egcs_fc_submittedcostsubsection: line.submittedCostSubsection,
+          egcs_fc_submittedlineitem: line.submittedLineItem, egcs_fc_description: line.description,
+          egcs_fc_amount: line.amount, egcs_fc_currency: line.currency
+        }).returning('id').executeTakeFirstOrThrow()
+        lineItemIds.push(String(item.id))
+      }
+      return { status: 'created', claimId: String(claim.id), lineItemIds, draftStatusId: '91' }
+    }
+    const syncRoute = (await import('../../server/api/sync.post')).default
+    const event = { context: {
+      $db: db, params: { streamId: '30' },
+      $authContext: { userId: 'user-1', userAbilities: { authorize: () => true } },
+      gcsExtension: { extensionKey: GCFORMS_EXTENSION_KEY, stream: context.stream, writeAuthorization: context.writeAuthorization }
+    } } as never
+    await expect(syncRoute(event)).resolves.toMatchObject({ ok: true, imported: 1, problems: 0 })
+    const claims = await sql<{ id: string, agreement_id: string, uuid: string }>`SELECT id::text, egcs_fc_fundingagreement::text AS agreement_id, egcs_fc_gcformssubmissionuuid AS uuid FROM "Funding_Case_Agreement_Claim"`.execute(db)
+    expect(claims.rows).toEqual([{ id: '1', agreement_id: '101', uuid: 'submission-sync-1' }])
+    const lines = await sql<{ claim_id: string, budget_id: string, amount: string }>`SELECT egcs_fc_fundingagreementclaim::text AS claim_id, egcs_fc_fundingagreementbudgetlineitem::text AS budget_id, egcs_fc_amount::text AS amount FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)
+    expect(lines.rows).toEqual([{ claim_id: '1', budget_id: '701', amount: '1234.56' }])
+    const submission = await db.selectFrom('extensions.gcs_gcforms_submissions')
+      .select(['status', 'diagnostic_code', 'mapped_values']).executeTakeFirstOrThrow()
+    expect(submission).toMatchObject({ status: 'imported', diagnostic_code: null })
+    expect(submission.mapped_values).toEqual(expect.arrayContaining([
+      expect.objectContaining({ destinationEntity: 'claim', destinationPath: 'egcs_fc_fundingagreement', value: 'AGR-SYNC' }),
+      expect.objectContaining({ destinationEntity: 'claim_line_item', destinationPath: 'egcs_fc_amount', value: ['1234.56'] })
+    ]))
+    const links = await sql<{ destination_entity: string, owner_id: string }>`SELECT destination_entity, owner_id::text FROM extensions.gcs_gcforms_destination_links ORDER BY id`.execute(db)
+    expect(links.rows).toEqual([
+      { destination_entity: 'claim', owner_id: '1' },
+      { destination_entity: 'claim_line_item', owner_id: '1' }
+    ])
+    expect(remoteFetch).toHaveBeenCalledWith(expect.stringMatching(/\/forms\/form-1\/submission\/submission-sync-1$/), expect.any(Object))
+    await expect(syncRoute(event)).resolves.toMatchObject({ ok: true, imported: 0, skipped: 1, problems: 0 })
+    expect((await sql`SELECT id FROM "Funding_Case_Agreement_Claim"`.execute(db)).rows).toHaveLength(1)
+    expect((await sql`SELECT id FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)).rows).toHaveLength(1)
+  })
   it('serializes JSONB values as Postgres parameters without changing array or object shape', async () => {
     const postgresDb: Kysely<Record<string, never>> = new Kysely({
       dialect: new PostgresDialect({
