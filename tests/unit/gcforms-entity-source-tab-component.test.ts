@@ -19,7 +19,7 @@ const componentProps = {
   context: {
     target: 'proponent',
     applicantRecipientId: '42',
-    agencyId: '7'
+    agencies: [{ agencyId: '7', nameEn: 'Agency', nameFr: 'Agence', config: {} }]
   },
   config: {},
   rbac: {
@@ -54,10 +54,10 @@ afterEach(() => {
 })
 
 describe('GcFormsEntitySourceTab', () => {
-  it('reloads for a changed agency and ignores the prior agency response', async () => {
+  it('reloads for a changed Proponent and ignores the prior Proponent response', async () => {
     let releaseOldResponse: ((response: Response) => void) | undefined
     const fetchMock = vi.fn<typeof fetch>(async input => {
-      if (String(input).includes('agencyId=7')) {
+      if (String(input).includes('/proponents/42/')) {
         return await new Promise<Response>(resolve => { releaseOldResponse = resolve })
       }
       return jsonResponse({ items: [] })
@@ -65,12 +65,12 @@ describe('GcFormsEntitySourceTab', () => {
     const wrapper = await mountTab('en', fetchMock)
 
     await wrapper.setProps({
-      context: { target: 'proponent', applicantRecipientId: '42', agencyId: '8' }
+      context: { target: 'proponent', applicantRecipientId: '43', agencies: [{ agencyId: '8', nameEn: 'Agency', nameFr: 'Agence', config: {} }] }
     } as never)
     await flushPromises()
 
     expect(fetchMock).toHaveBeenNthCalledWith(2,
-      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions?agencyId=8',
+      '/api/extensions/gcs-gcforms-integration/proponents/43/submissions',
       expect.objectContaining({ method: 'GET' }))
     expect(wrapper.get('[data-testid="gcforms-empty-state"]').exists()).toBe(true)
 
@@ -138,7 +138,7 @@ describe('GcFormsEntitySourceTab', () => {
     const text = wrapper.text()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions?agencyId=7',
+      '/api/extensions/gcs-gcforms-integration/proponents/42/submissions',
       expect.objectContaining({ method: 'GET' })
     )
     expect(text).toContain(title)

@@ -5,7 +5,7 @@ export const buildGcFormsEntitySourceEndpoint = (
   context: ExtensionEntityTabContext
 ): string => {
   if (context.target === 'proponent' && context.applicantRecipientId) {
-    return `/proponents/${context.applicantRecipientId}/submissions?agencyId=${encodeURIComponent(context.agencyId)}`
+    return `/proponents/${context.applicantRecipientId}/submissions`
   }
 
   if (context.target === 'claim' && context.claimId) {
