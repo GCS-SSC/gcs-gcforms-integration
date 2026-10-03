@@ -92,6 +92,7 @@ const initialTemplate = {
   titleEn: 'Claims',
   titleFr: 'Reclamations',
   elements: [
+    { id: 7, type: 'dropdown', properties: { questionId: 'submitting_proponent', titleEn: 'Submitting Proponent', titleFr: 'Promoteur qui soumet', validation: { required: true } } },
     {
       id: 1,
       type: 'textField',
@@ -158,7 +159,7 @@ const changedTemplate = {
         validation: { required: true }
       }
     },
-    ...initialTemplate.elements.slice(1)
+    ...initialTemplate.elements.filter(element => element.id !== 1)
   ]
 }
 
@@ -532,6 +533,8 @@ afterEach(async () => {
 describe('GC Forms template shape guard', () => {
   it('syncs a discovered submission into an agreement claim and line item exactly once', async () => {
     const tables = [
+      `CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY, egcs_ar_legalname_en text, egcs_ar_legalname_fr text, egcs_ar_operatingname_en text, egcs_ar_operatingname_fr text, egcs_ar_active boolean NOT NULL DEFAULT true, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_applicantrecipient bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Common_Status" (id bigserial PRIMARY KEY, egcs_cn_agency bigint NOT NULL, egcs_cn_isdraft boolean NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Profile" (id bigserial PRIMARY KEY, egcs_fc_agreementnumber varchar(30) NOT NULL, egcs_fc_transferpaymentstream bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Agency_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_ay_fiscalyeardisplay varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
@@ -540,12 +543,14 @@ describe('GC Forms template shape guard', () => {
       `CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_ay_name_en text NOT NULL, egcs_ay_name_fr text NOT NULL, egcs_ay_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_tp_transferpaymentstream bigint NOT NULL, egcs_tp_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL, egcs_fc_organizationcostcategory bigint NOT NULL, egcs_fc_costsubsection text NOT NULL, egcs_fc_description text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
-      `CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_applicantrecipient bigint NOT NULL, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE extensions.gcs_gcforms_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE extensions.gcs_gcforms_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`
     ]
     for (const statement of tables) await sql.raw(statement).execute(db)
+    await sql`INSERT INTO "Applicant_Recipient_Profile"(id,egcs_ar_legalname_en,egcs_ar_legalname_fr) VALUES(901,'Submitting Organization','Organisme soumissionnaire')`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Applicant_Recipient"(egcs_fc_fundingagreement,egcs_fc_applicantrecipient) VALUES(101,901)`.execute(db)
     await sql`INSERT INTO "Common_Status" VALUES (91, 20, true, false)`.execute(db)
     await sql`INSERT INTO "Funding_Case_Agreement_Profile" VALUES (101, 'AGR-SYNC', 30, false)`.execute(db)
     await sql`INSERT INTO "Agency_Fiscal_Year" VALUES (401, '2025-2026', false)`.execute(db)
@@ -559,6 +564,7 @@ describe('GC Forms template shape guard', () => {
       id, sourceQuestionId, destinationEntity, destinationPath, transform, required: true, onMissing: 'block', onInvalid: 'block'
     })
     const mappings = [
+      mapping('proponent', 'submitting_proponent', 'claim', 'egcs_fc_applicantrecipient', 'string'),
       mapping('agreement', 'agreement_number', 'claim', 'egcs_fc_fundingagreement', 'string'),
       mapping('year', 'fiscal_year', 'claim', 'egcs_fc_fiscalyear', 'string'),
       mapping('start', 'claim_period_start_month', 'claim', 'egcs_fc_periodstart', 'number'),
@@ -570,7 +576,7 @@ describe('GC Forms template shape guard', () => {
       mapping('amount', 'submitted_amount', 'claim_line_item', 'egcs_fc_amount', 'money')
     ]
     await db.updateTable('extensions.stream_configuration').set({ config: { credentialId: '1', mappings } }).where('stream_id', '=', '30').execute()
-    const answers = JSON.stringify({ agreement_number: 'AGR-SYNC', fiscal_year: '501', claim_period_start_month: '0', claim_period_end_month: '2', submitted_line_items: [{ submitted_cost_category: 'Operating Costs', submitted_cost_subsection: 'Delivery', submitted_line_item: 'Travel', submitted_amount: '1234.56' }] })
+    const answers = JSON.stringify({ submitting_proponent: '901', agreement_number: 'AGR-SYNC', fiscal_year: '501', claim_period_start_month: '0', claim_period_end_month: '2', submitted_line_items: [{ submitted_cost_category: 'Operating Costs', submitted_cost_subsection: 'Delivery', submitted_line_item: 'Travel', submitted_amount: '1234.56' }] })
     const encryptionKey = randomBytes(32)
     const nonce = randomBytes(12)
     const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce)
@@ -598,7 +604,7 @@ describe('GC Forms template shape guard', () => {
     const context = createSyncContext()
     context.writeAuthorization.createAgreementClaim = async (trx: TestDb, input: any) => {
       const claim = await trx.insertInto('Funding_Case_Agreement_Claim').values({
-        egcs_fc_fundingagreement: input.agreementId, egcs_fc_fiscalyear: input.fiscalYearId,
+        egcs_fc_fundingagreement: input.agreementId, egcs_fc_applicantrecipient: input.applicantRecipientId, egcs_fc_fiscalyear: input.fiscalYearId,
         egcs_fc_isfinalforyear: input.isFinalForYear, egcs_fc_periodstart: input.periodStart,
         egcs_fc_periodend: input.periodEnd, egcs_fc_receiveddate: input.receivedDate,
         egcs_fc_gcformssubmissionuuid: input.submissionUuid, egcs_fc_status: input.expectedDraftStatusId

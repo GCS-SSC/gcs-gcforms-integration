@@ -24,6 +24,8 @@ type TemplateElement = {
 let db: TestDb
 
 const createSchema = async () => {
+  await sql`CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY, egcs_ar_legalname_en text, egcs_ar_legalname_fr text, egcs_ar_operatingname_en text, egcs_ar_operatingname_fr text, egcs_ar_active boolean NOT NULL DEFAULT true, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_applicantrecipient bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`
     CREATE TABLE "Funding_Case_Agreement_Profile" (
       id bigserial PRIMARY KEY,
@@ -85,6 +87,8 @@ const createSchema = async () => {
 }
 
 const seedStreamBudgetData = async () => {
+  await sql`INSERT INTO "Applicant_Recipient_Profile"(id,egcs_ar_legalname_en,egcs_ar_legalname_fr) VALUES(901,'Submitting Organization','Organisme soumissionnaire')`.execute(db)
+  await sql`INSERT INTO "Funding_Case_Agreement_Applicant_Recipient"(egcs_fc_fundingagreement,egcs_fc_applicantrecipient) VALUES(101,901)`.execute(db)
   await db.insertInto('Funding_Case_Agreement_Profile').values([
     { id: '101', egcs_fc_agreementnumber: 'A-001', egcs_fc_transferpaymentstream: '10', _deleted: false },
     { id: '102', egcs_fc_agreementnumber: 'A-002', egcs_fc_transferpaymentstream: '10', _deleted: true },
@@ -183,6 +187,12 @@ describe('GC Forms claim template generator', () => {
 
   it('replaces stream-dependent dropdown choices and leaves unrelated fields intact', async () => {
     const template = await generateGcFormsClaimTemplate(db, '10')
+    const proponent = findElement(template.elements, 'submitting_proponent')
+    expect(proponent.type).toBe('dropdown')
+    expect(proponent.properties?.validation?.required).toBe(true)
+    expect(proponent.properties?.titleEn).toBe('Submitting Proponent (required)')
+    expect(proponent.properties?.titleFr).toBe('Promoteur qui soumet la réclamation (obligatoire)')
+    expect(proponent.properties?.choices).toEqual([{ en: '', fr: '' }, { en: 'Submitting Organization (GCS #901)', fr: 'Organisme soumissionnaire (GCS #901)' }])
     const fiscalYear = findElement(template.elements, 'fiscal_year')
     const costCategory = findElement(template.elements, 'submitted_cost_category')
     const lineItem = findElement(template.elements, 'submitted_line_item')

@@ -30,6 +30,7 @@ const db: TestDb = new Kysely<GcFormsIntegrationHostDatabase>({
 })
 
 const mappings: GcsGcFormsFieldMapping[] = [
+  { id: 'proponent', sourceQuestionId: 'proponent', destinationEntity: 'claim', destinationPath: 'egcs_fc_applicantrecipient', transform: 'string', required: true, onMissing: 'block', onInvalid: 'block' },
   { id: 'agreement', sourceQuestionId: 'agreement', destinationEntity: 'claim', destinationPath: 'egcs_fc_fundingagreement', transform: 'string', required: true, onMissing: 'block', onInvalid: 'block' },
   { id: 'fiscal-year', sourceQuestionId: 'fiscal-year', destinationEntity: 'claim', destinationPath: 'egcs_fc_fiscalyear', transform: 'string', required: true, onMissing: 'block', onInvalid: 'block' },
   { id: 'period-start', sourceQuestionId: 'period-start', destinationEntity: 'claim', destinationPath: 'egcs_fc_periodstart', transform: 'number', required: true, onMissing: 'block', onInvalid: 'block' },
@@ -43,6 +44,7 @@ const mappings: GcsGcFormsFieldMapping[] = [
 ]
 
 const mappedValues: GcsGcFormsMappedValue[] = [
+  { mappingId: 'proponent', sourceQuestionId: 'proponent', destinationEntity: 'claim', destinationPath: 'egcs_fc_applicantrecipient', value: '301' },
   { mappingId: 'agreement', sourceQuestionId: 'agreement', destinationEntity: 'claim', destinationPath: 'egcs_fc_fundingagreement', value: 'AGR-ATOMIC' },
   { mappingId: 'fiscal-year', sourceQuestionId: 'fiscal-year', destinationEntity: 'claim', destinationPath: 'egcs_fc_fiscalyear', value: '501' },
   { mappingId: 'period-start', sourceQuestionId: 'period-start', destinationEntity: 'claim', destinationPath: 'egcs_fc_periodstart', value: 0 },
@@ -58,7 +60,9 @@ const mappedValues: GcsGcFormsMappedValue[] = [
 const createSchema = async () => {
   await sql`DROP SCHEMA IF EXISTS extensions CASCADE`.execute(db)
   await sql`CREATE SCHEMA extensions`.execute(db)
-  await sql`DROP TABLE IF EXISTS "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile" CASCADE`.execute(db)
+  await sql`DROP TABLE IF EXISTS "Applicant_Recipient_Profile", "Funding_Case_Agreement_Applicant_Recipient", "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile" CASCADE`.execute(db)
+  await sql`CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY, egcs_ar_legalname_en text, egcs_ar_legalname_fr text, egcs_ar_operatingname_en text, egcs_ar_operatingname_fr text, egcs_ar_active boolean NOT NULL DEFAULT true, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_applicantrecipient bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Funding_Case_Agreement_Profile" (id bigserial PRIMARY KEY, egcs_fc_agreementnumber varchar(30) NOT NULL, egcs_fc_transferpaymentstream bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Agency_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_ay_fiscalyeardisplay varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
@@ -66,7 +70,7 @@ const createSchema = async () => {
   await sql`CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_ay_name_en text NOT NULL, egcs_ay_name_fr text NOT NULL, egcs_ay_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_tp_transferpaymentstream bigint NOT NULL, egcs_tp_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL, egcs_fc_organizationcostcategory bigint NOT NULL, egcs_fc_costsubsection text NOT NULL, egcs_fc_description text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
-  await sql`CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_applicantrecipient bigint NOT NULL, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Common_Entity_Assignment" (id bigserial PRIMARY KEY, egcs_cn_entityid bigint NOT NULL, egcs_cn_entitytype varchar(80) NOT NULL, egcs_cn_user bigint NOT NULL, egcs_cn_isprimary boolean NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE extensions.gcs_gcforms_field_mappings (id bigserial PRIMARY KEY, integration_id bigint NOT NULL, mapping_key varchar(120) NOT NULL, source_question_id varchar(200) NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, transform varchar(40) NOT NULL, required boolean NOT NULL, default_value jsonb, on_missing varchar(20) NOT NULL, on_invalid varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
@@ -76,6 +80,8 @@ const createSchema = async () => {
 }
 
 const seed = async () => {
+  await sql`INSERT INTO "Applicant_Recipient_Profile"(id,egcs_ar_legalname_en,egcs_ar_legalname_fr) VALUES(301,'Submitting Organization','Organisme soumissionnaire')`.execute(db)
+  await sql`INSERT INTO "Funding_Case_Agreement_Applicant_Recipient"(egcs_fc_fundingagreement,egcs_fc_applicantrecipient) VALUES(101,301)`.execute(db)
   await sql`INSERT INTO "Funding_Case_Agreement_Profile" VALUES (101, 'AGR-ATOMIC', 31, false)`.execute(db)
   await sql`INSERT INTO "Agency_Fiscal_Year" VALUES (401, '2025-2026', false)`.execute(db)
   await sql`INSERT INTO "Funding_Case_Agreement_Budget_Fiscal_Year" VALUES (501, 101, 401, false)`.execute(db)
@@ -99,7 +105,7 @@ const insertHostAggregate = async (
   input: Parameters<Parameters<typeof materializeGcFormsClaimSubmission>[1]['createAgreementClaim']>[0]
 ) => {
   const claim = await trx.insertInto('Funding_Case_Agreement_Claim').values({
-    egcs_fc_fundingagreement: input.agreementId, egcs_fc_fiscalyear: input.fiscalYearId,
+    egcs_fc_fundingagreement: input.agreementId, egcs_fc_applicantrecipient: input.applicantRecipientId, egcs_fc_fiscalyear: input.fiscalYearId,
     egcs_fc_isfinalforyear: input.isFinalForYear, egcs_fc_periodstart: input.periodStart,
     egcs_fc_periodend: input.periodEnd, egcs_fc_receiveddate: input.receivedDate,
     egcs_fc_gcformssubmissionuuid: input.submissionUuid, egcs_fc_status: input.expectedDraftStatusId ?? '91'
@@ -149,14 +155,14 @@ describe('GC Forms PostgreSQL Claim transaction handoff', () => {
   })
 
   beforeEach(async () => {
-    await sql`TRUNCATE TABLE "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile", extensions.gcs_gcforms_destination_links, extensions.gcs_gcforms_field_mappings, extensions.gcs_gcforms_submissions RESTART IDENTITY`.execute(db)
+    await sql`TRUNCATE TABLE "Applicant_Recipient_Profile", "Funding_Case_Agreement_Applicant_Recipient", "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile", extensions.gcs_gcforms_destination_links, extensions.gcs_gcforms_field_mappings, extensions.gcs_gcforms_submissions RESTART IDENTITY`.execute(db)
     await sql`ALTER TABLE extensions.gcs_gcforms_destination_links DROP CONSTRAINT IF EXISTS reject_line_link`.execute(db)
     await seed()
   })
 
   afterAll(async () => {
     await sql`DROP SCHEMA IF EXISTS extensions CASCADE`.execute(db)
-    await sql`DROP TABLE IF EXISTS "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile" CASCADE`.execute(db)
+    await sql`DROP TABLE IF EXISTS "Applicant_Recipient_Profile", "Funding_Case_Agreement_Applicant_Recipient", "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile" CASCADE`.execute(db)
     const residue = await sql<{ count: string }>`SELECT count(*)::text AS count FROM information_schema.tables WHERE table_schema = 'extensions' OR table_name IN ('Funding_Case_Agreement_Claim', 'Funding_Case_Agreement_Claim_Line_Item', 'Common_Entity_Assignment')`.execute(db)
     expect(residue.rows[0]?.count).toBe('0')
     await db.destroy()

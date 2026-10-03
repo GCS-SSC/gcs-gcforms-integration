@@ -320,6 +320,15 @@ const entityTabs = computed(() => [
 
 const claimFields = computed<ClaimMappingField[]>(() => [
   {
+    id: 'submitting-proponent',
+    labelKey: 'claimSubmittingProponent',
+    sourceQuestionId: 'submitting_proponent',
+    destinationPath: 'egcs_fc_applicantrecipient',
+    transform: 'string',
+    required: true,
+    repeat: false
+  },
+  {
     id: 'agreement-number',
     labelKey: 'claimAgreementNumber',
     sourceQuestionId: 'agreement_number',

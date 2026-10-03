@@ -77,6 +77,7 @@ Example: an agreement number field on GC Forms creates a draft claim under that 
 Required claim mappings:
 
 - `claim.egcs_fc_fundingagreement`: agreement number, not agreement id.
+- `claim.egcs_fc_applicantrecipient`: explicit submitting Proponent ID, or the generated bilingual `Name (GCS #ID)` choice. It must identify an active Proponent linked to the selected Agreement. A single retained Proponent destination link from the same submission also supplies explicit attribution; missing, ambiguous, inactive or unrelated attribution fails before host Claim creation. Agreement membership alone never chooses the submitter.
 - `claim.egcs_fc_fiscalyear`: agreement budget fiscal year id or fiscal-year display label such as `2026-2027`.
 - `claim.egcs_fc_isfinalforyear`: boolean.
 - `claim.egcs_fc_periodstart`: month number from `0` to `11`, or a fiscal-year month label from April through March.

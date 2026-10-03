@@ -44,6 +44,21 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     egcs_fc_transferpaymentstream: string
     _deleted: Generated<boolean>
   }
+  'Funding_Case_Agreement_Applicant_Recipient': {
+    id: Generated<string>
+    egcs_fc_fundingagreement: string
+    egcs_fc_applicantrecipient: string
+    _deleted: Generated<boolean>
+  }
+  'Applicant_Recipient_Profile': {
+    id: Generated<string>
+    egcs_ar_legalname_en: string | null
+    egcs_ar_legalname_fr: string | null
+    egcs_ar_operatingname_en: string | null
+    egcs_ar_operatingname_fr: string | null
+    egcs_ar_active: Generated<boolean>
+    _deleted: Generated<boolean>
+  }
   'Funding_Case_Agreement_Budget_Fiscal_Year': {
     id: Generated<string>
     egcs_fc_fundingagreement: string
@@ -101,6 +116,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
   'Funding_Case_Agreement_Claim': {
     id: Generated<string>
     egcs_fc_fundingagreement: string
+    egcs_fc_applicantrecipient: Generated<string | null>
     egcs_fc_fiscalyear: string
     egcs_fc_isfinalforyear: boolean
     egcs_fc_periodend: number

@@ -10,6 +10,7 @@ type TestDb = Kysely<GcFormsIntegrationHostDatabase>
 let db: TestDb
 
 const claimMappings: GcsGcFormsFieldMapping[] = [
+  { id: 'submitting-proponent', sourceQuestionId: 'submitting_proponent', destinationEntity: 'claim', destinationPath: 'egcs_fc_applicantrecipient', transform: 'string', required: true, onMissing: 'block', onInvalid: 'block' },
   {
     id: 'agreement-number',
     sourceQuestionId: 'agreement_number',
@@ -126,6 +127,7 @@ const lineItemMappings: GcsGcFormsFieldMapping[] = [
 ]
 
 const claimValues: GcsGcFormsMappedValue[] = [
+  { mappingId: 'submitting-proponent', sourceQuestionId: 'submitting_proponent', destinationEntity: 'claim', destinationPath: 'egcs_fc_applicantrecipient', value: '301' },
   {
     mappingId: 'agreement-number',
     sourceQuestionId: 'agreement_number',
@@ -241,6 +243,8 @@ const withMappedTableDestinationPathPrefix = (
 })
 
 const createSchema = async () => {
+  await sql`CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY, egcs_ar_legalname_en text, egcs_ar_legalname_fr text, egcs_ar_operatingname_en text, egcs_ar_operatingname_fr text, egcs_ar_active boolean NOT NULL DEFAULT true, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_applicantrecipient bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE SCHEMA extensions`.execute(db)
   await sql`
     CREATE TABLE "Common_Status" (
@@ -310,6 +314,7 @@ const createSchema = async () => {
   `.execute(db)
   await sql`
     CREATE TABLE "Funding_Case_Agreement_Claim" (
+      egcs_fc_applicantrecipient bigint NOT NULL,
       id bigserial PRIMARY KEY,
       egcs_fc_fundingagreement bigint NOT NULL,
       egcs_fc_fiscalyear bigint NOT NULL,
@@ -403,6 +408,8 @@ const createSchema = async () => {
 }
 
 const seedBaseData = async () => {
+  await sql`INSERT INTO "Applicant_Recipient_Profile"(id,egcs_ar_legalname_en,egcs_ar_legalname_fr) VALUES(301,'Submitting Organization','Organisme soumissionnaire'),(302,'Other Organization','Autre organisme')`.execute(db)
+  await sql`INSERT INTO "Funding_Case_Agreement_Applicant_Recipient"(egcs_fc_fundingagreement,egcs_fc_applicantrecipient) VALUES(101,301),(102,302)`.execute(db)
   await db
     .insertInto('Common_Status')
     .values({
@@ -579,6 +586,7 @@ const materialize = async (
     if (!status.egcs_cn_isdraft) return { status: 'requested_status_not_draft' }
     const claim = await db.insertInto('Funding_Case_Agreement_Claim').values({
       egcs_fc_fundingagreement: input.agreementId,
+      egcs_fc_applicantrecipient: input.applicantRecipientId,
       egcs_fc_fiscalyear: input.fiscalYearId,
       egcs_fc_isfinalforyear: input.isFinalForYear,
       egcs_fc_periodstart: input.periodStart,
@@ -748,6 +756,7 @@ describe('GC Forms claim materialization', () => {
 
     expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({
       agreementId: '101',
+      applicantRecipientId: '301',
       streamId: '31',
       fiscalYearId: '501',
       expectedDraftStatusId: '91',
@@ -1281,4 +1290,65 @@ describe('GC Forms claim materialization', () => {
     }))
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
   })
+  it.each(['', '302', '999', '0', '9223372036854775808'])('rejects missing or unavailable explicitly mapped Proponent %s without invoking host creation', async value => {
+    await seedMappings(claimMappings)
+    const createAgreementClaim = vi.fn()
+    const result = await materialize(claimMappings, claimValues.map(row => row.destinationPath === 'egcs_fc_applicantrecipient' ? { ...row, value } : row), '901', 'new-proponent-case', createAgreementClaim)
+    expect(result).toMatchObject({ status: 'failed', issues: [expect.objectContaining({ code: 'claim_proponent_unavailable', destinationPath: 'claim.egcs_fc_applicantrecipient' })] })
+    expect(createAgreementClaim).not.toHaveBeenCalled()
+    expect(await db.selectFrom('Funding_Case_Agreement_Claim').select('id').execute()).toEqual([])
+  })
+
+  it.each(['inactive', 'deleted', 'unlinked'])('rejects a %s submitting Proponent relationship before host handoff', async condition => {
+    await seedMappings(claimMappings)
+    if (condition === 'inactive') await db.updateTable('Applicant_Recipient_Profile').set({ egcs_ar_active: false }).where('id', '=', '301').execute()
+    if (condition === 'deleted') await db.updateTable('Applicant_Recipient_Profile').set({ _deleted: true }).where('id', '=', '301').execute()
+    if (condition === 'unlinked') await db.updateTable('Funding_Case_Agreement_Applicant_Recipient').set({ _deleted: true }).where('egcs_fc_applicantrecipient', '=', '301').execute()
+    const createAgreementClaim = vi.fn()
+    expect(await materialize(claimMappings, claimValues, '901', 'unavailable-proponent', createAgreementClaim)).toMatchObject({ status: 'failed', issues: [expect.objectContaining({ code: 'claim_proponent_unavailable' })] })
+    expect(createAgreementClaim).not.toHaveBeenCalled()
+  })
+
+  it('accepts a generated bilingual Proponent choice as explicit attribution and retains the identity', async () => {
+    await seedMappings(claimMappings)
+    const result = await materialize(claimMappings, claimValues.map(row => row.destinationPath === 'egcs_fc_applicantrecipient' ? { ...row, value: 'Organisme soumissionnaire (GCS #301)' } : row))
+    expect(result.status).toBe('created')
+    const claim = await db.selectFrom('Funding_Case_Agreement_Claim').select('egcs_fc_applicantrecipient').executeTakeFirstOrThrow()
+    expect(String(claim.egcs_fc_applicantrecipient)).toBe('301')
+    const link = await db.selectFrom('extensions.gcs_gcforms_destination_links').select('value').where('owner_type', '=', 'fundingcaseagreementclaim').executeTakeFirstOrThrow()
+    expect(link.value).toMatchObject({ applicantRecipientId: '301' })
+  })
+
+  it('requires an unequivocal retained Proponent link from this exact submission and never infers the Agreement member', async () => {
+    const withoutMappedProponent = claimValues.filter(row => row.destinationPath !== 'egcs_fc_applicantrecipient')
+    await seedMappings(claimMappings)
+    const createAgreementClaim = vi.fn()
+    expect(await materialize(claimMappings, withoutMappedProponent, '901', 'retained-proponent-case', createAgreementClaim)).toMatchObject({ status: 'failed' })
+    expect(createAgreementClaim).not.toHaveBeenCalled()
+    await db.insertInto('extensions.gcs_gcforms_destination_links').values({ submission_id: '902', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
+    expect(await materialize(claimMappings, withoutMappedProponent, '901', 'retained-proponent-case', createAgreementClaim)).toMatchObject({ status: 'failed' })
+    await db.insertInto('extensions.gcs_gcforms_destination_links').values({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
+    expect((await materialize(claimMappings, withoutMappedProponent)).status).toBe('created')
+    expect(String((await db.selectFrom('Funding_Case_Agreement_Claim').select('egcs_fc_applicantrecipient').executeTakeFirstOrThrow()).egcs_fc_applicantrecipient)).toBe('301')
+  })
+
+  it('fails closed when two retained submitting Proponent identities remain possible', async () => {
+    await seedMappings(claimMappings)
+    await db.insertInto('extensions.gcs_gcforms_destination_links').values(['301', '302'].map(owner_id => ({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id, destination_entity: 'proponent', destination_path: 'id', value: null }))).execute()
+    const createAgreementClaim = vi.fn()
+    expect(await materialize(claimMappings, claimValues.filter(row => row.destinationPath !== 'egcs_fc_applicantrecipient'), '901', 'ambiguous-proponent', createAgreementClaim)).toMatchObject({ status: 'failed', issues: [expect.objectContaining({ code: 'claim_proponent_unavailable' })] })
+    expect(createAgreementClaim).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the fresh host Proponent rejection bilingually without creating destination links', async () => {
+    await seedMappings(claimMappings)
+    const createAgreementClaim = vi.fn(async () => ({ status: 'applicant_recipient_unavailable' as const }))
+    await expect(materialize(claimMappings, claimValues, '901', 'host-proponent-drift', createAgreementClaim)).rejects.toMatchObject({
+      statusCode: 409, code: 'GCS_GCFORMS_CLAIM_PROPONENT_UNAVAILABLE',
+      localizedMessage: { en: expect.stringContaining('active'), fr: expect.stringContaining('actif') }
+    })
+    expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({ applicantRecipientId: '301' }))
+    expect(await db.selectFrom('extensions.gcs_gcforms_destination_links').select('id').execute()).toEqual([])
+  })
+
 })

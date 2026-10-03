@@ -1,6 +1,7 @@
 {
   "layout": [
     1,
+    7,
     2,
     3,
     4,
@@ -37,6 +38,35 @@
         "descriptionFr": "",
         "placeholderEn": "AGR-0001",
         "placeholderFr": "AGR-0001"
+      }
+    },
+    {
+      "id": 7,
+      "type": "dropdown",
+      "uuid": "00000000-0000-4000-8000-000000000007",
+      "properties": {
+        "tags": [
+          "gcs",
+          "claim",
+          "proponent"
+        ],
+        "choices": [
+          {
+            "en": "",
+            "fr": ""
+          }
+        ],
+        "titleEn": "Submitting Proponent (required)",
+        "titleFr": "Promoteur qui soumet la réclamation (obligatoire)",
+        "questionId": "submitting_proponent",
+        "validation": {
+          "required": true
+        },
+        "subElements": [],
+        "descriptionEn": "Choose the Proponent submitting this claim under the selected agreement.",
+        "descriptionFr": "Choisissez le promoteur qui soumet cette réclamation dans le cadre de l’entente sélectionnée.",
+        "placeholderEn": "",
+        "placeholderFr": ""
       }
     },
     {

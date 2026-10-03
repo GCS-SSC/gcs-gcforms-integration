@@ -1,6 +1,6 @@
 import { translateGcsExtensionMessage } from '@gcs-ssc/extensions'
-import { GCFORMS_DIAGNOSTIC_MESSAGES, UNKNOWN_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics'
-export { GCFORMS_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics'
+import { GCFORMS_DIAGNOSTIC_MESSAGES, UNKNOWN_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics.ts'
+export { GCFORMS_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics.ts'
 import { z } from 'zod'
 import type { GcsExtensionJsonConfig, JsonValue } from '@gcs-ssc/extensions'
 
@@ -18,6 +18,7 @@ const GCFORMS_CLAIM_LINE_ITEM_QUESTION_IDS = [
 ] as const
 const GCFORMS_CLAIM_REQUIRED_QUESTION_IDS = [
   'agreement_number',
+  'submitting_proponent',
   'fiscal_year',
   'claim_period_start_month',
   'claim_period_end_month',
@@ -296,6 +297,7 @@ export const GCFORMS_DIAGNOSTIC_CODES = [
   'agreement_not_found',
   'agreement_override_unavailable',
   'claim_fiscal_year_invalid',
+  'claim_proponent_unavailable',
   'claim_line_item_required_value_missing',
   'claim_line_item_values_invalid',
   'submission_processing_failed',

@@ -61,6 +61,28 @@ const loadBaseClaimTemplate = async (): Promise<GcFormsClaimTemplate> => {
   return JSON.parse(source) as GcFormsClaimTemplate
 }
 
+/** Retains a stable identity in each bilingual external-form choice. */
+const fetchSubmittingProponentChoices = async (rawDb: unknown, streamId: string): Promise<BilingualChoice[]> => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  const rows = await db.selectFrom('Applicant_Recipient_Profile as proponent')
+    .innerJoin('Funding_Case_Agreement_Applicant_Recipient as relationship', 'relationship.egcs_fc_applicantrecipient', 'proponent.id')
+    .innerJoin('Funding_Case_Agreement_Profile as agreement', 'agreement.id', 'relationship.egcs_fc_fundingagreement')
+    .select(['proponent.id', 'proponent.egcs_ar_legalname_en', 'proponent.egcs_ar_legalname_fr', 'proponent.egcs_ar_operatingname_en', 'proponent.egcs_ar_operatingname_fr'])
+    .where('agreement.egcs_fc_transferpaymentstream', '=', streamId)
+    .where('agreement._deleted', '=', false)
+    .where('relationship._deleted', '=', false)
+    .where('proponent._deleted', '=', false)
+    .where('proponent.egcs_ar_active', '=', true)
+    .distinct()
+    .orderBy('proponent.id')
+    .execute()
+  return rows.map(row => {
+    const en = row.egcs_ar_legalname_en ?? row.egcs_ar_operatingname_en ?? row.egcs_ar_legalname_fr ?? row.egcs_ar_operatingname_fr ?? 'Proponent'
+    const fr = row.egcs_ar_legalname_fr ?? row.egcs_ar_operatingname_fr ?? row.egcs_ar_legalname_en ?? row.egcs_ar_operatingname_en ?? 'Promoteur'
+    return { en: `${en} (GCS #${row.id})`, fr: `${fr} (GCS #${row.id})` }
+  })
+}
+
 /** Loads the distinct fiscal-year labels used by agreements in a transfer-payment stream. */
 const fetchFiscalYearChoices = async (rawDb: unknown, streamId: string): Promise<BilingualChoice[]> => {
   const db = asGcFormsIntegrationDb(rawDb)
@@ -188,16 +210,18 @@ export const generateGcFormsClaimTemplate = async (
   rawDb: unknown,
   streamId: string
 ): Promise<GcFormsClaimTemplate> => {
-  const [template, fiscalYears, budgetChoices] = await Promise.all([
+  const [template, fiscalYears, budgetChoices, proponents] = await Promise.all([
     loadBaseClaimTemplate(),
     fetchFiscalYearChoices(rawDb, streamId),
-    fetchBudgetLineItemChoices(rawDb, streamId)
+    fetchBudgetLineItemChoices(rawDb, streamId),
+    fetchSubmittingProponentChoices(rawDb, streamId)
   ])
 
   return {
     ...template,
     elements: template.elements?.map(element => updateElementForQuestion(element, {
       fiscal_year: fiscalYears,
+      submitting_proponent: proponents,
       submitted_cost_category: budgetChoices.costCategories,
       submitted_line_item: budgetChoices.lineItems
     }))

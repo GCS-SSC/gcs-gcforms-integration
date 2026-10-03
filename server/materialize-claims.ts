@@ -43,6 +43,7 @@ interface ClaimMaterializationInput {
 
 interface PreparedClaim {
   agreementId: string
+  applicantRecipientId: string
   agreementNumber: string
   agreementMappingId: string
   fiscalYearId: string
@@ -126,6 +127,14 @@ const requireCreatedAgreementClaim = (
 ): Extract<GcsExtensionAgreementClaimCreateResult, { status: 'created' }> => {
   if (result.status === 'created') return result
   if (result.status === 'agreement_unavailable') throw createClaimAgreementUnavailableError()
+  if (result.status === 'applicant_recipient_unavailable') throw createGcsExtensionUserError({
+    statusCode: 409,
+    code: 'GCS_GCFORMS_CLAIM_PROPONENT_UNAVAILABLE',
+    message: {
+      en: 'The submitting Proponent is no longer active on the selected agreement.',
+      fr: 'Le promoteur qui soumet la réclamation n’est plus actif sur l’entente sélectionnée.'
+    }
+  })
   if (result.status === 'fiscal_year_unavailable') throw createClaimFiscalYearUnavailableError()
   if (result.status === 'requested_status_not_draft') throw createSubmissionStatusNotDraftError()
   throw createSubmissionStatusUnavailableError()
@@ -151,7 +160,7 @@ const CLAIM_REQUIRED_PATHS = [
   'egcs_fc_periodend',
   'egcs_fc_receiveddate'
 ] as const
-type ClaimPath = typeof CLAIM_REQUIRED_PATHS[number] | 'egcs_fc_isfinalforyear'
+type ClaimPath = typeof CLAIM_REQUIRED_PATHS[number] | 'egcs_fc_isfinalforyear' | 'egcs_fc_applicantrecipient'
 
 const CLAIM_LINE_ITEM_REQUIRED_PATHS = [
   'egcs_fc_submittedcostcategory',
@@ -544,6 +553,46 @@ const resolveClaimAgreement = async (
     : null
 }
 
+/** Accepts an explicit mapped identity or one retained same-submission Proponent link. */
+const resolveClaimApplicantRecipient = async (
+  rawDb: unknown,
+  input: ClaimMaterializationInput,
+  values: NormalizedMappedValue[],
+  agreementId: string
+): Promise<string | null> => {
+  const db = asGcFormsIntegrationDb(rawDb)
+  const explicitValue = requiredString(claimFieldValue(values, 'egcs_fc_applicantrecipient'))
+  let applicantRecipientId: string | undefined
+  if (explicitValue !== null) {
+    const match = /^(?:([1-9]\d*)|.+ \(GCS #([1-9]\d*)\))$/.exec(explicitValue)
+    applicantRecipientId = match?.[1] ?? match?.[2]
+    if (!applicantRecipientId || applicantRecipientId.length > 19
+      || (applicantRecipientId.length === 19 && applicantRecipientId > '9223372036854775807')) return null
+  } else {
+    const links = await db.selectFrom('extensions.gcs_gcforms_destination_links')
+      .select('owner_id')
+      .where('submission_id', '=', input.submissionId)
+      .where('owner_type', '=', 'applicantrecipient')
+      .where('destination_entity', '=', 'proponent')
+      .where('_deleted', '=', false)
+      .execute()
+    const identities = [...new Set(links.map(link => String(link.owner_id)))]
+    if (identities.length !== 1) return null
+    applicantRecipientId = identities[0]
+  }
+  if (!applicantRecipientId) return null
+  const relationship = await db.selectFrom('Funding_Case_Agreement_Applicant_Recipient as relationship')
+    .innerJoin('Applicant_Recipient_Profile as proponent', 'proponent.id', 'relationship.egcs_fc_applicantrecipient')
+    .select('proponent.id')
+    .where('relationship.egcs_fc_fundingagreement', '=', agreementId)
+    .where('relationship.egcs_fc_applicantrecipient', '=', applicantRecipientId)
+    .where('relationship._deleted', '=', false)
+    .where('proponent._deleted', '=', false)
+    .where('proponent.egcs_ar_active', '=', true)
+    .executeTakeFirst()
+  return relationship ? String(relationship.id) : null
+}
+
 /** Validates and resolves mapped claim values into a host-ready claim record. */
 const prepareClaimInput = async (
   rawDb: unknown,
@@ -604,11 +653,17 @@ const prepareClaimInput = async (
     }
   }
 
+  const applicantRecipientId = await resolveClaimApplicantRecipient(rawDb, input, values, agreement.agreementId)
+  if (!applicantRecipientId) {
+    return { issues: [createIssue(input.mappings, CLAIM_ENTITY, 'egcs_fc_applicantrecipient', 'claim_proponent_unavailable')] }
+  }
+
   const agreementMapping = mappingForPath(input.mappings, CLAIM_ENTITY, CLAIM_AGREEMENT_NUMBER_PATH)
 
   return {
     claim: {
       agreementId: agreement.agreementId,
+      applicantRecipientId,
       agreementNumber: agreement.agreementNumber,
       agreementMappingId: agreementMapping ? agreementMapping.id : '',
       fiscalYearId,
@@ -852,6 +907,7 @@ const existingClaimBySubmissionUuid = async (
 const claimLinkValue = (claimId: string, claim: PreparedClaim): JsonValue => ({
   claimId,
   agreementId: claim.agreementId,
+  applicantRecipientId: claim.applicantRecipientId,
   agreementNumber: claim.agreementNumber,
   fiscalYearId: claim.fiscalYearId,
   isFinalForYear: claim.isFinalForYear,
@@ -942,6 +998,7 @@ export const materializeGcFormsClaimSubmission = async (
   return await executeGcFormsTransaction(db, async trx => {
     const created = requireCreatedAgreementClaim(await input.createAgreementClaim({
       agreementId: claimInput.agreementId,
+      applicantRecipientId: claimInput.applicantRecipientId,
       streamId: input.streamId,
       fiscalYearId: claimInput.fiscalYearId,
       isFinalForYear: claimInput.isFinalForYear,
