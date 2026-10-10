@@ -104,11 +104,11 @@ export default defineGcsExtension({
   ],
   name: {
     en: 'GC Forms integration',
-    fr: 'Integration GC Forms'
+    fr: 'Intégration de Formulaires GC'
   },
   description: {
     en: 'Connects GC Forms templates, submissions, and attachments to configurable GCS field mappings.',
-    fr: 'Connecte les modeles, les soumissions et les pieces jointes GC Forms a des correspondances configurables de champs GCS.'
+    fr: 'Connecte les modèles, les soumissions et les pièces jointes Formulaires GC à des correspondances configurables de champs GCS.'
   },
   admin: {
     agency: {
@@ -128,7 +128,7 @@ export default defineGcsExtension({
         id: 'gcforms-source',
         label: {
           en: 'GC Forms',
-          fr: 'GC Forms'
+          fr: 'Formulaires GC'
         },
         icon: 'i-lucide-file-input',
         path: './components/GcFormsEntitySourceTab.vue',
@@ -142,7 +142,7 @@ export default defineGcsExtension({
         id: 'gcforms-source',
         label: {
           en: 'GC Forms',
-          fr: 'GC Forms'
+          fr: 'Formulaires GC'
         },
         icon: 'i-lucide-file-input',
         path: './components/GcFormsEntitySourceTab.vue',
@@ -156,7 +156,7 @@ export default defineGcsExtension({
         id: 'gcforms-source',
         label: {
           en: 'GC Forms',
-          fr: 'GC Forms'
+          fr: 'Formulaires GC'
         },
         icon: 'i-lucide-file-input',
         path: './components/GcFormsEntitySourceTab.vue',

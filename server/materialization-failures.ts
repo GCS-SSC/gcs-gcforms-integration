@@ -192,7 +192,7 @@ const createSubmissionNotFoundError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_SUBMISSION_NOT_FOUND',
   message: {
     en: 'GC Forms submission was not found for this stream.',
-    fr: 'La soumission GC Forms est introuvable pour ce volet.'
+    fr: 'La soumission Formulaires GC est introuvable pour ce volet.'
   }
 })
 
@@ -201,7 +201,7 @@ const createSubmissionStatusConflictError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_SUBMISSION_NOT_MATERIALIZATION_FAILED',
   message: {
     en: 'This GC Forms submission is no longer awaiting materialization failure resolution.',
-    fr: 'Cette soumission GC Forms n attend plus la resolution d un echec de materialisation.'
+    fr: 'Cette soumission Formulaires GC n’attend plus la résolution d’un échec de matérialisation.'
   }
 })
 
@@ -210,7 +210,7 @@ const createMaterializationContextConflictError = () => createGcsExtensionUserEr
   code: 'GCS_GCFORMS_MATERIALIZATION_CONTEXT_MISSING',
   message: {
     en: 'The saved GC Forms materialization context is no longer available.',
-    fr: 'Le contexte de materialisation GC Forms enregistre n est plus disponible.'
+    fr: 'Le contexte de matérialisation Formulaires GC enregistré n’est plus disponible.'
   }
 })
 
@@ -219,7 +219,7 @@ const createAgreementOverrideInvalidError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_AGREEMENT_OVERRIDE_INVALID',
   message: {
     en: 'Selected agreement is not available in this transfer payment stream.',
-    fr: 'L entente selectionnee n est pas disponible dans ce volet de paiements de transfert.'
+    fr: 'L’entente sélectionnée n’est pas disponible dans ce volet de paiements de transfert.'
   }
 })
 

@@ -21,7 +21,7 @@ const extension: GcsResolvedExtension = {
   requiredHostCapabilities: [],
   name: {
     en: 'GC Forms integration',
-    fr: 'Integration GC Forms'
+    fr: 'Intégration de Formulaires GC'
   },
   admin: {},
   client: {
@@ -167,8 +167,8 @@ describe('AgencyGcFormsIntegrationConfig', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('[label="Statut des réclamations importées"]').exists()).toBe(true)
-    expect(wrapper.find('[description="Le statut Brouillon de l’organisation attribué aux réclamations matérialisées à partir des soumissions GC Forms."]').exists()).toBe(true)
+    expect(wrapper.find('[label="Statut des demandes de remboursement importées"]').exists()).toBe(true)
+    expect(wrapper.find('[description="Le statut d’ébauche de l’organisme attribué aux demandes de remboursement matérialisées à partir des soumissions Formulaires GC."]').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -613,7 +613,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
       await flushPromises()
     }
     await clickButton('Synchroniser les soumissions')
-    await clickButton('Verifier les materialisations echouees')
+    await clickButton('Vérifier les matérialisations échouées')
 
     const localized = 'L’entente pour claim.egcs_fc_fundingagreement est introuvable dans ce volet de paiements de transfert.'
     expect(wrapper.text()).toContain(localized)
@@ -890,7 +890,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
 
     await setupState.refreshTemplate()
     await setupState.syncSubmissions()
-    expect(setupState.statusMessage).toContain('Selectionnez')
+    expect(setupState.statusMessage).toContain('Sélectionnez')
     setupState.isSaving = true
     setupState.isDownloadingClaimTemplate = true
     await setupState.saveConfiguration()

@@ -60,11 +60,11 @@ describe('GC Forms persisted diagnostics', () => {
     expect(renderGcFormsDiagnostic({
       code: 'provider_detail_not_for_display',
       params: { rawProviderDetail }
-    }, 'fr')).toBe('GC Forms n’a pas pu terminer cette correspondance.')
+    }, 'fr')).toBe('Formulaires GC n’a pas pu terminer cette correspondance.')
     expect(renderGcFormsDiagnostic({
       code: 'agreement_not_found',
       params: { rawProviderDetail }
-    }, 'fr')).toBe('GC Forms n’a pas pu terminer cette correspondance.')
+    }, 'fr')).toBe('Formulaires GC n’a pas pu terminer cette correspondance.')
     expect(renderGcFormsDiagnostic({
       code: 'agreement_not_found',
       params: [] as unknown as GcsGcFormsDiagnosticParams
@@ -135,7 +135,7 @@ describe('GC Forms persisted diagnostics', () => {
     expect(renderStoredGcFormsDiagnostic('unknown_provider_code', { raw: 'hidden' }, 'fr')).toEqual({
       code: 'unknown_diagnostic',
       params: {},
-      message: 'GC Forms n’a pas pu terminer cette correspondance.'
+      message: 'Formulaires GC n’a pas pu terminer cette correspondance.'
     })
     expect(renderStoredGcFormsMappingIssues('not-an-array', 'en')).toEqual([])
     expect(renderStoredGcFormsMappingIssues([{

@@ -195,7 +195,7 @@ describe('GC Forms registered lifecycle guard', () => {
       code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS',
       localizedMessage: {
         en: expect.stringContaining('cannot be disabled or deleted'),
-        fr: expect.stringContaining('ne peut pas etre desactive ni supprime')
+        fr: expect.stringContaining('ne peut pas être désactivé ni supprimé')
       }
     })
       await expect(invokeGuard('stream', '20', '31')).resolves.toBeUndefined()
@@ -264,7 +264,7 @@ describe('GC Forms registered lifecycle guard', () => {
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
       localizedMessage: {
         en: expect.stringContaining('Draft'),
-        fr: expect.stringContaining('Brouillon')
+        fr: expect.stringContaining('statut d’ébauche')
       }
     })
     await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()

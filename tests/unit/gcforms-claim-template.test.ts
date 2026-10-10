@@ -191,7 +191,7 @@ describe('GC Forms claim template generator', () => {
     expect(proponent.type).toBe('dropdown')
     expect(proponent.properties?.validation?.required).toBe(true)
     expect(proponent.properties?.titleEn).toBe('Submitting Proponent (required)')
-    expect(proponent.properties?.titleFr).toBe('Promoteur qui soumet la réclamation (obligatoire)')
+    expect(proponent.properties?.titleFr).toBe('Promoteur qui soumet la demande de remboursement (obligatoire)')
     expect(proponent.properties?.choices).toEqual([{ en: '', fr: '' }, { en: 'Submitting Organization (GCS #901)', fr: 'Organisme soumissionnaire (GCS #901)' }])
     const fiscalYear = findElement(template.elements, 'fiscal_year')
     const costCategory = findElement(template.elements, 'submitted_cost_category')

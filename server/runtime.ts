@@ -194,7 +194,7 @@ const createGcFormsConfigChangedError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_CONFIG_CHANGED',
   message: {
     en: 'The GC Forms configuration changed while synchronization was running. Start the synchronization again.',
-    fr: 'La configuration de GC Forms a change pendant la synchronisation. Relancez la synchronisation.'
+    fr: 'La configuration de Formulaires GC a changé pendant la synchronisation. Relancez la synchronisation.'
   }
 })
 
@@ -248,7 +248,7 @@ export const getGcFormsSecretRootKey = (): string => {
     code: 'GCS_GCFORMS_SECRET_ROOT_KEY_MISSING',
     message: {
       en: 'The server encryption key for extension credentials is not configured.',
-      fr: 'La cle de chiffrement serveur pour les justificatifs d extension n est pas configuree.'
+      fr: 'La clé de chiffrement serveur pour les identifiants d’authentification d’extension n’est pas configurée.'
     }
   })
 }
@@ -289,7 +289,7 @@ const createGcFormsCredentialMissingError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
   message: {
     en: 'The selected GC Forms credential is not available on the server.',
-    fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+    fr: 'L’identifiant d’authentification Formulaires GC sélectionné n’est pas disponible sur le serveur.'
   }
 })
 
@@ -417,7 +417,7 @@ const getGcFormsCredentialRow = async (
       code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
       message: {
         en: 'The selected GC Forms credential is not available on the server.',
-        fr: 'Le justificatif GC Forms selectionne n est pas disponible sur le serveur.'
+        fr: 'L’identifiant d’authentification Formulaires GC sélectionné n’est pas disponible sur le serveur.'
       }
     })
   }
@@ -435,7 +435,7 @@ const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
     code: 'GCS_GCFORMS_CONFIG_INCOMPLETE',
     message: {
       en: 'Select a GC Forms agency credential before syncing.',
-      fr: 'Selectionnez un justificatif GC Forms de l organisation avant la synchronisation.'
+      fr: 'Sélectionnez un identifiant d’authentification Formulaires GC de l’organisme avant la synchronisation.'
     }
   })
 }
@@ -451,7 +451,7 @@ const assertConfiguredSubmissionStatus = (config: GcsGcFormsStreamConfig): strin
     code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
     message: {
       en: 'Select an Agency status for claims imported from GC Forms before syncing.',
-      fr: 'Sélectionnez un statut d’organisation pour les réclamations importées de GC Forms avant la synchronisation.'
+      fr: 'Sélectionnez un statut d’organisme pour les demandes de remboursement importées de Formulaires GC avant la synchronisation.'
     }
   })
 }
@@ -469,7 +469,7 @@ export const authorizeGcFormsStream = async (
       code: 'GCS_GCFORMS_UNAUTHORIZED',
       message: {
         en: 'You must be signed in to use this GC Forms integration.',
-        fr: 'Vous devez ouvrir une session pour utiliser cette integration GC Forms.'
+        fr: 'Vous devez ouvrir une session pour utiliser cette intégration Formulaires GC.'
       }
     })
   }
@@ -495,7 +495,7 @@ export const authorizeGcFormsStream = async (
       code: 'GCS_GCFORMS_FORBIDDEN',
       message: {
         en: 'You do not have access to this GC Forms integration.',
-        fr: 'Vous n avez pas acces a cette integration GC Forms.'
+        fr: 'Vous n’avez pas accès à cette intégration Formulaires GC.'
       }
     })
   }
@@ -541,7 +541,7 @@ const resolveStreamConfig = async (
       code: 'GCS_GCFORMS_STREAM_DISABLED',
       message: {
         en: 'GC Forms integration is not enabled for this stream.',
-        fr: 'L integration GC Forms n est pas activee pour ce volet.'
+        fr: 'L’intégration Formulaires GC n’est pas activée pour ce volet.'
       }
     })
   }
@@ -789,7 +789,7 @@ export const ensureIntegration = async (
         connection_id: connectionId,
         stream_id: streamId,
         name_en: 'GC Forms integration',
-        name_fr: 'Integration GC Forms',
+        name_fr: 'Intégration de Formulaires GC',
         enabled: true,
         config_fingerprint: configFingerprint,
         config: gcFormsJsonbValue(normalizedConfig)
@@ -1020,14 +1020,14 @@ const assertGcFormsClaimTemplateShape = (template: unknown) => {
       code: 'GCS_GCFORMS_TEMPLATE_UNSUPPORTED',
       message: {
         en: `The GC Forms template is missing required claim fields: ${missingQuestionIds.join(', ')}.`,
-        fr: `Le modele GC Forms ne contient pas les champs de reclamation requis : ${missingQuestionIds.join(', ')}.`
+        fr: `Le modèle Formulaires GC ne contient pas les champs de demande de remboursement requis : ${missingQuestionIds.join(', ')}.`
       },
       details: missingQuestionIds.map(questionId => ({
         path: questionId,
         code: 'missing_question_id',
         message: {
           en: `Missing required GC Forms question: ${questionId}.`,
-          fr: `Question GC Forms requise manquante : ${questionId}.`
+          fr: `Question Formulaires GC requise manquante : ${questionId}.`
         }
       }))
     })
@@ -1054,7 +1054,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
       code: 'GCS_GCFORMS_TEMPLATE_NOT_REVIEWED',
       message: {
         en: 'Refresh and review the GC Forms template before syncing submissions.',
-        fr: 'Actualisez et verifiez le modele GC Forms avant de synchroniser les soumissions.'
+        fr: 'Actualisez et vérifiez le modèle Formulaires GC avant de synchroniser les soumissions.'
       }
     })
   }
@@ -1065,7 +1065,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
       message: {
         en: 'The GC Forms template has changed since it was last reviewed. Refresh the template, review the mappings, save the stream configuration, and sync again.',
-        fr: 'Le modele GC Forms a change depuis sa derniere verification. Actualisez le modele, verifiez les correspondances, enregistrez la configuration du volet, puis synchronisez de nouveau.'
+        fr: 'Le modèle Formulaires GC a changé depuis sa dernière vérification. Actualisez le modèle, vérifiez les correspondances, enregistrez la configuration du volet, puis synchronisez de nouveau.'
       }
     })
     throw Object.assign(templateChangedError, {
@@ -1466,7 +1466,7 @@ const createHistoricalConnectionClient = async (
       code: 'GCS_GCFORMS_HISTORICAL_CREDENTIAL_CHANGED',
       message: {
         en: 'The credential used by this pending GC Forms submission has changed.',
-        fr: 'Le justificatif utilise par cette soumission GC Forms en attente a change.'
+        fr: 'L’identifiant d’authentification utilisé par cette soumission Formulaires GC en attente a changé.'
       }
     })
   }

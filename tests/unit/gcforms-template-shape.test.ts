@@ -1181,7 +1181,7 @@ describe('GC Forms template shape guard', () => {
       code: 'GCS_GCFORMS_CONFIG_CHANGED',
       localizedMessage: {
         en: expect.stringContaining('configuration changed'),
-        fr: expect.stringContaining('configuration de GC Forms a change')
+        fr: expect.stringContaining('configuration de Formulaires GC a changé')
       }
     })
     expect(decryptSpy).toHaveBeenCalledWith('prepared-before-patch')

@@ -304,14 +304,14 @@ describe('GC Forms encrypted credentials', () => {
       code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
       localizedMessage: {
         en: 'The credential details are invalid.',
-        fr: 'Les renseignements du justificatif sont invalides.'
+        fr: 'Les renseignements de l’identifiant d’authentification sont invalides.'
       },
       details: expect.arrayContaining([
         expect.objectContaining({
           path: 'name_en',
           message: {
             en: 'Review this credential field.',
-            fr: 'Verifiez ce champ du justificatif.'
+            fr: 'Vérifiez ce champ de l’identifiant d’authentification.'
           }
         })
       ])
@@ -322,7 +322,7 @@ describe('GC Forms encrypted credentials', () => {
       code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
       localizedMessage: {
         en: 'The credential details are invalid.',
-        fr: 'Les renseignements du justificatif sont invalides.'
+        fr: 'Les renseignements de l’identifiant d’authentification sont invalides.'
       }
     })
   })
@@ -459,7 +459,7 @@ describe('GC Forms encrypted credentials', () => {
       code: 'GCS_GCFORMS_CREDENTIAL_UPDATE_RECOVERABLE_SUBMISSIONS',
       localizedMessage: {
         en: expect.stringContaining('cannot be changed'),
-        fr: expect.stringContaining('ne peut pas etre modifiee')
+        fr: expect.stringContaining('ne peut pas être modifiée')
       }
     })
     await expect(deleteGcFormsCredential(contextFor('10', true, credential.id))).rejects.toMatchObject({
@@ -467,7 +467,7 @@ describe('GC Forms encrypted credentials', () => {
       code: 'GCS_GCFORMS_CREDENTIAL_RECOVERABLE_SUBMISSIONS',
       localizedMessage: {
         en: expect.stringContaining('cannot be deleted'),
-        fr: expect.stringContaining('ne peut pas etre supprime')
+        fr: expect.stringContaining('ne peut pas être supprimé')
       }
     })
     await expect(getGcFormsCredential(db, '10', credential.id)).resolves.toEqual({

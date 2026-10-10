@@ -17,20 +17,20 @@ export const GCFORMS_DIAGNOSTIC_MESSAGES = defineGcsExtensionMessages({
     "submission_status_invalid": "The configured GC Forms submission status is invalid ({statusCode})."
   },
   "fr": {
-    "missing_required_value": "Une valeur GC Forms obligatoire est manquante pour {destinationPath}.",
-    "invalid_value": "La valeur GC Forms pour {destinationPath} ne peut pas être transformée.",
-    "unsupported_destination": "La destination configurée {destinationEntity} n’est pas prise en charge pour la matérialisation des réclamations.",
-    "claim_required_value_missing": "Une valeur de réclamation obligatoire est manquante pour {destinationPath}.",
-    "claim_values_invalid": "Les valeurs de réclamation n’ont pas pu être converties pour {destinationPath}.",
-    "claim_proponent_unavailable": "Choisissez un promoteur actif qui soumet la réclamation et qui est lié à l’entente à {destinationPath}.",
-    "claim_period_invalid": "La période de réclamation à {destinationPath} doit se situer dans un seul exercice financier.",
+    "missing_required_value": "Une valeur Formulaires GC obligatoire est manquante pour {destinationPath}.",
+    "invalid_value": "La valeur Formulaires GC pour {destinationPath} ne peut pas être transformée.",
+    "unsupported_destination": "La destination configurée {destinationEntity} n’est pas prise en charge pour la matérialisation des demandes de remboursement.",
+    "claim_required_value_missing": "Une valeur de demande de remboursement obligatoire est manquante pour {destinationPath}.",
+    "claim_values_invalid": "Les valeurs de demande de remboursement n’ont pas pu être converties pour {destinationPath}.",
+    "claim_proponent_unavailable": "Choisissez un promoteur actif qui soumet la demande de remboursement et qui est lié à l’entente à {destinationPath}.",
+    "claim_period_invalid": "La période de demande de remboursement à {destinationPath} doit se situer dans un seul exercice financier.",
     "agreement_not_found": "L’entente pour {destinationPath} est introuvable dans ce volet de paiements de transfert.",
     "agreement_override_unavailable": "L’entente sélectionnée pour {destinationPath} n’est plus disponible dans ce volet de paiements de transfert.",
-    "claim_fiscal_year_invalid": "L’exercice financier de la réclamation pour {destinationPath} n’est pas valide pour l’entente résolue.",
-    "claim_line_item_required_value_missing": "Une valeur obligatoire de ligne de réclamation est manquante pour {destinationPath} à la ligne {row}.",
-    "claim_line_item_values_invalid": "Les valeurs de la ligne de réclamation n’ont pas pu être converties pour {destinationPath} à la ligne {row}.",
-    "submission_processing_failed": "GC Forms n’a pas pu traiter cette soumission.",
-    "submission_status_invalid": "Le statut configuré pour les soumissions GC Forms n’est pas valide ({statusCode})."
+    "claim_fiscal_year_invalid": "L’exercice financier de la demande de remboursement pour {destinationPath} n’est pas valide pour l’entente résolue.",
+    "claim_line_item_required_value_missing": "Une valeur obligatoire de ligne de demande de remboursement est manquante pour {destinationPath} à la ligne {row}.",
+    "claim_line_item_values_invalid": "Les valeurs de la ligne de demande de remboursement n’ont pas pu être converties pour {destinationPath} à la ligne {row}.",
+    "submission_processing_failed": "Formulaires GC n’a pas pu traiter cette soumission.",
+    "submission_status_invalid": "Le statut configuré pour les soumissions Formulaires GC n’est pas valide ({statusCode})."
   }
 })
 export const UNKNOWN_DIAGNOSTIC_MESSAGES = defineGcsExtensionMessages({
@@ -38,6 +38,6 @@ export const UNKNOWN_DIAGNOSTIC_MESSAGES = defineGcsExtensionMessages({
     "unknown": "GC Forms could not complete this mapping."
   },
   "fr": {
-    "unknown": "GC Forms n’a pas pu terminer cette correspondance."
+    "unknown": "Formulaires GC n’a pas pu terminer cette correspondance."
   }
 })

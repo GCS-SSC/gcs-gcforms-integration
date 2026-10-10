@@ -60,7 +60,7 @@ export const guardGcFormsLifecycleChange = async (
       code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS',
       message: {
         en: 'GC Forms cannot be disabled or deleted for this scope until all recoverable submissions are resolved.',
-        fr: 'GC Forms ne peut pas etre desactive ni supprime pour cette portee tant que toutes les soumissions recuperables ne sont pas reglees.'
+        fr: 'Formulaires GC ne peut pas être désactivé ni supprimé pour cette portée tant que toutes les soumissions récupérables ne sont pas réglées.'
       }
     })
   }
@@ -71,7 +71,7 @@ const createGcFormsSubmissionStatusRequiredError = () => createGcsExtensionUserE
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
   message: {
     en: 'Select an Agency status for claims imported from GC Forms before enabling the integration.',
-    fr: 'Sélectionnez un statut d’organisation pour les réclamations importées de GC Forms avant d’activer l’intégration.'
+    fr: 'Sélectionnez un statut d’organisme pour les demandes de remboursement importées de Formulaires GC avant d’activer l’intégration.'
   }
 })
 
@@ -80,7 +80,7 @@ const createGcFormsSubmissionStatusUnavailableError = () => createGcsExtensionUs
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
   message: {
     en: 'The selected imported claim status is not active for this agency.',
-    fr: 'Le statut sélectionné pour les réclamations importées n’est pas actif pour cette organisation.'
+    fr: 'Le statut sélectionné pour les demandes de remboursement importées n’est pas actif pour cet organisme.'
   }
 })
 
@@ -89,7 +89,7 @@ const createGcFormsSubmissionStatusNotDraftError = () => createGcsExtensionUserE
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
   message: {
     en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Brouillon de l’organisation.'
+    fr: 'Les demandes de remboursement importées de Formulaires GC doivent utiliser le statut d’ébauche de l’organisme.'
   }
 })
 
@@ -98,7 +98,7 @@ const createGcFormsSubmissionStatusInvalidError = () => createGcsExtensionUserEr
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_INVALID',
   message: {
     en: 'The selected imported claim status identifier is invalid.',
-    fr: 'L’identifiant du statut sélectionné pour les réclamations importées est invalide.'
+    fr: 'L’identifiant du statut sélectionné pour les demandes de remboursement importées est invalide.'
   }
 })
 
@@ -107,7 +107,7 @@ const createGcFormsSubmissionStatusReferencedError = () => createGcsExtensionUse
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
   message: {
     en: 'This status is still required by recoverable GC Forms imported claims.',
-    fr: 'Ce statut est toujours requis par des réclamations importées récupérables de GC Forms.'
+    fr: 'Ce statut est toujours requis par des demandes de remboursement importées récupérables de Formulaires GC.'
   }
 })
 

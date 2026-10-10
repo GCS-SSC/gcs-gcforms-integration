@@ -239,7 +239,7 @@ describe('GC Forms materialization failure queue', () => {
       diagnostic: {
         code: 'claim_fiscal_year_invalid',
         params: { destinationPath: 'claim.egcs_fc_fiscalyear' },
-        message: 'L’exercice financier de la réclamation pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
+        message: 'L’exercice financier de la demande de remboursement pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
       },
       issues: [{
         mappingId: 'fiscal-year',
@@ -247,7 +247,7 @@ describe('GC Forms materialization failure queue', () => {
         destinationPath: 'claim.egcs_fc_fiscalyear',
         code: 'claim_fiscal_year_invalid',
         params: { destinationPath: 'claim.egcs_fc_fiscalyear' },
-        message: 'L’exercice financier de la réclamation pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
+        message: 'L’exercice financier de la demande de remboursement pour claim.egcs_fc_fiscalyear n’est pas valide pour l’entente résolue.'
       }]
     }))
     expect(result.items).toContainEqual(expect.objectContaining({

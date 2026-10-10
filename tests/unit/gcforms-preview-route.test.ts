@@ -86,7 +86,7 @@ describe('GC Forms preview route', () => {
         mappingId: 'map-name',
         code: 'missing_required_value',
         params: { destinationPath: 'egcs_fc_title_en' },
-        message: 'Une valeur GC Forms obligatoire est manquante pour egcs_fc_title_en.'
+        message: 'Une valeur Formulaires GC obligatoire est manquante pour egcs_fc_title_en.'
       })]
     }))
   })

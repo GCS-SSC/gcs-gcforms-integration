@@ -93,7 +93,7 @@ describe('GcFormsEntitySourceTab', () => {
     },
     {
       localeId: 'fr' as const,
-      title: 'Données sources de GC Forms',
+      title: 'Données sources de Formulaires GC',
       status: 'Importée; confirmation en attente',
       received: new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium' })
         .format(new Date('2026-01-15T17:30:00.000Z')),
@@ -162,7 +162,7 @@ describe('GcFormsEntitySourceTab', () => {
     const wrapper = await mountTab('fr', vi.fn<typeof fetch>(async () => jsonResponse({ items: [] })))
 
     expect(wrapper.get('[data-testid="gcforms-empty-state"]').text())
-      .toBe('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
+      .toBe('Aucune soumission de Formulaires GC n’est encore liée à cet enregistrement.')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Réessayer')
     wrapper.unmount()
@@ -175,9 +175,9 @@ describe('GcFormsEntitySourceTab', () => {
     const wrapper = await mountTab('fr', fetchMock)
     const alert = wrapper.get('[role="alert"]')
 
-    expect(alert.text()).toContain('Impossible de charger les données sources de GC Forms.')
+    expect(alert.text()).toContain('Impossible de charger les données sources de Formulaires GC.')
     expect(alert.text()).toContain(
-      'Vous n’avez pas l’autorisation de consulter les données sources de GC Forms pour cet enregistrement.'
+      'Vous n’avez pas l’autorisation de consulter les données sources de Formulaires GC pour cet enregistrement.'
     )
     expect(alert.text()).not.toContain('Aucune soumission')
     expect(alert.text()).not.toContain('403')
@@ -189,7 +189,7 @@ describe('GcFormsEntitySourceTab', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="gcforms-empty-state"]').text())
-      .toBe('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
+      .toBe('Aucune soumission de Formulaires GC n’est encore liée à cet enregistrement.')
     wrapper.unmount()
   })
 

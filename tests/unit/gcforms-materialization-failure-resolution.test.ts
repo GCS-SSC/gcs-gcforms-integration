@@ -372,7 +372,7 @@ describe('GC Forms materialization failure resolution', () => {
         code: 'GCS_GCFORMS_SUBMISSION_NOT_MATERIALIZATION_FAILED',
         localizedMessage: {
           en: expect.stringContaining('no longer awaiting'),
-          fr: expect.stringContaining('n attend plus')
+          fr: expect.stringContaining('n’attend plus')
         }
       })
       expect(lockAuthState).toHaveBeenCalledOnce()

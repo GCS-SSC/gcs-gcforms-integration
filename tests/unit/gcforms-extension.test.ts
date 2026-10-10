@@ -80,7 +80,7 @@ describe('GC Forms extension manifest and entity tab contract', () => {
     )
 
     expect(StreamGcFormsIntegrationConfigMessages.en.downloadClaimForm).toBe('Download claim form')
-    expect(StreamGcFormsIntegrationConfigMessages.fr.downloadClaimForm).toBe('Telecharger le formulaire de reclamation')
+    expect(StreamGcFormsIntegrationConfigMessages.fr.downloadClaimForm).toBe('Télécharger le formulaire de demande de remboursement')
     expect(source).toContain('getJson(`/streams/${streamId}/claim-template`)')
     expect(source).toContain('gcs-claim-form-stream-${streamId}.json')
   })

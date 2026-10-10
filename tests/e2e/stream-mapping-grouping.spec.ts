@@ -20,25 +20,25 @@ type PresentationCell = {
 
 const presentationCells: PresentationCell[] = [
   {
-    claimChild: 'Numero d entente',
-    claimGroup: 'Champs de reclamation',
-    collapseLabel: 'Reduire',
+    claimChild: 'Numéro d’entente',
+    claimGroup: 'Champs de demande de remboursement',
+    collapseLabel: 'Réduire',
     configurationPath: '/configuration',
-    expandLabel: 'Developper',
+    expandLabel: 'Développer',
     localeId: 'LOC-FR',
-    otherGroupChild: 'Categorie de cout',
+    otherGroupChild: 'Catégorie de coût',
     pathPrefix: '/fr',
     viewport: { width: 1440, height: 900 },
     viewportId: 'VP-DESKTOP'
   },
   {
-    claimChild: 'Numero d entente',
-    claimGroup: 'Champs de reclamation',
-    collapseLabel: 'Reduire',
+    claimChild: 'Numéro d’entente',
+    claimGroup: 'Champs de demande de remboursement',
+    collapseLabel: 'Réduire',
     configurationPath: '/configuration',
-    expandLabel: 'Developper',
+    expandLabel: 'Développer',
     localeId: 'LOC-FR',
-    otherGroupChild: 'Categorie de cout',
+    otherGroupChild: 'Catégorie de coût',
     pathPrefix: '/fr',
     viewport: { width: 390, height: 844 },
     viewportId: 'VP-MOBILE'
@@ -270,7 +270,7 @@ test('renders a French materialization diagnostic and retries without leaking ra
       agencyId: fixture.agencyId
     })
     await page.goto(`/fr/extension/gcs-gcforms-integration/configuration?${query.toString()}`)
-    await page.getByText('Materialisations echouees', { exact: true }).click()
+    await page.getByText('Matérialisations échouées', { exact: true }).click()
 
     await expect(page.getByText(localizedDiagnostic, { exact: true }).first()).toBeVisible()
     await expect(page.getByText(rawDetail, { exact: false })).toHaveCount(0)
@@ -299,7 +299,7 @@ test('renders a French materialization diagnostic and retries without leaking ra
     await page.getByRole('button', { name: 'Associer', exact: true }).last().click()
 
     await expect(page.getByText(
-      'Aucune materialisation de reclamation echouee ne necessite de verification.',
+      'Aucune matérialisation de demande de remboursement échouée ne nécessite de vérification.',
       { exact: true }
     )).toBeVisible()
     expect(retryResolved).toBe(true)

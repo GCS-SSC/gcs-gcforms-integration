@@ -78,14 +78,14 @@ const openSourceTab = async (
 ): Promise<void> => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(sourceTabPath(localeId, proponentId))
-  const sourceTab = page.getByRole('tab', { name: 'GC Forms', exact: true })
+  const sourceTab = page.getByRole('tab', { name: localeId === 'fr' ? 'Formulaires GC' : 'GC Forms', exact: true })
   await expect(sourceTab).toBeVisible()
   const sourceRequest = page.waitForRequest(request => request.url().includes(`/proponents/${proponentId}/submissions`))
   await sourceTab.click()
   expect(new URL((await sourceRequest).url()).searchParams.has('agencyId')).toBe(false)
   await expect(page.getByRole('heading', {
     level: 2,
-    name: localeId === 'fr' ? 'Données sources de GC Forms' : 'GC Forms source data'
+    name: localeId === 'fr' ? 'Données sources de Formulaires GC' : 'GC Forms source data'
   })).toBeVisible()
   await page.setViewportSize(viewport)
 }
@@ -208,7 +208,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
       await openSourceTab(page, proponentId, 'fr', viewport)
 
       await expect(page.getByTestId('gcforms-empty-state'))
-        .toHaveText('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
+        .toHaveText('Aucune soumission de Formulaires GC n’est encore liée à cet enregistrement.')
       await expect(page.getByRole('alert')).toHaveCount(0)
       await expectNoDocumentOverflow(page)
       await page.unroute(sourceApiPattern)
@@ -234,15 +234,15 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
       await openSourceTab(page, proponentId, 'fr', viewport)
 
       const alert = page.getByRole('alert')
-      await expect(alert).toContainText('Impossible de charger les données sources de GC Forms.')
-      await expect(alert).toContainText('Une erreur s’est produite pendant le chargement des données sources de GC Forms.')
+      await expect(alert).toContainText('Impossible de charger les données sources de Formulaires GC.')
+      await expect(alert).toContainText('Une erreur s’est produite pendant le chargement des données sources de Formulaires GC.')
       await expect(alert).not.toContainText('Aucune soumission')
       await expect(alert.getByRole('button', { name: 'Réessayer' })).toBeVisible()
       await expectNoDocumentOverflow(page)
 
       await alert.getByRole('button', { name: 'Réessayer' }).click()
       await expect(page.getByTestId('gcforms-empty-state'))
-        .toHaveText('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
+        .toHaveText('Aucune soumission de Formulaires GC n’est encore liée à cet enregistrement.')
       expect(requestCount).toBe(2)
       await page.unroute(sourceApiPattern)
     })

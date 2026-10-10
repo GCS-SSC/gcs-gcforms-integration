@@ -11,8 +11,8 @@ export default defineGcsExtensionRouteHandler(async (context) => {
       statusCode: 400,
       code: 'GCS_GCFORMS_ENTITY_CONTEXT_MISSING',
       message: {
-        en: 'GC Forms source data could not resolve the current GCS record.',
-        fr: 'Les donnees source GC Forms n ont pas pu resoudre l enregistrement GCS courant.'
+        en: 'The current GCS record could not be identified for the GC Forms source data.',
+        fr: 'Impossible d’identifier l’enregistrement GCS courant pour les données sources de Formulaires GC.'
       }
     })
   }

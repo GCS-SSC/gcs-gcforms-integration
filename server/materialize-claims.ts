@@ -91,7 +91,7 @@ const createSubmissionStatusUnavailableError = () => createGcsExtensionUserError
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
   message: {
     en: 'The configured imported claim status is no longer available for this agency.',
-    fr: 'Le statut configuré des réclamations importées n’est plus disponible pour cette organisation.'
+    fr: 'Le statut configuré des demandes de remboursement importées n’est plus disponible pour cet organisme.'
   }
 })
 
@@ -100,7 +100,7 @@ const createSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
   message: {
     en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les réclamations importées de GC Forms doivent utiliser le statut Brouillon de l’organisation.'
+    fr: 'Les demandes de remboursement importées de Formulaires GC doivent utiliser le statut d’ébauche de l’organisme.'
   }
 })
 
@@ -118,7 +118,7 @@ const createClaimFiscalYearUnavailableError = () => createGcsExtensionUserError(
   code: 'GCS_GCFORMS_CLAIM_FISCAL_YEAR_UNAVAILABLE',
   message: {
     en: 'The selected claim fiscal year is no longer available for this agreement.',
-    fr: 'L’exercice financier sélectionné pour la réclamation n’est plus disponible pour cette entente.'
+    fr: 'L’exercice financier sélectionné pour la demande de remboursement n’est plus disponible pour cette entente.'
   }
 })
 
@@ -132,7 +132,7 @@ const requireCreatedAgreementClaim = (
     code: 'GCS_GCFORMS_CLAIM_PROPONENT_UNAVAILABLE',
     message: {
       en: 'The submitting Proponent is no longer active on the selected agreement.',
-      fr: 'Le promoteur qui soumet la réclamation n’est plus actif sur l’entente sélectionnée.'
+      fr: 'Le promoteur qui soumet la demande de remboursement n’est plus actif sur l’entente sélectionnée.'
     }
   })
   if (result.status === 'fiscal_year_unavailable') throw createClaimFiscalYearUnavailableError()

@@ -21,9 +21,9 @@ export const GcFormsEntitySourceTabMessages = defineGcsExtensionMessages({
     "retry": "Retry"
   },
   "fr": {
-    "title": "Données sources de GC Forms",
-    "empty": "Aucune soumission de GC Forms n’est encore liée à cet enregistrement.",
-    "loading": "Chargement des données sources de GC Forms…",
+    "title": "Données sources de Formulaires GC",
+    "empty": "Aucune soumission de Formulaires GC n’est encore liée à cet enregistrement.",
+    "loading": "Chargement des données sources de Formulaires GC…",
     "submission": "Soumission",
     "status": "Statut",
     "received": "Reçue",
@@ -35,9 +35,9 @@ export const GcFormsEntitySourceTabMessages = defineGcsExtensionMessages({
     "no": "Non",
     "noMappedValues": "Aucune valeur mise en correspondance",
     "unknownStatus": "Inconnu",
-    "errorTitle": "Impossible de charger les données sources de GC Forms.",
-    "errorForbidden": "Vous n’avez pas l’autorisation de consulter les données sources de GC Forms pour cet enregistrement.",
-    "errorDefault": "Une erreur s’est produite pendant le chargement des données sources de GC Forms.",
+    "errorTitle": "Impossible de charger les données sources de Formulaires GC.",
+    "errorForbidden": "Vous n’avez pas l’autorisation de consulter les données sources de Formulaires GC pour cet enregistrement.",
+    "errorDefault": "Une erreur s’est produite pendant le chargement des données sources de Formulaires GC.",
     "retry": "Réessayer"
   }
 })

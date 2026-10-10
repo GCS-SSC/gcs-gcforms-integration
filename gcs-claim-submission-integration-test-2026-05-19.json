@@ -57,14 +57,14 @@
           }
         ],
         "titleEn": "Submitting Proponent (required)",
-        "titleFr": "Promoteur qui soumet la réclamation (obligatoire)",
+        "titleFr": "Promoteur qui soumet la demande de remboursement (obligatoire)",
         "questionId": "submitting_proponent",
         "validation": {
           "required": true
         },
         "subElements": [],
         "descriptionEn": "Choose the Proponent submitting this claim under the selected agreement.",
-        "descriptionFr": "Choisissez le promoteur qui soumet cette réclamation dans le cadre de l’entente sélectionnée.",
+        "descriptionFr": "Choisissez le promoteur qui soumet cette demande de remboursement dans le cadre de l’entente sélectionnée.",
         "placeholderEn": "",
         "placeholderFr": ""
       }
