@@ -16,8 +16,6 @@ type AgencyExtensionRegistry = {
 }
 
 const extensionKey = 'gcs-gcforms-integration'
-const proponentId = '1'
-const sourceApiPattern = new RegExp(`/api/extensions/${extensionKey}/proponents/${proponentId}/submissions(?:[?]|$)`)
 const longMappedValue = `LONG-${'x'.repeat(720)}`
 
 const expectOk = async (response: APIResponse, label: string): Promise<void> => {
@@ -33,7 +31,7 @@ const login = async (page: Page): Promise<void> => {
   await page.waitForURL(url => !url.pathname.endsWith('/login'))
 }
 
-const getLeadAgencyId = async (page: Page): Promise<string> => {
+const getLeadAgencyId = async (page: Page, proponentId: string): Promise<string> => {
   const response = await page.request.get(`/api/applicant-recipients/${proponentId}`)
   await expectOk(response, 'Read seeded Proponent')
   const profile = await response.json() as { egcs_ar_leadagency: string | number }
@@ -66,7 +64,7 @@ const patchExtensionState = async (
   await expectOk(response, `${state.enabled ? 'Enable' : 'Restore'} GC Forms extension state`)
 }
 
-const sourceTabPath = (localeId: 'en' | 'fr'): string => {
+const sourceTabPath = (localeId: 'en' | 'fr', proponentId: string): string => {
   return localeId === 'fr'
     ? `/fr/promoteurs/modifier/${proponentId}`
     : `/en/proponents/edit/${proponentId}`
@@ -74,11 +72,12 @@ const sourceTabPath = (localeId: 'en' | 'fr'): string => {
 
 const openSourceTab = async (
   page: Page,
+  proponentId: string,
   localeId: 'en' | 'fr',
   viewport: { width: number, height: number }
 ): Promise<void> => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(sourceTabPath(localeId))
+  await page.goto(sourceTabPath(localeId, proponentId))
   const sourceTab = page.getByRole('tab', { name: 'GC Forms', exact: true })
   await expect(sourceTab).toBeVisible()
   const sourceRequest = page.waitForRequest(request => request.url().includes(`/proponents/${proponentId}/submissions`))
@@ -139,17 +138,32 @@ const populatedPayload = {
   }]
 }
 
-test('renders GC Forms source data, empty, error, retry, and overflow states', async ({ page }) => {
+test('renders GC Forms source data, empty, error, retry, and overflow states', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   await login(page)
-  const agencyId = await getLeadAgencyId(page)
+  const proponents = await page.request.get('/api/applicant-recipients?page=1&limit=1&status=active')
+  await expectOk(proponents, 'Read active managed Proponent')
+  const items = (await proponents.json() as { items: Array<{ id: string }> }).items
+  expect(items).toHaveLength(1)
+  const proponentId = String(items[0]!.id)
+  const sourceApiPattern = new RegExp(`/api/extensions/${extensionKey}/proponents/${proponentId}/submissions(?:[?]|$)`)
+  const agencyId = await getLeadAgencyId(page, proponentId)
   const initialState = await readExtensionState(page, agencyId)
+  const statuses = await page.request.get(`/api/agency/${agencyId}/statuses`)
+  await expectOk(statuses, 'Read Agency import status')
+  const draft = (await statuses.json() as Array<{ id: string; isDraft: boolean }>).find(status => status.isDraft)
+  expect(draft).toBeTruthy()
+  let primaryFailure = false
 
   try {
-    await patchExtensionState(page, agencyId, { ...initialState, enabled: true })
+    await patchExtensionState(page, agencyId, { ...initialState, enabled: true,
+      config: { ...initialState.config, submissionStatusId: String(draft!.id) } })
+    await expectOk(await page.request.post(`/api/extensions/agency/${agencyId}/migrations`, {
+      data: { extensionKey }
+    }), 'Apply GC Forms storage migrations')
 
     await test.step('loads the real empty source response in the selected agency context', async () => {
-      await openSourceTab(page, 'en', { width: 1440, height: 900 })
+      await openSourceTab(page, proponentId, 'en', { width: 1440, height: 900 })
       await expect(page.getByTestId('gcforms-empty-state'))
         .toHaveText('No GC Forms submissions have been linked to this record yet.')
       await expect(page.getByRole('alert')).toHaveCount(0)
@@ -167,7 +181,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
             body: JSON.stringify(populatedPayload)
           })
         })
-        await openSourceTab(page, 'en', viewport)
+        await openSourceTab(page, proponentId, 'en', viewport)
 
         const sourceSection = page.getByRole('heading', { name: 'GC Forms source data' }).locator('..').locator('..')
         await expect(page.getByText('Imported; confirmation pending', { exact: true })).toBeVisible()
@@ -191,7 +205,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
       await page.route(sourceApiPattern, async route => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' })
       })
-      await openSourceTab(page, 'fr', viewport)
+      await openSourceTab(page, proponentId, 'fr', viewport)
 
       await expect(page.getByTestId('gcforms-empty-state'))
         .toHaveText('Aucune soumission de GC Forms n’est encore liée à cet enregistrement.')
@@ -217,7 +231,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
               body: '{"items":[]}'
             })
       })
-      await openSourceTab(page, 'fr', viewport)
+      await openSourceTab(page, proponentId, 'fr', viewport)
 
       const alert = page.getByRole('alert')
       await expect(alert).toContainText('Impossible de charger les données sources de GC Forms.')
@@ -242,7 +256,7 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
           body: JSON.stringify({ data: { message: 'Forbidden' } })
         })
       })
-      await openSourceTab(page, 'en', viewport)
+      await openSourceTab(page, proponentId, 'en', viewport)
 
       const alert = page.getByRole('alert')
       await expect(alert).toContainText('GC Forms source data could not be loaded.')
@@ -253,8 +267,16 @@ test('renders GC Forms source data, empty, error, retry, and overflow states', a
       await expectNoDocumentOverflow(page)
       await page.unroute(sourceApiPattern)
     })
+  } catch (error: unknown) {
+    primaryFailure = true
+    throw error
   } finally {
     await page.unroute(sourceApiPattern).catch(() => {})
-    await patchExtensionState(page, agencyId, initialState)
+    try {
+      await patchExtensionState(page, agencyId, initialState)
+    } catch (error: unknown) {
+      if (!primaryFailure) throw error
+      testInfo.annotations.push({ type: 'cleanup failure', description: error instanceof Error ? error.message : String(error) })
+    }
   }
 })

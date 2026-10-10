@@ -10,6 +10,8 @@ Credential mutation and deletion are serialized with sync, confirmation, and man
 
 The extension also registers the SDK lifecycle guard used by the host's actual disable and deletion paths. Agency disable/deletion and stream disable/deletion are rejected while the affected scope contains an `imported_pending_confirm` or `materialization_failed` row on any historical connection. The guard uses the same ordered agency/stream lifecycle locks as import and reconciliation, so it observes a recoverable row committed immediately before disable/deletion and waits for an in-flight recovery before deciding whether the scope is safe to change.
 
+The Agency status reference guard checks live configured status references even before first enablement. All lifecycle guards query recoverable submissions and repair historical status pins only after GC Forms submission storage has been migrated. Before migration, Agency configuration still requires its valid Draft status, while disablement and unrelated Agency status deletion remain available because recoverable submissions cannot yet exist.
+
 The server requires `GCS_EXTENSION_SECRETS_KEY` to be configured with a base64-encoded 32-byte encryption key before credentials can be saved or used in production. Local development may use the host seed's fixed dev key so the seeded GC Forms demo credential works after a clean database reset.
 
 ## Template Shape Guard

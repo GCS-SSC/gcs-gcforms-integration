@@ -284,6 +284,26 @@ describe('GC Forms registered lifecycle guard', () => {
     }
   )
 
+  it('allows unrelated status deletion before GC Forms storage is migrated', async () => {
+    await sql`DROP TABLE extensions.gcs_gcforms_submissions`.execute(db)
+    await expect(invokeStatusReferenceGuard('20', '91')).resolves.toBeUndefined()
+  })
+
+  it('allows lifecycle changes and validates live configuration before submission storage is migrated', async () => {
+    await sql`DROP TABLE extensions.gcs_gcforms_submissions`.execute(db)
+    await db.insertInto('Common_Status').values([
+      { id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true },
+      { id: '92', egcs_cn_agency: '20' }
+    ]).execute()
+    await expect(invokeGuard('agency', '20')).resolves.toBeUndefined()
+    await expect(invokeGuard('stream', '20', '30')).resolves.toBeUndefined()
+    await expect(invokeGuard('stream', '20')).rejects.toThrow('require a stream id')
+    await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
+    await expect(invokeConfigurationGuard('20')).rejects.toMatchObject({ code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED' })
+    await expect(invokeConfigurationGuard('20', '92')).rejects.toMatchObject({ code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT' })
+    await expect(invokeConfigurationGuard('21', '91')).rejects.toMatchObject({ code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE' })
+  })
+
   it('blocks deletion only for the exact live GC Forms Agency status reference', async () => {
     await db
       .insertInto('extensions.agency_enablement')

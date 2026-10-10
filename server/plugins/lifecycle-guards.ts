@@ -15,6 +15,12 @@ import { GCFORMS_EXTENSION_KEY } from '../../shared/gcforms.ts'
 import { parseGcFormsAgencyConfig } from '../../shared/gcforms.ts'
 import { asGcFormsIntegrationDb } from '../db.ts'
 
+/** Reports whether this installed integration has migrated its submission storage. */
+const hasSubmissionStorage = async (db: ReturnType<typeof asGcFormsIntegrationDb>): Promise<boolean> => {
+  const storage = await sql<{ submissions: string | null }>`SELECT to_regclass('extensions.gcs_gcforms_submissions')::text AS submissions`.execute(db)
+  return Boolean(storage.rows[0]?.submissions)
+}
+
 /** Blocks scope disablement or deletion while GC Forms confirmations remain recoverable. */
 export const guardGcFormsLifecycleChange = async (
   context: GcsExtensionDisableGuardContext
@@ -27,6 +33,10 @@ export const guardGcFormsLifecycleChange = async (
   )
 
   const db = asGcFormsIntegrationDb(context.db)
+  if (context.scope === 'stream' && !context.streamId) {
+    throw new Error('GC Forms stream lifecycle guards require a stream id.')
+  }
+  if (!await hasSubmissionStorage(db)) return
   let query = db
     .selectFrom('extensions.gcs_gcforms_submissions as submission')
     .innerJoin(
@@ -40,10 +50,7 @@ export const guardGcFormsLifecycleChange = async (
     .where('submission._deleted', '=', false)
 
   if (context.scope === 'stream') {
-    if (!context.streamId) {
-      throw new Error('GC Forms stream lifecycle guards require a stream id.')
-    }
-    query = query.where('connection.stream_id', '=', context.streamId)
+    query = query.where('connection.stream_id', '=', context.streamId!)
   }
 
   const recoverableSubmission = await query.executeTakeFirst()
@@ -110,6 +117,8 @@ const findRecoverableHistoricalStatusReference = async (
   statusId?: string,
   match: 'equal' | 'different' = 'equal'
 ) => {
+  if (!await hasSubmissionStorage(db)) return undefined
+
   let query = db
     .selectFrom('extensions.gcs_gcforms_submissions as submission')
     .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')
@@ -174,6 +183,7 @@ export const guardGcFormsConfiguration = async (
   if (!status.egcs_cn_isdraft) {
     throw createGcFormsSubmissionStatusNotDraftError()
   }
+  if (!await hasSubmissionStorage(db)) return
   const legacyIntegrations = await db
     .selectFrom('extensions.gcs_gcforms_submissions as submission')
     .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')

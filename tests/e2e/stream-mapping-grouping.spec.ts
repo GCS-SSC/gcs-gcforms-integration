@@ -88,7 +88,7 @@ const login = async (page: Page): Promise<void> => {
 const createFixture = async (page: Page, fixture: Partial<Fixture>): Promise<Fixture> => {
   const token = nanoid()
   const agency = await page.request.post('/api/agency', { data: {
-    egcs_ay_gwcoa_number: '100',
+    egcs_ay_gwcoa_number: '113',
     egcs_ay_agencyfinancialsystemid: `${Date.now()}${randomInt(100_000, 1_000_000)}`,
     egcs_ay_name_en: `GC Forms grouping ${token}`,
     egcs_ay_name_fr: `Regroupement GC Forms ${token}`,
