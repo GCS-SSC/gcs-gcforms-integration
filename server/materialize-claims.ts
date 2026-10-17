@@ -1,3 +1,4 @@
+import { gcFormsUserMessage } from '../i18n/server'
 import { sql } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
 import {
@@ -89,37 +90,25 @@ export interface ClaimMaterializationResult {
 const createSubmissionStatusUnavailableError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
-  message: {
-    en: 'The configured imported claim status is no longer available for this agency.',
-    fr: 'Le statut configuré des demandes de remboursement importées n’est plus disponible pour cet organisme.'
-  }
+  message: gcFormsUserMessage('configured_status_unavailable')
 })
 
 const createSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
-  message: {
-    en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les demandes de remboursement importées de Formulaires GC doivent utiliser le statut d’ébauche de l’organisme.'
-  }
+  message: gcFormsUserMessage('draft_status_required')
 })
 
 const createClaimAgreementUnavailableError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_AGREEMENT_UNAVAILABLE',
-  message: {
-    en: 'The selected agreement is no longer available for this stream.',
-    fr: 'L’entente sélectionnée n’est plus disponible pour ce volet.'
-  }
+  message: gcFormsUserMessage('agreement_unavailable')
 })
 
 const createClaimFiscalYearUnavailableError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_CLAIM_FISCAL_YEAR_UNAVAILABLE',
-  message: {
-    en: 'The selected claim fiscal year is no longer available for this agreement.',
-    fr: 'L’exercice financier sélectionné pour la demande de remboursement n’est plus disponible pour cette entente.'
-  }
+  message: gcFormsUserMessage('fiscal_year_unavailable')
 })
 
 const requireCreatedAgreementClaim = (
@@ -130,10 +119,7 @@ const requireCreatedAgreementClaim = (
   if (result.status === 'applicant_recipient_unavailable') throw createGcsExtensionUserError({
     statusCode: 409,
     code: 'GCS_GCFORMS_CLAIM_PROPONENT_UNAVAILABLE',
-    message: {
-      en: 'The submitting Proponent is no longer active on the selected agreement.',
-      fr: 'Le promoteur qui soumet la demande de remboursement n’est plus actif sur l’entente sélectionnée.'
-    }
+    message: gcFormsUserMessage('proponent_inactive')
   })
   if (result.status === 'fiscal_year_unavailable') throw createClaimFiscalYearUnavailableError()
   if (result.status === 'requested_status_not_draft') throw createSubmissionStatusNotDraftError()

@@ -1,3 +1,4 @@
+import { gcFormsUserMessage } from '../i18n/server'
 import { createPrivateKey } from 'node:crypto'
 import { sql } from 'kysely'
 import type { ZodType } from 'zod'
@@ -45,17 +46,11 @@ const parseCredentialRequest = <Output>(schema: ZodType<Output>, value: unknown)
   throw createGcsExtensionUserError({
     statusCode: 400,
     code: 'GCS_GCFORMS_CREDENTIAL_INVALID',
-    message: {
-      en: 'The credential details are invalid.',
-      fr: 'Les renseignements de l’identifiant d’authentification sont invalides.'
-    },
+    message: gcFormsUserMessage('credential_invalid'),
     details: parsed.error.issues.map(issue => ({
       path: issue.path.map(segment => String(segment)).join('.'),
       code: issue.code,
-      message: {
-        en: 'Review this credential field.',
-        fr: 'Vérifiez ce champ de l’identifiant d’authentification.'
-      }
+      message: gcFormsUserMessage('credential_field_invalid')
     }))
   })
 }
@@ -70,10 +65,7 @@ const authorizeGcFormsAgencyCredentials = (
     throw createGcsExtensionUserError({
       statusCode: 400,
       code: 'GCS_GCFORMS_AGENCY_MISSING',
-      message: {
-        en: 'Agency id is required to manage GC Forms credentials.',
-        fr: 'L’identifiant de l’organisme est requis pour gérer les identifiants d’authentification Formulaires GC.'
-      }
+      message: gcFormsUserMessage('agency_required')
     })
   }
 
@@ -82,10 +74,7 @@ const authorizeGcFormsAgencyCredentials = (
     throw createGcsExtensionUserError({
       statusCode: 401,
       code: 'GCS_GCFORMS_UNAUTHORIZED',
-      message: {
-        en: 'You must be signed in to manage GC Forms credentials.',
-        fr: 'Vous devez ouvrir une session pour gérer les identifiants d’authentification Formulaires GC.'
-      }
+      message: gcFormsUserMessage('credentials_sign_in_required')
     })
   }
 
@@ -93,10 +82,7 @@ const authorizeGcFormsAgencyCredentials = (
     throw createGcsExtensionUserError({
       statusCode: 403,
       code: 'GCS_GCFORMS_FORBIDDEN',
-      message: {
-        en: 'You do not have access to manage GC Forms credentials for this agency.',
-        fr: 'Vous n’avez pas accès à la gestion des identifiants d’authentification Formulaires GC pour cet organisme.'
-      }
+      message: gcFormsUserMessage('credentials_forbidden')
     })
   }
 }
@@ -108,10 +94,7 @@ const assertValidPrivateKey = (key: string) => {
     throw createGcsExtensionUserError({
       statusCode: 400,
       code: 'GCS_GCFORMS_PRIVATE_KEY_INVALID',
-      message: {
-        en: 'The GC Forms private key is not a valid PEM private key.',
-        fr: 'La clé privée Formulaires GC n’est pas une clé privée PEM valide.'
-      }
+      message: gcFormsUserMessage('private_key_invalid')
     })
   }
 }
@@ -286,10 +269,7 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
       throw createGcsExtensionUserError({
         statusCode: 404,
         code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-        message: {
-          en: 'The selected GC Forms credential is not available on the server.',
-          fr: 'L’identifiant d’authentification Formulaires GC sélectionné n’est pas disponible sur le serveur.'
-        }
+        message: gcFormsUserMessage('credential_unavailable')
       })
     }
 
@@ -328,10 +308,7 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
         throw createGcsExtensionUserError({
           statusCode: 409,
           code: 'GCS_GCFORMS_CREDENTIAL_UPDATE_RECOVERABLE_SUBMISSIONS',
-          message: {
-            en: 'This GC Forms credential authentication cannot be changed until all recoverable submissions using it are resolved.',
-            fr: 'L’authentification de cet identifiant d’authentification Formulaires GC ne peut pas être modifiée tant que toutes les soumissions récupérables qui l’utilisent ne sont pas réglées.'
-          }
+          message: gcFormsUserMessage('credential_change_blocked')
         })
       }
     }
@@ -397,10 +374,7 @@ export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext)
       throw createGcsExtensionUserError({
         statusCode: 409,
         code: 'GCS_GCFORMS_CREDENTIAL_RECOVERABLE_SUBMISSIONS',
-        message: {
-          en: 'This GC Forms credential cannot be deleted until all recoverable submissions using it are resolved.',
-          fr: 'Cet identifiant d’authentification Formulaires GC ne peut pas être supprimé tant que toutes les soumissions récupérables qui l’utilisent ne sont pas réglées.'
-        }
+        message: gcFormsUserMessage('credential_delete_blocked')
       })
     }
 

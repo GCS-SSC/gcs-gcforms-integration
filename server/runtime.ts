@@ -1,3 +1,4 @@
+import { gcFormsUserMessage } from '../i18n/server'
 import { createHash } from 'node:crypto'
 import { sql, type Selectable, type Transaction } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
@@ -192,10 +193,7 @@ const createSyncSessionIdentity = (
 const createGcFormsConfigChangedError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_CONFIG_CHANGED',
-  message: {
-    en: 'The GC Forms configuration changed while synchronization was running. Start the synchronization again.',
-    fr: 'La configuration de Formulaires GC a changé pendant la synchronisation. Relancez la synchronisation.'
-  }
+  message: gcFormsUserMessage('configuration_changed')
 })
 
 const getTemplateChangedSession = (error: unknown): GcFormsSyncSessionIdentity | null => {
@@ -246,10 +244,7 @@ export const getGcFormsSecretRootKey = (): string => {
   throw createGcsExtensionUserError({
     statusCode: 400,
     code: 'GCS_GCFORMS_SECRET_ROOT_KEY_MISSING',
-    message: {
-      en: 'The server encryption key for extension credentials is not configured.',
-      fr: 'La clé de chiffrement serveur pour les identifiants d’authentification d’extension n’est pas configurée.'
-    }
+    message: gcFormsUserMessage('encryption_key_missing')
   })
 }
 
@@ -287,10 +282,7 @@ export const runAuthorizedGcFormsWrite = async <T>(
 const createGcFormsCredentialMissingError = () => createGcsExtensionUserError({
   statusCode: 400,
   code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-  message: {
-    en: 'The selected GC Forms credential is not available on the server.',
-    fr: 'L’identifiant d’authentification Formulaires GC sélectionné n’est pas disponible sur le serveur.'
-  }
+  message: gcFormsUserMessage('credential_unavailable')
 })
 
 const timestampIdentity = (value: Date | string): string => value instanceof Date
@@ -415,10 +407,7 @@ const getGcFormsCredentialRow = async (
     throw createGcsExtensionUserError({
       statusCode: 400,
       code: 'GCS_GCFORMS_CREDENTIAL_MISSING',
-      message: {
-        en: 'The selected GC Forms credential is not available on the server.',
-        fr: 'L’identifiant d’authentification Formulaires GC sélectionné n’est pas disponible sur le serveur.'
-      }
+      message: gcFormsUserMessage('credential_unavailable')
     })
   }
 
@@ -433,10 +422,7 @@ const assertConfiguredCredential = (config: GcsGcFormsStreamConfig): string => {
   throw createGcsExtensionUserError({
     statusCode: 400,
     code: 'GCS_GCFORMS_CONFIG_INCOMPLETE',
-    message: {
-      en: 'Select a GC Forms agency credential before syncing.',
-      fr: 'Sélectionnez un identifiant d’authentification Formulaires GC de l’organisme avant la synchronisation.'
-    }
+    message: gcFormsUserMessage('credential_required')
   })
 }
 
@@ -449,10 +435,7 @@ const assertConfiguredSubmissionStatus = (config: GcsGcFormsStreamConfig): strin
   throw createGcsExtensionUserError({
     statusCode: 400,
     code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
-    message: {
-      en: 'Select an Agency status for claims imported from GC Forms before syncing.',
-      fr: 'Sélectionnez un statut d’organisme pour les demandes de remboursement importées de Formulaires GC avant la synchronisation.'
-    }
+    message: gcFormsUserMessage('sync_status_required')
   })
 }
 
@@ -467,10 +450,7 @@ export const authorizeGcFormsStream = async (
     throw createGcsExtensionUserError({
       statusCode: 401,
       code: 'GCS_GCFORMS_UNAUTHORIZED',
-      message: {
-        en: 'You must be signed in to use this GC Forms integration.',
-        fr: 'Vous devez ouvrir une session pour utiliser cette intégration Formulaires GC.'
-      }
+      message: gcFormsUserMessage('sign_in_required')
     })
   }
 
@@ -480,10 +460,7 @@ export const authorizeGcFormsStream = async (
     throw createGcsExtensionUserError({
       statusCode: 404,
       code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
-      message: {
-        en: 'Transfer payment stream was not found.',
-        fr: 'Le volet de paiements de transfert est introuvable.'
-      }
+      message: gcFormsUserMessage('stream_not_found')
     })
   }
 
@@ -493,10 +470,7 @@ export const authorizeGcFormsStream = async (
     throw createGcsExtensionUserError({
       statusCode: 403,
       code: 'GCS_GCFORMS_FORBIDDEN',
-      message: {
-        en: 'You do not have access to this GC Forms integration.',
-        fr: 'Vous n’avez pas accès à cette intégration Formulaires GC.'
-      }
+      message: gcFormsUserMessage('integration_forbidden')
     })
   }
 }
@@ -511,10 +485,7 @@ const resolveStreamConfig = async (
     throw createGcsExtensionUserError({
       statusCode: 404,
       code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
-      message: {
-        en: 'Transfer payment stream was not found.',
-        fr: 'Le volet de paiements de transfert est introuvable.'
-      }
+      message: gcFormsUserMessage('stream_not_found')
     })
   }
 
@@ -539,10 +510,7 @@ const resolveStreamConfig = async (
     throw createGcsExtensionUserError({
       statusCode: 400,
       code: 'GCS_GCFORMS_STREAM_DISABLED',
-      message: {
-        en: 'GC Forms integration is not enabled for this stream.',
-        fr: 'L’intégration Formulaires GC n’est pas activée pour ce volet.'
-      }
+      message: gcFormsUserMessage('integration_disabled')
     })
   }
 
@@ -597,10 +565,7 @@ const resolveConnectionIdentity = async (
     throw createGcsExtensionUserError({
       statusCode: 404,
       code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
-      message: {
-        en: 'Transfer payment stream was not found.',
-        fr: 'Le volet de paiements de transfert est introuvable.'
-      }
+      message: gcFormsUserMessage('stream_not_found')
     })
   }
   const credentialId = assertConfiguredCredential(config)
@@ -846,10 +811,7 @@ const createConfiguredClientSession = async (
     throw createGcsExtensionUserError({
       statusCode: 404,
       code: 'GCS_GCFORMS_STREAM_NOT_FOUND',
-      message: {
-        en: 'Transfer payment stream was not found.',
-        fr: 'Le volet de paiements de transfert est introuvable.'
-      }
+      message: gcFormsUserMessage('stream_not_found')
     })
   }
 
@@ -1018,17 +980,11 @@ const assertGcFormsClaimTemplateShape = (template: unknown) => {
     throw createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_TEMPLATE_UNSUPPORTED',
-      message: {
-        en: `The GC Forms template is missing required claim fields: ${missingQuestionIds.join(', ')}.`,
-        fr: `Le modèle Formulaires GC ne contient pas les champs de demande de remboursement requis : ${missingQuestionIds.join(', ')}.`
-      },
+      message: gcFormsUserMessage('missing_claim_fields', { fields: missingQuestionIds.join(', ') }),
       details: missingQuestionIds.map(questionId => ({
         path: questionId,
         code: 'missing_question_id',
-        message: {
-          en: `Missing required GC Forms question: ${questionId}.`,
-          fr: `Question Formulaires GC requise manquante : ${questionId}.`
-        }
+        message: gcFormsUserMessage('missing_question', { question: questionId })
       }))
     })
   }
@@ -1052,10 +1008,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
     throw createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_TEMPLATE_NOT_REVIEWED',
-      message: {
-        en: 'Refresh and review the GC Forms template before syncing submissions.',
-        fr: 'Actualisez et vérifiez le modèle Formulaires GC avant de synchroniser les soumissions.'
-      }
+      message: gcFormsUserMessage('template_review_required')
     })
   }
 
@@ -1063,10 +1016,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
     const templateChangedError = createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_TEMPLATE_CHANGED',
-      message: {
-        en: 'The GC Forms template has changed since it was last reviewed. Refresh the template, review the mappings, save the stream configuration, and sync again.',
-        fr: 'Le modèle Formulaires GC a changé depuis sa dernière vérification. Actualisez le modèle, vérifiez les correspondances, enregistrez la configuration du volet, puis synchronisez de nouveau.'
-      }
+      message: gcFormsUserMessage('template_changed_since_review')
     })
     throw Object.assign(templateChangedError, {
       gcFormsSyncSession: sessionIdentity
@@ -1464,10 +1414,7 @@ const createHistoricalConnectionClient = async (
     throw createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_HISTORICAL_CREDENTIAL_CHANGED',
-      message: {
-        en: 'The credential used by this pending GC Forms submission has changed.',
-        fr: 'L’identifiant d’authentification utilisé par cette soumission Formulaires GC en attente a changé.'
-      }
+      message: gcFormsUserMessage('pending_credential_changed')
     })
   }
   return new GcFormsApiClient({

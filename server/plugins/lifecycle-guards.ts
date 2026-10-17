@@ -1,3 +1,4 @@
+import { gcFormsUserMessage } from '../../i18n/server'
 import { sql, type Transaction } from 'kysely'
 import { ZodError } from 'zod'
 import {
@@ -58,10 +59,7 @@ export const guardGcFormsLifecycleChange = async (
     throw createGcsExtensionUserError({
       statusCode: 409,
       code: 'GCS_GCFORMS_SCOPE_RECOVERABLE_SUBMISSIONS',
-      message: {
-        en: 'GC Forms cannot be disabled or deleted for this scope until all recoverable submissions are resolved.',
-        fr: 'Formulaires GC ne peut pas être désactivé ni supprimé pour cette portée tant que toutes les soumissions récupérables ne sont pas réglées.'
-      }
+      message: gcFormsUserMessage('disable_blocked')
     })
   }
 }
@@ -69,46 +67,31 @@ export const guardGcFormsLifecycleChange = async (
 const createGcFormsSubmissionStatusRequiredError = () => createGcsExtensionUserError({
   statusCode: 400,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REQUIRED',
-  message: {
-    en: 'Select an Agency status for claims imported from GC Forms before enabling the integration.',
-    fr: 'Sélectionnez un statut d’organisme pour les demandes de remboursement importées de Formulaires GC avant d’activer l’intégration.'
-  }
+  message: gcFormsUserMessage('enable_status_required')
 })
 
 const createGcFormsSubmissionStatusUnavailableError = () => createGcsExtensionUserError({
   statusCode: 400,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_UNAVAILABLE',
-  message: {
-    en: 'The selected imported claim status is not active for this agency.',
-    fr: 'Le statut sélectionné pour les demandes de remboursement importées n’est pas actif pour cet organisme.'
-  }
+  message: gcFormsUserMessage('imported_status_inactive')
 })
 
 const createGcFormsSubmissionStatusNotDraftError = () => createGcsExtensionUserError({
   statusCode: 400,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_NOT_DRAFT',
-  message: {
-    en: 'Claims imported from GC Forms must use the agency Draft status.',
-    fr: 'Les demandes de remboursement importées de Formulaires GC doivent utiliser le statut d’ébauche de l’organisme.'
-  }
+  message: gcFormsUserMessage('draft_status_required')
 })
 
 const createGcFormsSubmissionStatusInvalidError = () => createGcsExtensionUserError({
   statusCode: 400,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_INVALID',
-  message: {
-    en: 'The selected imported claim status identifier is invalid.',
-    fr: 'L’identifiant du statut sélectionné pour les demandes de remboursement importées est invalide.'
-  }
+  message: gcFormsUserMessage('imported_status_invalid')
 })
 
 const createGcFormsSubmissionStatusReferencedError = () => createGcsExtensionUserError({
   statusCode: 409,
   code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED',
-  message: {
-    en: 'This status is still required by recoverable GC Forms imported claims.',
-    fr: 'Ce statut est toujours requis par des demandes de remboursement importées récupérables de Formulaires GC.'
-  }
+  message: gcFormsUserMessage('imported_status_in_use')
 })
 
 const findRecoverableHistoricalStatusReference = async (

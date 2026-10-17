@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { StreamGcFormsIntegrationConfigMessages } from '../i18n/StreamGcFormsIntegrationConfig'
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
+  FetchResponseError,
   type GcsExtensionJsonConfig,
   type GcsResolvedExtension,
   type JsonValue
@@ -86,7 +87,6 @@ const isSyncModalOpen: Ref<boolean> = ref(false)
 const isLoadingMaterializationFailures: Ref<boolean> = ref(false)
 const resolvingSubmissionId: Ref<string | null> = ref(null)
 const matchSearchTerm: Ref<string> = ref('')
-const statusMessage: Ref<string> = ref('')
 const failedMaterializations: Ref<GcFormsMaterializationFailureItem[]> = ref([])
 const agreementOptions: Ref<GcFormsAgreementOption[]> = ref([])
 const selectedMaterializationFailure: Ref<GcFormsMaterializationFailureItem | null> = ref(null)
@@ -94,7 +94,11 @@ const selectedMatchId: Ref<string> = ref('')
 const isMatchModalOpen: Ref<boolean> = ref(false)
 const selectedTab: Ref<string> = ref('fundingclaimreconcile')
 const syncResult: Ref<GcFormsSyncResult | null> = ref(null)
-const syncError: Ref<string> = ref('')
+const syncErrorState: Ref<{ key: 'credentialRequired' | 'failed' } | { message: string } | null> = ref(null)
+const syncError = computed(() => {
+  const error = syncErrorState.value
+  return error === null ? '' : 'key' in error ? tLocal(error.key) : error.message
+})
 const templateShapeChanged: Ref<boolean> = ref(localConfig.value.templateShapeChanged)
 
 interface GcFormsAgreementOption {
@@ -626,7 +630,21 @@ const upsertMappingRow = (row: MappingFieldTableRow, value: unknown) => {
   }
 }
 
-const errorDescription = (error: unknown): string => error instanceof Error ? error.message : String(error)
+const apiErrorMessage = (error: unknown): string | null => {
+  if (!(error instanceof FetchResponseError)) return null
+  const payload = error.data
+  const candidates = [payload, typeof payload === 'object' && payload !== null && 'data' in payload ? payload.data : null]
+  const hasMessage = candidates.some(candidate => {
+    if (typeof candidate !== 'object' || candidate === null) return false
+    if ('message' in candidate && typeof candidate.message === 'string' && candidate.message.length > 0) return true
+    return 'details' in candidate && Array.isArray(candidate.details) && candidate.details.some(detail =>
+      typeof detail === 'object' && detail !== null && 'message' in detail && typeof detail.message === 'string' && detail.message.length > 0
+    )
+  })
+  return hasMessage ? error.message : null
+}
+
+const errorDescription = (error: unknown) => apiErrorMessage(error) ?? (() => h('span', tLocal('failed')))
 
 const postJson = async (path: string, body?: JsonValue | Record<string, unknown>): Promise<unknown> => {
   const requestOptions = { headers: { 'accept-language': activeDiagnosticLocale() } }
@@ -659,21 +677,17 @@ const loadCredentials = async () => {
 /** Refreshes the stored template catalog through the selected credential and reports any failure. */
 const refreshTemplate = async () => {
   if (selectedCredentialMissing.value) {
-    statusMessage.value = tLocal('credentialRequired')
     return
   }
 
   try {
     isRefreshingTemplate.value = true
-    statusMessage.value = tLocal('loading')
     const response = await postJson(`/streams/${streamId}/template`) as { fieldCatalog?: unknown }
     fieldCatalog.value = parseFieldCatalog(response.fieldCatalog)
     templateShapeChanged.value = false
-    statusMessage.value = tLocal('success')
   } catch (error: unknown) {
-    statusMessage.value = errorDescription(error)
     toast.add({
-      title: tLocal('refreshTemplateFailed'),
+      title: () => h('span', tLocal('refreshTemplateFailed')),
       description: errorDescription(error),
       color: 'error'
     })
@@ -693,7 +707,6 @@ const saveConfiguration = async () => {
 
   try {
     isSaving.value = true
-    statusMessage.value = tLocal('loading')
     await hostApi.patch(`/api/extensions/streams/${streamId}`, {
       extensionKey: extension.key,
       enabled: streamEnabled,
@@ -702,19 +715,17 @@ const saveConfiguration = async () => {
       signal: controller.signal
     })
 
-    statusMessage.value = tLocal('success')
     toast.add({
-      title: tLocal('saved'),
-      description: tLocal('savedDescription'),
+      title: () => h('span', tLocal('saved')),
+      description: () => h('span', tLocal('savedDescription')),
       color: 'success'
     })
   } catch (error: unknown) {
     const description = error instanceof DOMException && error.name === 'AbortError'
-      ? 'Save timed out.'
+      ? () => h('span', tLocal('saveTimedOut'))
       : errorDescription(error)
-    statusMessage.value = description
     toast.add({
-      title: tLocal('saveFailed'),
+      title: () => h('span', tLocal('saveFailed')),
       description,
       color: 'error'
     })
@@ -735,7 +746,6 @@ const loadStoredTemplate = async () => {
   } catch (error: unknown) {
     fieldCatalog.value = []
     templateShapeChanged.value = false
-    statusMessage.value = errorDescription(error)
   }
 }
 
@@ -760,7 +770,7 @@ const downloadClaimTemplate = async () => {
     downloadJsonFile(`gcs-claim-form-stream-${streamId}.json`, template)
   } catch (error: unknown) {
     toast.add({
-      title: tLocal('downloadClaimFormFailed'),
+      title: () => h('span', tLocal('downloadClaimFormFailed')),
       description: errorDescription(error),
       color: 'error'
     })
@@ -772,27 +782,24 @@ const downloadClaimTemplate = async () => {
 /** Synchronizes configured GC Forms submissions and refreshes outstanding materialization failures. */
 const syncSubmissions = async () => {
   if (selectedCredentialMissing.value) {
-    syncError.value = tLocal('credentialRequired')
-    statusMessage.value = tLocal('credentialRequired')
+    syncErrorState.value = { key: 'credentialRequired' }
     return
   }
 
   try {
     isSyncing.value = true
-    syncError.value = ''
+    syncErrorState.value = null
     syncResult.value = null
-    statusMessage.value = tLocal('loading')
     syncResult.value = await postJson(`/streams/${streamId}/sync`) as GcFormsSyncResult
     await refreshMaterializationFailures()
-    statusMessage.value = tLocal('success')
   } catch (error: unknown) {
-    syncError.value = errorDescription(error)
+    const message = apiErrorMessage(error)
+    syncErrorState.value = message === null ? { key: 'failed' } : { message }
     try {
       await loadStoredTemplate()
     } catch {
       // Keep the original sync error visible in the modal.
     }
-    statusMessage.value = errorDescription(error)
   } finally {
     isSyncing.value = false
   }
@@ -834,15 +841,12 @@ const resolveMaterializationFailure = async () => {
 
   try {
     resolvingSubmissionId.value = submission.submissionId
-    statusMessage.value = tLocal('loading')
     await postJson(`/streams/${streamId}/materialization-failures/${submission.submissionId}/agreement`, { agreementId: selectedMatchId.value })
     await refreshMaterializationFailures()
     isMatchModalOpen.value = false
     selectedMaterializationFailure.value = null
     selectedMatchId.value = ''
-    statusMessage.value = tLocal('success')
   } catch (error: unknown) {
-    statusMessage.value = errorDescription(error)
   } finally {
     resolvingSubmissionId.value = null
   }

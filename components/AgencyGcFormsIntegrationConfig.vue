@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AgencyGcFormsIntegrationConfigMessages } from '../i18n/AgencyGcFormsIntegrationConfig'
 
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import {
   type GcsExtensionJsonConfig,
@@ -47,7 +47,14 @@ const credentialForm: Ref<Partial<{
 }> | null> = ref(null)
 const isLoadingCredentials: Ref<boolean> = ref(false)
 const isSavingCredential: Ref<boolean> = ref(false)
-const statusMessage: Ref<string> = ref('')
+const statusMessageKey: Ref<'saved' | 'failed' | 'deleted' | null> = ref(null)
+const statusMessage = computed(() => statusMessageKey.value ? tLocal(statusMessageKey.value) : '')
+const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value === 'fr' ? 'fr-CA' : 'en-CA', { dateStyle: 'medium', timeStyle: 'short' }))
+const formatUpdatedAt = (value: string | null | undefined): string => {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '-' : dateFormatter.value.format(date)
+}
 
 const hasSameAgencyConfig = (
   left: GcsGcFormsAgencyConfig,
@@ -113,7 +120,7 @@ const saveCredential = async () => {
 
   try {
     isSavingCredential.value = true
-    statusMessage.value = ''
+    statusMessageKey.value = null
     const body = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== ''))
     if (form.id) {
       await api.patch(`${credentialEndpoint}/${encodeURIComponent(form.id)}`, body)
@@ -121,10 +128,10 @@ const saveCredential = async () => {
       await api.post(credentialEndpoint, form)
     }
     credentialForm.value = null
-    statusMessage.value = tLocal('saved')
+    statusMessageKey.value = 'saved'
     await refreshCredentials()
   } catch {
-    statusMessage.value = tLocal('failed')
+    statusMessageKey.value = 'failed'
   } finally {
     isSavingCredential.value = false
   }
@@ -132,12 +139,12 @@ const saveCredential = async () => {
 
 const deleteCredential = async (credentialId: string) => {
   try {
-    statusMessage.value = ''
+    statusMessageKey.value = null
     await api.delete(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`)
-    statusMessage.value = tLocal('deleted')
+    statusMessageKey.value = 'deleted'
     await refreshCredentials()
   } catch {
-    statusMessage.value = tLocal('failed')
+    statusMessageKey.value = 'failed'
   }
 }
 
@@ -236,7 +243,7 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-for="credential in credentials" :key="credential.id" class="border-t border-default">
-            <td class="px-3 py-2 font-medium">
+            <td class="px-3 py-2 font-medium" :lang="locale === 'fr' ? 'fr' : 'en'">
               {{ displayName(credential) }}
             </td>
             <td class="px-3 py-2">
@@ -249,7 +256,7 @@ onMounted(async () => {
               {{ credential.userId }}
             </td>
             <td class="px-3 py-2">
-              {{ credential.updatedAt ?? '-' }}
+              {{ formatUpdatedAt(credential.updatedAt) }}
             </td>
             <td class="px-3 py-2">
               <div class="flex items-center gap-1">
@@ -278,10 +285,10 @@ onMounted(async () => {
 
     <div v-if="credentialForm" class="grid gap-4 md:grid-cols-2">
       <ExtensionFormField :label="tLocal('nameEn')" required>
-        <ExtensionInput v-model="credentialForm.name_en" />
+        <ExtensionInput v-model="credentialForm.name_en" lang="en" />
       </ExtensionFormField>
       <ExtensionFormField :label="tLocal('nameFr')" required>
-        <ExtensionInput v-model="credentialForm.name_fr" />
+        <ExtensionInput v-model="credentialForm.name_fr" lang="fr" />
       </ExtensionFormField>
       <ExtensionFormField :label="tLocal('keyId')" required>
         <ExtensionInput v-model="credentialForm.keyId" />

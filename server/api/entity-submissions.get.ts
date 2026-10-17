@@ -1,3 +1,4 @@
+import { gcFormsUserMessage } from '../../i18n/server'
 import { createGcsExtensionUserError, defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
 import { asGcFormsIntegrationDb } from '../db.ts'
 import { getGcFormsDiagnosticLocale, renderStoredGcFormsMappingIssues } from '../diagnostics.ts'
@@ -10,10 +11,7 @@ export default defineGcsExtensionRouteHandler(async (context) => {
     throw createGcsExtensionUserError({
       statusCode: 400,
       code: 'GCS_GCFORMS_ENTITY_CONTEXT_MISSING',
-      message: {
-        en: 'The current GCS record could not be identified for the GC Forms source data.',
-        fr: 'Impossible d’identifier l’enregistrement GCS courant pour les données sources de Formulaires GC.'
-      }
+      message: gcFormsUserMessage('entity_context_missing')
     })
   }
 

@@ -153,7 +153,114 @@ afterEach(() => {
   installExtensionTestUiRuntime()
 })
 
+describe('GC Forms live locale state', () => {
+  it('translates bounded save timeouts in both interface languages', async () => {
+    const locale = ref('en')
+    vi.stubGlobal('useI18n', () => ({ locale, n: (value: number) => String(value) }))
+    const runtime = installExtensionTestUiRuntime()
+    const add = vi.fn()
+    runtime.composables.useToast = () => ({ add })
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
+      if (init?.method === 'PATCH') throw new DOMException('Aborted', 'AbortError')
+      return jsonResponse({ items: [], fieldCatalog: [] })
+    }))
+    const wrapper = mount(StreamGcFormsIntegrationConfig, {
+      props: { extension, streamId: 'stream-1', modelValue: {} }
+    })
+    await flushPromises()
+    for (const language of ['en', 'fr']) {
+      locale.value = language
+      await nextTick()
+      const save = wrapper.findAll('button').find(button => button.text() === (language === 'fr' ? 'Enregistrer' : 'Save'))
+      expect(save).toBeDefined()
+      await save!.trigger('click')
+      await flushPromises()
+    }
+    expect(add.mock.calls.map(([notification]) => notification.description().children)).toEqual([
+      'Le délai d’enregistrement est dépassé.', 'Le délai d’enregistrement est dépassé.'
+    ])
+    const notification = add.mock.calls[0]![0]
+    const retained = mount(defineComponent({
+      setup: () => () => h('div', [notification.title(), notification.description()])
+    }))
+    expect(retained.text()).toContain('Le délai d’enregistrement est dépassé.')
+    locale.value = 'en'
+    await nextTick()
+    expect(retained.text()).toContain('Save failed')
+    expect(retained.text()).toContain('Save timed out.')
+    retained.unmount()
+    wrapper.unmount()
+  })
+
+  it('retranslates a local sync prerequisite without issuing another request', async () => {
+    const locale = ref('en')
+    vi.stubGlobal('useI18n', () => ({
+      locale,
+      t: () => { throw new Error('Host translation lookup is forbidden') },
+      n: (value: number) => String(value)
+    }))
+    const runtime = installExtensionTestUiRuntime()
+    runtime.components.UModal = ReactiveModal
+    runtime.components.UAlert = VisibleAlert
+    const fetchMock = vi.fn(async () => jsonResponse({ items: [], fieldCatalog: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mount(StreamGcFormsIntegrationConfig, {
+      props: { extension, streamId: 'stream-1', agencyId: 'agency-1', modelValue: {} }
+    })
+    await flushPromises()
+    const button = wrapper.findAll('button').find(candidate => candidate.text() === 'Sync submissions')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Select')
+    const requests = fetchMock.mock.calls.length
+    locale.value = 'fr'
+    await nextTick()
+    expect(wrapper.text()).toContain('Sélectionnez')
+    expect(wrapper.text()).not.toContain('Select a')
+    expect(fetchMock).toHaveBeenCalledTimes(requests)
+    wrapper.unmount()
+  })
+})
+
 describe('AgencyGcFormsIntegrationConfig', () => {
+  it('updates credential timestamps and completed notices when the locale changes', async () => {
+    const locale = ref('en')
+    vi.stubGlobal('useI18n', () => ({ locale, n: (value: number) => String(value) }))
+    installExtensionTestUiRuntime()
+    const updatedAt = '2026-07-24T12:00:00.000Z'
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => jsonResponse({
+      items: init?.method === 'DELETE' ? [] : [{
+        id: 'credential-1', name_en: 'English name', name_fr: 'Nom français',
+        formId: 'form-1', keyId: 'key-1', userId: 'user-1', updatedAt
+      }]
+    })))
+    const wrapper = mount(AgencyGcFormsIntegrationConfig, {
+      props: { agencyId: '20', extension, modelValue: {} }
+    })
+    await flushPromises()
+    const expectedDate = (language: string) => new Intl.DateTimeFormat(language, {
+      dateStyle: 'medium', timeStyle: 'short'
+    }).format(new Date(updatedAt))
+    expect(wrapper.text()).toContain(expectedDate('en-CA'))
+    locale.value = 'fr'
+    await nextTick()
+    expect(wrapper.text()).toContain(expectedDate('fr-CA'))
+    expect(wrapper.find('[lang="fr"]').text()).toBe('Nom français')
+    const remove = wrapper.find('button[aria-label="Supprimer"]')
+    expect(remove.exists()).toBe(true)
+    await remove.trigger('click')
+    await flushPromises()
+    const add = wrapper.findAll('button').find(button => button.text() === 'Nouvel identifiant d’authentification')
+    expect(add).toBeDefined()
+    await add!.trigger('click')
+    expect(wrapper.text()).toContain('supprim')
+    locale.value = 'en'
+    await nextTick()
+    expect(wrapper.text()).toContain('deleted')
+    wrapper.unmount()
+  })
+
   it('renders the Agency-owned submission status field in French', async () => {
     vi.stubGlobal('useI18n', () => ({
       locale: ref('fr'),
@@ -426,7 +533,11 @@ describe('StreamGcFormsIntegrationConfig', () => {
   })
 
   it('runs template, save, download, and sync actions through the host clients', async () => {
+    const locale = ref('en')
+    vi.stubGlobal('useI18n', () => ({ locale, n: (value: number) => String(value) }))
     const runtime = installExtensionTestUiRuntime()
+    const toastAdd = vi.fn()
+    runtime.composables.useToast = () => ({ add: toastAdd })
     runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
     runtime.components.UModal = ReactiveModal
     runtime.components.UAlert = VisibleAlert
@@ -517,6 +628,19 @@ describe('StreamGcFormsIntegrationConfig', () => {
 
     await clickButton('Refresh template')
     await clickButton('Save')
+    const savedToast = toastAdd.mock.calls.find(([notification]) => notification.color === 'success')?.[0]
+    expect(savedToast.title().children).toBe('Saved')
+    expect(savedToast.description().children).toBe('GC Forms mappings were saved.')
+    const retainedToast = mount(defineComponent({
+      setup: () => () => h('div', [savedToast.title(), savedToast.description()])
+    }))
+    locale.value = 'fr'
+    await nextTick()
+    expect(retainedToast.text()).toContain('Enregistré')
+    expect(retainedToast.text()).toContain('Les correspondances Formulaires GC ont été enregistrées.')
+    retainedToast.unmount()
+    locale.value = 'en'
+    await nextTick()
     await clickButton('Download claim form')
     await clickButton('Sync submissions')
     expect(wrapper.text()).toContain('Sync complete')
@@ -639,6 +763,8 @@ describe('StreamGcFormsIntegrationConfig', () => {
   })
 
   it('reports failed template, save, download, and sync actions', async () => {
+    const locale = ref('en')
+    vi.stubGlobal('useI18n', () => ({ locale, n: (value: number) => String(value) }))
     const runtime = installExtensionTestUiRuntime()
     runtime.components.UModal = ReactiveModal
     runtime.components.UAlert = VisibleAlert
@@ -646,6 +772,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
     runtime.composables.useToast = () => ({ add: toastAdd })
 
     let failActions = false
+    let failWithApi = false
     vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
@@ -656,7 +783,10 @@ describe('StreamGcFormsIntegrationConfig', () => {
         || (url.endsWith('/api/extensions/streams/stream-1') && method === 'PATCH')
       )
       if (failActions && isAction) {
-        throw new Error(`Request failed: ${url}`)
+        if (failWithApi) return new Response(JSON.stringify({ code: 'TEST_SERVICE_ERROR', message: 'Localized service message' }), {
+          status: 400, headers: { 'content-type': 'application/json' }
+        })
+        throw new TypeError('Failed to fetch')
       }
       if (url.includes('/materialization-failures')) {
         return jsonResponse({ items: [], agreements: [] })
@@ -698,13 +828,29 @@ describe('StreamGcFormsIntegrationConfig', () => {
     await clickButton('Download claim form')
     await clickButton('Sync submissions')
 
-    expect(toastAdd.mock.calls.map(([notification]) => notification.title)).toEqual([
+    expect(toastAdd.mock.calls.map(([notification]) => notification.title().children)).toEqual([
       'Template refresh failed',
       'Save failed',
       'Claim form download failed'
     ])
     expect(wrapper.text()).toContain('Sync failed')
-    expect(wrapper.text()).toContain('Request failed:')
+    expect(wrapper.text()).toContain('Action failed')
+    expect(wrapper.text()).not.toContain('Failed to fetch')
+    const networkToast = toastAdd.mock.calls[0]![0]
+    const retained = mount(defineComponent({
+      setup: () => () => h('div', [networkToast.title(), networkToast.description()])
+    }))
+    expect(retained.text()).toContain('Action failed')
+    locale.value = 'fr'
+    await nextTick()
+    expect(retained.text()).toContain('Échec de l’action')
+    expect(wrapper.text()).toContain('Échec de l’action')
+    failWithApi = true
+    await clickButton('Synchroniser les soumissions')
+    expect(wrapper.text()).toContain('Localized service message')
+    await clickButton('Actualiser le modèle')
+    expect(toastAdd.mock.calls.at(-1)![0].description).toBe('Localized service message')
+    retained.unmount()
 
     wrapper.unmount()
   })
@@ -798,7 +944,6 @@ describe('StreamGcFormsIntegrationConfig', () => {
 
     type StreamSetupState = {
       parseFieldCatalog: (value: unknown) => Array<Record<string, unknown>>
-      errorDescription: (value: unknown) => string
       fieldSelectValue: (field: Record<string, unknown>) => string
       upsertClaimMapping: (field: Record<string, unknown>, sourceQuestionId: unknown) => void
       localConfig: { mappings: Array<Record<string, unknown>> }
@@ -817,7 +962,6 @@ describe('StreamGcFormsIntegrationConfig', () => {
       resolveMaterializationFailure: () => Promise<void>
       refreshMaterializationFailures: () => Promise<void>
       openMatchModal: (submission: Record<string, unknown>) => void
-      statusMessage: string
       isSaving: boolean
       isDownloadingClaimTemplate: boolean
       selectedTab: string
@@ -842,7 +986,6 @@ describe('StreamGcFormsIntegrationConfig', () => {
       }
     ])
 
-    expect(setupState.errorDescription('primitive failure')).toBe('primitive failure')
     expect(setupState.fieldSelectValue({ id: 'missing', sourceQuestionId: '', destinationPath: 'x' }))
       .toBe('__gcforms_no_source_field')
     setupState.upsertClaimMapping({
@@ -890,7 +1033,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
 
     await setupState.refreshTemplate()
     await setupState.syncSubmissions()
-    expect(setupState.statusMessage).toContain('Sélectionnez')
+    expect(wrapper.text()).toContain('Sélectionnez')
     setupState.isSaving = true
     setupState.isDownloadingClaimTemplate = true
     await setupState.saveConfiguration()
