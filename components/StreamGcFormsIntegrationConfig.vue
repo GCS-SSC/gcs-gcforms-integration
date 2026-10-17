@@ -1041,7 +1041,7 @@ onMounted(async () => {
                 v-if="canExpandMappingGroupedRow(row as GroupedMappingFieldRow)"
                 type="button"
                 class="group flex min-w-0 items-center gap-3 text-left"
-                :aria-label="row.getIsExpanded?.() ? tLocal('collapse') : tLocal('expand')"
+                :aria-label="`${row.getIsExpanded?.() ? tLocal('collapse') : tLocal('expand')}: ${row.original.mappingGroupLabel}`"
                 @click="row.toggleExpanded?.()">
                 <ExtensionIcon
                   :name="row.getIsExpanded?.() ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
