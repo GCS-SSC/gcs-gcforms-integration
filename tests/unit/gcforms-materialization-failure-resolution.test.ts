@@ -33,7 +33,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_credentials (
+    CREATE TABLE extensions.gcs_gcforms_integration_credentials (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       name_en varchar(200) NOT NULL,
@@ -66,7 +66,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_connections (
+    CREATE TABLE extensions.gcs_gcforms_integration_connections (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -82,7 +82,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_integrations (
+    CREATE TABLE extensions.gcs_gcforms_integration_integrations (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -91,7 +91,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -108,7 +108,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_materialization_overrides (
+    CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (
       id bigserial PRIMARY KEY,
       submission_id bigint NOT NULL,
       destination_entity varchar(60) NOT NULL,
@@ -128,7 +128,7 @@ const seedSubmission = async (
   confirmSubmissions = false
 ) => {
   await db
-    .insertInto('extensions.gcs_gcforms_credentials')
+    .insertInto('extensions.gcs_gcforms_integration_credentials')
     .values({
       id: '1',
       agency_id: '20',
@@ -152,7 +152,7 @@ const seedSubmission = async (
     .select(['id', 'created_at', 'updated_at'])
     .executeTakeFirstOrThrow()
   await sql`
-    INSERT INTO extensions.gcs_gcforms_connections (
+    INSERT INTO extensions.gcs_gcforms_integration_connections (
       id,
       agency_id,
       stream_id,
@@ -182,7 +182,7 @@ const seedSubmission = async (
     )
   `.execute(db)
   await sql`
-    INSERT INTO extensions.gcs_gcforms_integrations (id, connection_id, stream_id, config)
+    INSERT INTO extensions.gcs_gcforms_integration_integrations (id, connection_id, stream_id, config)
     VALUES (
       601,
       801,
@@ -191,7 +191,7 @@ const seedSubmission = async (
     )
   `.execute(db)
   await sql`
-    INSERT INTO extensions.gcs_gcforms_submissions (
+    INSERT INTO extensions.gcs_gcforms_integration_submissions (
       id,
       connection_id,
       integration_id,
@@ -311,7 +311,7 @@ describe('GC Forms materialization failure resolution', () => {
     await expect(resolveClaimMaterializationFailure(context, '30', '901', '101'))
       .rejects.toThrow('GC Forms recovery requires host-provided Claim creation.')
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select('id')
       .execute()).resolves.toEqual([])
   })
@@ -330,11 +330,11 @@ describe('GC Forms materialization failure resolution', () => {
     })
     expect(materializeMock).not.toHaveBeenCalled()
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select('id')
       .execute()).resolves.toEqual([])
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'materialization_failed' })
@@ -351,7 +351,7 @@ describe('GC Forms materialization failure resolution', () => {
     })
     expect(materializeMock).not.toHaveBeenCalled()
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select('id')
       .execute()).resolves.toEqual([])
   })
@@ -379,11 +379,11 @@ describe('GC Forms materialization failure resolution', () => {
       expect(authorizeCurrentScope).toHaveBeenCalledOnce()
       expect(materializeMock).not.toHaveBeenCalled()
       await expect(db
-        .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+        .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
         .select(db.fn.countAll().as('count'))
         .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
       await expect(db
-        .selectFrom('extensions.gcs_gcforms_submissions')
+        .selectFrom('extensions.gcs_gcforms_integration_submissions')
         .select('status')
         .where('id', '=', '901')
         .executeTakeFirstOrThrow()).resolves.toEqual({ status })
@@ -415,7 +415,7 @@ describe('GC Forms materialization failure resolution', () => {
       label: 'missing integration identity',
       prepare: async () => {
         await db
-          .updateTable('extensions.gcs_gcforms_submissions')
+          .updateTable('extensions.gcs_gcforms_integration_submissions')
           .set({ integration_id: null })
           .where('id', '=', '901')
           .execute()
@@ -425,7 +425,7 @@ describe('GC Forms materialization failure resolution', () => {
       label: 'invalid persisted integration config',
       prepare: async () => {
         await db
-          .updateTable('extensions.gcs_gcforms_integrations')
+          .updateTable('extensions.gcs_gcforms_integration_integrations')
           .set({ config: sql`'"invalid"'::jsonb` })
           .where('id', '=', '601')
           .execute()
@@ -435,7 +435,7 @@ describe('GC Forms materialization failure resolution', () => {
       label: 'missing historical submission status',
       prepare: async () => {
         await db
-          .updateTable('extensions.gcs_gcforms_integrations')
+          .updateTable('extensions.gcs_gcforms_integration_integrations')
           .set({ config: { mappings: [] } })
           .where('id', '=', '601')
           .execute()
@@ -460,7 +460,7 @@ describe('GC Forms materialization failure resolution', () => {
     await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
       .rejects.toMatchObject({ code: 'GCS_GCFORMS_AGREEMENT_OVERRIDE_INVALID' })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select('id')
       .execute()).resolves.toEqual([])
   })
@@ -469,7 +469,7 @@ describe('GC Forms materialization failure resolution', () => {
     await seedSubmission('materialization_failed')
     materializeMock.mockImplementationOnce(async trx => {
       await trx
-        .updateTable('extensions.gcs_gcforms_submissions')
+        .updateTable('extensions.gcs_gcforms_integration_submissions')
         .set({ status: 'imported' })
         .where('id', '=', '901')
         .execute()
@@ -479,7 +479,7 @@ describe('GC Forms materialization failure resolution', () => {
     await expect(resolveClaimMaterializationFailure(createContext().context, '30', '901', '101'))
       .rejects.toMatchObject({ code: 'GCS_GCFORMS_SUBMISSION_NOT_MATERIALIZATION_FAILED' })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'materialization_failed' })
@@ -507,12 +507,12 @@ describe('GC Forms materialization failure resolution', () => {
     }
     const newMapping = { ...oldMapping, sourceQuestionId: 'new_agreement_number' }
     await db
-      .updateTable('extensions.gcs_gcforms_integrations')
+      .updateTable('extensions.gcs_gcforms_integration_integrations')
       .set({ config: { confirmSubmissions: false, mappings: [oldMapping], submissionStatusId: '91' } })
       .where('id', '=', '601')
       .execute()
     await sql`
-      INSERT INTO extensions.gcs_gcforms_integrations (id, connection_id, stream_id, config)
+      INSERT INTO extensions.gcs_gcforms_integration_integrations (id, connection_id, stream_id, config)
       VALUES (602, 801, 30, ${JSON.stringify({
         confirmSubmissions: false,
         mappings: [newMapping],
@@ -554,14 +554,14 @@ describe('GC Forms materialization failure resolution', () => {
     }))
     expect(confirmSpy).not.toHaveBeenCalled()
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select(['submission_id', 'owner_id'])
       .executeTakeFirstOrThrow()).resolves.toMatchObject({
       submission_id: 901,
       owner_id: 101
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
@@ -604,7 +604,7 @@ describe('GC Forms materialization failure resolution', () => {
       }
     })
     const failedRow = await db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'mapping_issues', 'diagnostic_code', 'diagnostic_params'])
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()
@@ -627,7 +627,7 @@ describe('GC Forms materialization failure resolution', () => {
       status: 'imported'
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'mapping_issues', 'diagnostic_code', 'diagnostic_params'])
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -681,7 +681,7 @@ describe('GC Forms materialization failure resolution', () => {
     expect(confirmSpy.mock.invocationCallOrder[0])
       .toBeLessThan(lockAuthState.mock.invocationCallOrder[2] as number)
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
@@ -716,7 +716,7 @@ describe('GC Forms materialization failure resolution', () => {
       item: { name_en: 'Safe label', keyId: 'key-1' }
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select('revision')
       .where('id', '=', '1')
       .executeTakeFirstOrThrow()).resolves.toEqual({ revision: 1 })

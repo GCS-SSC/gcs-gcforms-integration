@@ -45,7 +45,7 @@ import { shouldConfirmGcFormsSubmission } from './submission-confirmation.ts'
 import { prepareGcFormsSubmissionMaterialization } from './submission-materialization.ts'
 
 type ConnectionRow = Selectable<
-  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_connections']
+  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_integration_connections']
 >
 
 type CredentialRow = {
@@ -64,7 +64,7 @@ type GcFormsCredentialSessionIdentity = {
 }
 
 type IntegrationRow = Selectable<
-  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_integrations']
+  GcFormsIntegrationHostDatabase['extensions.gcs_gcforms_integration_integrations']
 >
 
 type ImportRunRow = {
@@ -296,7 +296,7 @@ const getGcFormsCredentialMetadataState = async (
   credentialId: string
 ): Promise<{ credential: CredentialRow; identity: GcFormsCredentialSessionIdentity }> => {
   const row = await db
-    .selectFrom('extensions.gcs_gcforms_credentials as credential')
+    .selectFrom('extensions.gcs_gcforms_integration_credentials as credential')
     .innerJoin('extensions.secret_entry as secret', join => join
       .on('secret.extension_key', '=', GCFORMS_EXTENSION_KEY)
       .on('secret.owner_type', '=', 'agency')
@@ -397,7 +397,7 @@ const getGcFormsCredentialRow = async (
   credentialId: string
 ): Promise<CredentialRow> => {
   const row = await db
-    .selectFrom('extensions.gcs_gcforms_credentials')
+    .selectFrom('extensions.gcs_gcforms_integration_credentials')
     .select(['id', 'agency_id', 'key_id', 'user_id', 'form_id', 'revision'])
     .where('id', '=', sql<string>`${credentialId}::bigint`)
     .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
@@ -592,7 +592,7 @@ const findConnectionByIdentity = async (
   streamId: string,
   identity: GcFormsConnectionIdentity
 ): Promise<ConnectionRow | undefined> => await db
-  .selectFrom('extensions.gcs_gcforms_connections')
+  .selectFrom('extensions.gcs_gcforms_integration_connections')
   .selectAll()
   .where('stream_id', '=', streamId)
   .where('credential_id', '=', identity.credentialId)
@@ -626,28 +626,28 @@ export const getStoredTemplate = async (
   const connection = await findCurrentGcFormsConnection(db, streamId, config)
   const stored = connection
     ? await db
-        .selectFrom('extensions.gcs_gcforms_templates')
+        .selectFrom('extensions.gcs_gcforms_integration_templates')
         .select(['field_catalog', 'title_en', 'title_fr'])
         .where('connection_id', '=', String(connection.id))
         .where('_deleted', '=', false)
         .executeTakeFirst()
     : undefined
   const streamStored = stored ?? await db
-    .selectFrom('extensions.gcs_gcforms_templates')
+    .selectFrom('extensions.gcs_gcforms_integration_templates')
     .innerJoin(
-      'extensions.gcs_gcforms_connections',
-      'extensions.gcs_gcforms_connections.id',
-      'extensions.gcs_gcforms_templates.connection_id'
+      'extensions.gcs_gcforms_integration_connections',
+      'extensions.gcs_gcforms_integration_connections.id',
+      'extensions.gcs_gcforms_integration_templates.connection_id'
     )
     .select([
-      'extensions.gcs_gcforms_templates.field_catalog as field_catalog',
-      'extensions.gcs_gcforms_templates.title_en as title_en',
-      'extensions.gcs_gcforms_templates.title_fr as title_fr'
+      'extensions.gcs_gcforms_integration_templates.field_catalog as field_catalog',
+      'extensions.gcs_gcforms_integration_templates.title_en as title_en',
+      'extensions.gcs_gcforms_integration_templates.title_fr as title_fr'
     ])
-    .where('extensions.gcs_gcforms_connections.stream_id', '=', streamId)
-    .where('extensions.gcs_gcforms_connections._deleted', '=', false)
-    .where('extensions.gcs_gcforms_templates._deleted', '=', false)
-    .orderBy('extensions.gcs_gcforms_templates.refreshed_at', 'desc')
+    .where('extensions.gcs_gcforms_integration_connections.stream_id', '=', streamId)
+    .where('extensions.gcs_gcforms_integration_connections._deleted', '=', false)
+    .where('extensions.gcs_gcforms_integration_templates._deleted', '=', false)
+    .orderBy('extensions.gcs_gcforms_integration_templates.refreshed_at', 'desc')
     .executeTakeFirst()
 
   return {
@@ -667,7 +667,7 @@ const updateConnection = async (
   config: GcsGcFormsStreamConfig
 ) => {
   return await db
-    .updateTable('extensions.gcs_gcforms_connections')
+    .updateTable('extensions.gcs_gcforms_integration_connections')
     .set({
       contact_email: config.contactEmail || null,
       preferred_language: config.preferredLanguage,
@@ -693,7 +693,7 @@ export const ensureConnection = async (
   }
 
   const inserted = await db
-    .insertInto('extensions.gcs_gcforms_connections')
+    .insertInto('extensions.gcs_gcforms_integration_connections')
     .values({
       agency_id: identity.agencyId,
       stream_id: streamId,
@@ -738,7 +738,7 @@ export const ensureIntegration = async (
     const normalizedConfig = parseGcFormsStreamConfig(config)
     const configFingerprint = integrationConfigFingerprint(normalizedConfig)
     const existing = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .selectAll()
       .where('connection_id', '=', connectionId)
       .where('config_fingerprint', '=', configFingerprint)
@@ -749,7 +749,7 @@ export const ensureIntegration = async (
     }
 
     const inserted = await db
-      .insertInto('extensions.gcs_gcforms_integrations')
+      .insertInto('extensions.gcs_gcforms_integration_integrations')
       .values({
         connection_id: connectionId,
         stream_id: streamId,
@@ -764,7 +764,7 @@ export const ensureIntegration = async (
       .executeTakeFirst()
     if (!inserted) {
       const concurrent = await db
-        .selectFrom('extensions.gcs_gcforms_integrations')
+        .selectFrom('extensions.gcs_gcforms_integration_integrations')
         .selectAll()
         .where('connection_id', '=', connectionId)
         .where('config_fingerprint', '=', configFingerprint)
@@ -778,7 +778,7 @@ export const ensureIntegration = async (
 
     if (normalizedConfig.mappings.length > 0) {
       await db
-        .insertInto('extensions.gcs_gcforms_field_mappings')
+        .insertInto('extensions.gcs_gcforms_integration_field_mappings')
         .values(normalizedConfig.mappings.map(mapping => ({
           integration_id: String(inserted.id),
           mapping_key: mapping.id,
@@ -855,7 +855,7 @@ export const refreshTemplate = async (
   const fieldCatalog = normalizeGcFormsTemplate(template)
 
   const existing = await db
-    .selectFrom('extensions.gcs_gcforms_templates')
+    .selectFrom('extensions.gcs_gcforms_integration_templates')
     .select('id')
     .where('connection_id', '=', String(connection.id))
     .where('_deleted', '=', false)
@@ -863,7 +863,7 @@ export const refreshTemplate = async (
 
   if (existing) {
     await db
-      .updateTable('extensions.gcs_gcforms_templates')
+      .updateTable('extensions.gcs_gcforms_integration_templates')
       .set({
         form_id: connection.form_id,
         title_en: maybeString(template.titleEn),
@@ -876,7 +876,7 @@ export const refreshTemplate = async (
       .execute()
   } else {
     await db
-      .insertInto('extensions.gcs_gcforms_templates')
+      .insertInto('extensions.gcs_gcforms_integration_templates')
       .values({
         connection_id: String(connection.id),
         form_id: connection.form_id,
@@ -889,7 +889,7 @@ export const refreshTemplate = async (
   }
 
   await db
-    .updateTable('extensions.gcs_gcforms_connections')
+    .updateTable('extensions.gcs_gcforms_integration_connections')
     .set({ last_template_refresh_at: new Date(), updated_at: new Date() })
     .where('id', '=', String(connection.id))
     .execute()
@@ -998,7 +998,7 @@ const assertGcFormsTemplateShapeUnchanged = async (
   sessionIdentity: GcFormsSyncSessionIdentity
 ) => {
   const stored = await db
-    .selectFrom('extensions.gcs_gcforms_templates')
+    .selectFrom('extensions.gcs_gcforms_integration_templates')
     .select('template')
     .where('connection_id', '=', connectionId)
     .where('_deleted', '=', false)
@@ -1030,7 +1030,7 @@ const createGcFormsImportRun = async (
   integrationId: string
 ): Promise<ImportRunRow> => {
   return await db
-    .insertInto('extensions.gcs_gcforms_import_runs')
+    .insertInto('extensions.gcs_gcforms_integration_import_runs')
     .values({
       connection_id: connectionId,
       integration_id: integrationId,
@@ -1054,7 +1054,7 @@ const getPersistedRemoteSubmissions = async (
   }
 
   return await db
-    .selectFrom('extensions.gcs_gcforms_submissions')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions')
     .select(['submission_name', 'status'])
     .where('connection_id', '=', connectionId)
     .where('submission_name', 'in', submissionNames)
@@ -1070,7 +1070,7 @@ const getOrCreateGcFormsSubmission = async (
   submission: GcFormsNewSubmission
 ): Promise<SubmissionRow> => {
   const inserted = await db
-    .insertInto('extensions.gcs_gcforms_submissions')
+    .insertInto('extensions.gcs_gcforms_integration_submissions')
     .values({
       connection_id: String(connection.id),
       integration_id: integrationId,
@@ -1092,7 +1092,7 @@ const getOrCreateGcFormsSubmission = async (
   }
 
   return await db
-    .selectFrom('extensions.gcs_gcforms_submissions')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions')
     .selectAll()
     .where('connection_id', '=', String(connection.id))
     .where('submission_name', '=', submission.name)
@@ -1131,7 +1131,7 @@ const replaceGcFormsSubmissionAttachments = async (
   decrypted: GcFormsDecryptedSubmission
 ) => {
   await db
-    .updateTable('extensions.gcs_gcforms_attachments')
+    .updateTable('extensions.gcs_gcforms_integration_attachments')
     .set({ _deleted: true })
     .where('submission_id', '=', submissionId)
     .where('_deleted', '=', false)
@@ -1142,7 +1142,7 @@ const replaceGcFormsSubmissionAttachments = async (
   }
 
   await db
-    .insertInto('extensions.gcs_gcforms_attachments')
+    .insertInto('extensions.gcs_gcforms_integration_attachments')
     .values(decrypted.attachments.map(attachment => ({
       submission_id: submissionId,
       gcforms_attachment_id: attachment.id ?? null,
@@ -1162,7 +1162,7 @@ const updateGcFormsSubmissionProblem = async (
   diagnosticParams: GcsGcFormsDiagnosticParams = {}
 ) => {
   await db
-    .updateTable('extensions.gcs_gcforms_submissions')
+    .updateTable('extensions.gcs_gcforms_integration_submissions')
     .set({
       status: 'problem',
       mapping_issues: gcFormsJsonbValue([]),
@@ -1242,7 +1242,7 @@ const importGcFormsSubmission = async (
     const primaryIssue = issues[0]
 
     await context.db
-      .updateTable('extensions.gcs_gcforms_submissions')
+      .updateTable('extensions.gcs_gcforms_integration_submissions')
       .set({
         integration_id: String(context.integration.id),
         status: shouldConfirm ? 'imported_pending_confirm' : finalStatus,
@@ -1295,7 +1295,7 @@ export const finalizeGcFormsSubmissionConfirmation = async (
   finalStatus: GcFormsSubmissionStatus
 ): Promise<void> => {
   await asGcFormsIntegrationDb(rawDb)
-    .updateTable('extensions.gcs_gcforms_submissions')
+    .updateTable('extensions.gcs_gcforms_integration_submissions')
     .set({ status: finalStatus, updated_at: new Date() })
     .where('id', '=', submissionId)
     .where('_deleted', '=', false)
@@ -1310,7 +1310,7 @@ const finishGcFormsImportRun = async (
   problemCount: number
 ) => {
   await db
-    .updateTable('extensions.gcs_gcforms_import_runs')
+    .updateTable('extensions.gcs_gcforms_integration_import_runs')
     .set({
       status: 'completed',
       finished_at: new Date(),
@@ -1331,7 +1331,7 @@ const failGcFormsImportRun = async (
   problemCount: number
 ) => {
   await db
-    .updateTable('extensions.gcs_gcforms_import_runs')
+    .updateTable('extensions.gcs_gcforms_integration_import_runs')
     .set({
       status: 'failed',
       finished_at: new Date(),
@@ -1433,9 +1433,9 @@ const getHistoricalPendingConfirmations = async (
   streamId: string
 ): Promise<{ items: HistoricalPendingRow[], hasMore: boolean }> => {
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -1477,9 +1477,9 @@ export const reconcileDisabledGcFormsConfirmations = async (
   }
 
   const pendingRows = await trx
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -1497,16 +1497,16 @@ export const reconcileDisabledGcFormsConfirmations = async (
 
   const pendingIds = pendingRows.map(row => String(row.id))
   await trx
-    .updateTable('extensions.gcs_gcforms_submissions')
+    .updateTable('extensions.gcs_gcforms_integration_submissions')
     .set({ status: 'imported', updated_at: new Date() })
     .where('id', 'in', pendingIds)
     .where('status', '=', 'imported_pending_confirm')
     .where('_deleted', '=', false)
     .execute()
   const nextPending = await trx
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -1528,14 +1528,14 @@ export const reconcileGcFormsSubmissionConfirmation = async (
 ): Promise<void> => {
   const remoteConfirmation = await runAuthorizedGcFormsWrite(context, async trx => {
     const row = await trx
-      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
       .innerJoin(
-        'extensions.gcs_gcforms_connections as connection',
+        'extensions.gcs_gcforms_integration_connections as connection',
         'connection.id',
         'submission.connection_id'
       )
       .innerJoin(
-        'extensions.gcs_gcforms_integrations as integration',
+        'extensions.gcs_gcforms_integration_integrations as integration',
         'integration.id',
         'submission.integration_id'
       )
@@ -1585,9 +1585,9 @@ export const reconcileGcFormsSubmissionConfirmation = async (
 
   await runAuthorizedGcFormsWrite(context, async trx => {
     const current = await trx
-      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
       .innerJoin(
-        'extensions.gcs_gcforms_connections as connection',
+        'extensions.gcs_gcforms_integration_connections as connection',
         'connection.id',
         'submission.connection_id'
       )

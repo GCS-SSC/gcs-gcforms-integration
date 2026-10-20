@@ -73,10 +73,10 @@ const createSchema = async () => {
   await sql`CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_applicantrecipient bigint NOT NULL, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
   await sql`CREATE TABLE "Common_Entity_Assignment" (id bigserial PRIMARY KEY, egcs_cn_entityid bigint NOT NULL, egcs_cn_entitytype varchar(80) NOT NULL, egcs_cn_user bigint NOT NULL, egcs_cn_isprimary boolean NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
-  await sql`CREATE TABLE extensions.gcs_gcforms_field_mappings (id bigserial PRIMARY KEY, integration_id bigint NOT NULL, mapping_key varchar(120) NOT NULL, source_question_id varchar(200) NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, transform varchar(40) NOT NULL, required boolean NOT NULL, default_value jsonb, on_missing varchar(20) NOT NULL, on_invalid varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
-  await sql`CREATE TABLE extensions.gcs_gcforms_submissions (id bigserial PRIMARY KEY, connection_id bigint NOT NULL, integration_id bigint, form_id varchar(80) NOT NULL, submission_name varchar(80) NOT NULL, status varchar(40) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
-  await sql`CREATE TABLE extensions.gcs_gcforms_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
-  await sql`CREATE TABLE extensions.gcs_gcforms_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE extensions.gcs_gcforms_integration_field_mappings (id bigserial PRIMARY KEY, integration_id bigint NOT NULL, mapping_key varchar(120) NOT NULL, source_question_id varchar(200) NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, transform varchar(40) NOT NULL, required boolean NOT NULL, default_value jsonb, on_missing varchar(20) NOT NULL, on_invalid varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE extensions.gcs_gcforms_integration_submissions (id bigserial PRIMARY KEY, connection_id bigint NOT NULL, integration_id bigint, form_id varchar(80) NOT NULL, submission_name varchar(80) NOT NULL, status varchar(40) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE extensions.gcs_gcforms_integration_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
+  await sql`CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`.execute(db)
 }
 
 const seed = async () => {
@@ -89,9 +89,9 @@ const seed = async () => {
   await sql`INSERT INTO "Agency_Cost_Category_Line_Item" VALUES (601, 'Travel', 'Déplacement', 301, false)`.execute(db)
   await sql`INSERT INTO "Transfer_Payment_Stream_Cost_Category_Line_Item" VALUES (801, 31, 601, false)`.execute(db)
   await sql`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (701, 501, 801, 'Delivery', 'Travel', false)`.execute(db)
-  await sql`INSERT INTO extensions.gcs_gcforms_submissions VALUES (901, 801, 601, 'form', 'submission-atomic', 'mapped', false)`.execute(db)
+  await sql`INSERT INTO extensions.gcs_gcforms_integration_submissions VALUES (901, 801, 601, 'form', 'submission-atomic', 'mapped', false)`.execute(db)
   for (const [index, mapping] of mappings.entries()) {
-    await db.insertInto('extensions.gcs_gcforms_field_mappings').values({
+    await db.insertInto('extensions.gcs_gcforms_integration_field_mappings').values({
       id: String(1000 + index), integration_id: '601', mapping_key: mapping.id,
       source_question_id: mapping.sourceQuestionId, destination_entity: mapping.destinationEntity,
       destination_path: mapping.destinationPath, transform: mapping.transform, required: mapping.required,
@@ -146,7 +146,7 @@ const counts = async () => ({
   claims: Number((await sql<{ count: string }>`SELECT count(*)::text AS count FROM "Funding_Case_Agreement_Claim"`.execute(db)).rows[0]?.count),
   lines: Number((await sql<{ count: string }>`SELECT count(*)::text AS count FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)).rows[0]?.count),
   assignments: Number((await sql<{ count: string }>`SELECT count(*)::text AS count FROM "Common_Entity_Assignment"`.execute(db)).rows[0]?.count),
-  links: Number((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_gcforms_destination_links`.execute(db)).rows[0]?.count)
+  links: Number((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_gcforms_integration_destination_links`.execute(db)).rows[0]?.count)
 })
 
 describe('GC Forms PostgreSQL Claim transaction handoff', () => {
@@ -155,8 +155,8 @@ describe('GC Forms PostgreSQL Claim transaction handoff', () => {
   })
 
   beforeEach(async () => {
-    await sql`TRUNCATE TABLE "Applicant_Recipient_Profile", "Funding_Case_Agreement_Applicant_Recipient", "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile", extensions.gcs_gcforms_destination_links, extensions.gcs_gcforms_field_mappings, extensions.gcs_gcforms_submissions RESTART IDENTITY`.execute(db)
-    await sql`ALTER TABLE extensions.gcs_gcforms_destination_links DROP CONSTRAINT IF EXISTS reject_line_link`.execute(db)
+    await sql`TRUNCATE TABLE "Applicant_Recipient_Profile", "Funding_Case_Agreement_Applicant_Recipient", "Common_Entity_Assignment", "Funding_Case_Agreement_Claim_Line_Item", "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Budget_Line_Item", "Transfer_Payment_Stream_Cost_Category_Line_Item", "Agency_Cost_Category_Line_Item", "Agency_Cost_Category", "Funding_Case_Agreement_Budget_Fiscal_Year", "Agency_Fiscal_Year", "Funding_Case_Agreement_Profile", extensions.gcs_gcforms_integration_destination_links, extensions.gcs_gcforms_integration_field_mappings, extensions.gcs_gcforms_integration_submissions RESTART IDENTITY`.execute(db)
+    await sql`ALTER TABLE extensions.gcs_gcforms_integration_destination_links DROP CONSTRAINT IF EXISTS reject_line_link`.execute(db)
     await seed()
   })
 
@@ -171,7 +171,7 @@ describe('GC Forms PostgreSQL Claim transaction handoff', () => {
   it('commits the host aggregate, creator-primary assignment, and extension links together', async () => {
     await expect(materialize()).resolves.toMatchObject({ status: 'created', lineItemIds: ['1'] })
     await expect(counts()).resolves.toEqual({ claims: 1, lines: 1, assignments: 1, links: 2 })
-    const links = await sql<{ owner_type: string, owner_id: string }>`SELECT owner_type, owner_id::text FROM extensions.gcs_gcforms_destination_links ORDER BY id`.execute(db)
+    const links = await sql<{ owner_type: string, owner_id: string }>`SELECT owner_type, owner_id::text FROM extensions.gcs_gcforms_integration_destination_links ORDER BY id`.execute(db)
     expect(links.rows).toEqual([
       { owner_type: 'fundingcaseagreementclaim', owner_id: '1' },
       { owner_type: 'fundingcaseagreementclaimlineitem', owner_id: '1' }
@@ -185,7 +185,7 @@ describe('GC Forms PostgreSQL Claim transaction handoff', () => {
       await expect(materialize('success', values)).resolves.toMatchObject({ status: 'created', lineItemIds: ['1'] })
       const line = await sql<{ amount: string }>`SELECT egcs_fc_amount::text AS amount FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)
       expect(line.rows).toEqual([{ amount }])
-      const evidence = await sql<{ value: { amount?: string } }>`SELECT value FROM extensions.gcs_gcforms_destination_links WHERE destination_entity = 'claim_line_item'`.execute(db)
+      const evidence = await sql<{ value: { amount?: string } }>`SELECT value FROM extensions.gcs_gcforms_integration_destination_links WHERE destination_entity = 'claim_line_item'`.execute(db)
       expect(evidence.rows[0]?.value.amount).toBe(amount)
       await expect(counts()).resolves.toEqual({ claims: 1, lines: 1, assignments: 1, links: 2 })
     }
@@ -206,7 +206,7 @@ describe('GC Forms PostgreSQL Claim transaction handoff', () => {
   })
 
   it('rolls back all host and extension rows when a later extension link fails', async () => {
-    await sql`ALTER TABLE extensions.gcs_gcforms_destination_links ADD CONSTRAINT reject_line_link CHECK (destination_entity <> 'claim_line_item')`.execute(db)
+    await sql`ALTER TABLE extensions.gcs_gcforms_integration_destination_links ADD CONSTRAINT reject_line_link CHECK (destination_entity <> 'claim_line_item')`.execute(db)
     await expect(materialize()).rejects.toMatchObject({ code: '23514' })
     await expect(counts()).resolves.toEqual({ claims: 0, lines: 0, assignments: 0, links: 0 })
   })

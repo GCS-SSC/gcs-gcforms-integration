@@ -79,7 +79,7 @@ beforeEach(async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_connections (
+    CREATE TABLE extensions.gcs_gcforms_integration_connections (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -101,7 +101,7 @@ beforeEach(async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -112,7 +112,7 @@ beforeEach(async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_integrations (
+    CREATE TABLE extensions.gcs_gcforms_integration_integrations (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -160,7 +160,7 @@ describe('GC Forms registered lifecycle guard', () => {
     'rejects stream disable or deletion for recoverable %s rows on historical connections',
     async status => {
     const connection = await db
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
@@ -180,7 +180,7 @@ describe('GC Forms registered lifecycle guard', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: null,
@@ -204,7 +204,7 @@ describe('GC Forms registered lifecycle guard', () => {
 
   it('rejects agency disable or deletion when any agency stream has a pending confirmation', async () => {
     const connection = await db
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '20',
         stream_id: '31',
@@ -223,7 +223,7 @@ describe('GC Forms registered lifecycle guard', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: null,
@@ -285,12 +285,12 @@ describe('GC Forms registered lifecycle guard', () => {
   )
 
   it('allows unrelated status deletion before GC Forms storage is migrated', async () => {
-    await sql`DROP TABLE extensions.gcs_gcforms_submissions`.execute(db)
+    await sql`DROP TABLE extensions.gcs_gcforms_integration_submissions`.execute(db)
     await expect(invokeStatusReferenceGuard('20', '91')).resolves.toBeUndefined()
   })
 
   it('allows lifecycle changes and validates live configuration before submission storage is migrated', async () => {
-    await sql`DROP TABLE extensions.gcs_gcforms_submissions`.execute(db)
+    await sql`DROP TABLE extensions.gcs_gcforms_integration_submissions`.execute(db)
     await db.insertInto('Common_Status').values([
       { id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true },
       { id: '92', egcs_cn_agency: '20' }
@@ -327,16 +327,16 @@ describe('GC Forms registered lifecycle guard', () => {
       { id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true },
       { id: '92', egcs_cn_agency: '20', egcs_cn_isdraft: true }
     ]).execute()
-    const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
+    const connection = await db.insertInto('extensions.gcs_gcforms_integration_connections').values({
       agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
       secret_entry_id: '1', secret_updated_at: new Date(0), form_id: 'form-1',
       api_url: 'https://api.example.test', identity_provider_url: 'https://idp.example.test',
       project_identifier: 'project-1', contact_email: null, preferred_language: 'en', status: 'active'
     }).returning('id').executeTakeFirstOrThrow()
-    const integration = await db.insertInto('extensions.gcs_gcforms_integrations').values({
+    const integration = await db.insertInto('extensions.gcs_gcforms_integration_integrations').values({
       connection_id: String(connection.id), stream_id: '30', config: { submissionStatusId: '91' }
     }).returning('id').executeTakeFirstOrThrow()
-    await db.insertInto('extensions.gcs_gcforms_submissions').values({
+    await db.insertInto('extensions.gcs_gcforms_integration_submissions').values({
       connection_id: String(connection.id), integration_id: String(integration.id), form_id: 'form-1',
       submission_name: 'failed-1', status: 'materialization_failed'
     }).execute()
@@ -347,8 +347,8 @@ describe('GC Forms registered lifecycle guard', () => {
     await expect(invokeStatusReferenceGuard('20', '91')).rejects.toMatchObject({
       code: 'GCS_GCFORMS_SUBMISSION_STATUS_REFERENCED'
     })
-    await db.updateTable('extensions.gcs_gcforms_submissions').set({ status: 'materialized' })
-      .where('id', '=', String((await db.selectFrom('extensions.gcs_gcforms_submissions').select('id')
+    await db.updateTable('extensions.gcs_gcforms_integration_submissions').set({ status: 'materialized' })
+      .where('id', '=', String((await db.selectFrom('extensions.gcs_gcforms_integration_submissions').select('id')
         .where('submission_name', '=', 'failed-1').executeTakeFirstOrThrow()).id)).execute()
     await expect(invokeConfigurationGuard('20', '92')).resolves.toBeUndefined()
     await expect(invokeStatusReferenceGuard('20', '91')).resolves.toBeUndefined()
@@ -358,22 +358,22 @@ describe('GC Forms registered lifecycle guard', () => {
     await db.insertInto('Common_Status').values({
       id: '91', egcs_cn_agency: '20', egcs_cn_isdraft: true
     }).execute()
-    const connection = await db.insertInto('extensions.gcs_gcforms_connections').values({
+    const connection = await db.insertInto('extensions.gcs_gcforms_integration_connections').values({
       agency_id: '20', stream_id: '30', credential_id: '1', credential_revision: 1,
       secret_entry_id: '1', secret_updated_at: new Date(0), form_id: 'legacy-form',
       api_url: 'https://api.example.test', identity_provider_url: 'https://idp.example.test',
       project_identifier: 'legacy-project', contact_email: null, preferred_language: 'en', status: 'active'
     }).returning('id').executeTakeFirstOrThrow()
-    const integration = await db.insertInto('extensions.gcs_gcforms_integrations').values({
+    const integration = await db.insertInto('extensions.gcs_gcforms_integration_integrations').values({
       connection_id: String(connection.id), stream_id: '30', config: {}
     }).returning('id').executeTakeFirstOrThrow()
-    await db.insertInto('extensions.gcs_gcforms_submissions').values({
+    await db.insertInto('extensions.gcs_gcforms_integration_submissions').values({
       connection_id: String(connection.id), integration_id: String(integration.id), form_id: 'legacy-form',
       submission_name: 'legacy-failed', status: 'materialization_failed'
     }).execute()
 
     await expect(invokeConfigurationGuard('20', '91')).resolves.toBeUndefined()
-    const repaired = await db.selectFrom('extensions.gcs_gcforms_integrations').select('config')
+    const repaired = await db.selectFrom('extensions.gcs_gcforms_integration_integrations').select('config')
       .where('id', '=', String(integration.id)).executeTakeFirstOrThrow()
     expect(repaired.config).toMatchObject({ submissionStatusId: '91' })
   })

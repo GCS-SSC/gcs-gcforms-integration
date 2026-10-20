@@ -138,7 +138,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     egcs_fc_currency: string
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_connections': {
+  'extensions.gcs_gcforms_integration_connections': {
     id: Generated<string>
     agency_id: string
     stream_id: string
@@ -158,7 +158,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_credentials': {
+  'extensions.gcs_gcforms_integration_credentials': {
     id: Generated<string>
     agency_id: string
     name_en: string
@@ -171,7 +171,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_templates': {
+  'extensions.gcs_gcforms_integration_templates': {
     id: Generated<string>
     connection_id: string
     form_id: string
@@ -182,7 +182,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     refreshed_at: Generated<Date | string>
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_integrations': {
+  'extensions.gcs_gcforms_integration_integrations': {
     id: Generated<string>
     connection_id: string
     stream_id: string
@@ -195,7 +195,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_field_mappings': {
+  'extensions.gcs_gcforms_integration_field_mappings': {
     id: Generated<string>
     integration_id: string
     mapping_key: string
@@ -209,7 +209,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     on_invalid: string
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_submissions': {
+  'extensions.gcs_gcforms_integration_submissions': {
     id: Generated<string>
     connection_id: string
     integration_id: string | null
@@ -229,7 +229,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     updated_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_attachments': {
+  'extensions.gcs_gcforms_integration_attachments': {
     id: Generated<string>
     submission_id: string
     gcforms_attachment_id: string | null
@@ -241,7 +241,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     downloaded_at: Date | string | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_import_runs': {
+  'extensions.gcs_gcforms_integration_import_runs': {
     id: Generated<string>
     connection_id: string
     integration_id: string | null
@@ -253,7 +253,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     problem_count: number
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_destination_links': {
+  'extensions.gcs_gcforms_integration_destination_links': {
     id: Generated<string>
     submission_id: string
     mapping_id: string | null
@@ -264,7 +264,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     value: JsonValue | null
     _deleted: Generated<boolean>
   }
-  'extensions.gcs_gcforms_materialization_overrides': {
+  'extensions.gcs_gcforms_integration_materialization_overrides': {
     id: Generated<string>
     submission_id: string
     destination_entity: string

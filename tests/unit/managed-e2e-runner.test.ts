@@ -76,6 +76,22 @@ describe('GC Forms managed E2E runner', () => {
     expect(state.cleanup).toHaveBeenCalledOnce()
   })
 
+  it.each([0, 2])('retains database files until the server exits after Playwright code %i', async playwrightExitCode => {
+    const state = fixture(playwrightExitCode)
+    state.server.child.kill.mockImplementation(() => true)
+    const outcome = runManagedGcFormsE2e([ownedSpec], {}, state.dependencies)
+      .then(() => null, error => error)
+
+    await vi.waitFor(() => expect(state.server.child.kill).toHaveBeenCalledOnce())
+    expect(state.cleanup).not.toHaveBeenCalled()
+
+    state.server.finish?.(143)
+    const error = await outcome
+    expect(state.cleanup).toHaveBeenCalledOnce()
+    if (playwrightExitCode === 0) expect(error).toBeNull()
+    else expect(error).toEqual(new Error(`GC Forms Playwright exited with code ${playwrightExitCode}.`))
+  })
+
   it('runs exactly the declared default spec when no focused spec is supplied', async () => {
     const state = fixture()
     await runManagedGcFormsE2e([], {}, state.dependencies)

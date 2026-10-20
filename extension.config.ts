@@ -4,7 +4,7 @@ export default defineGcsExtension({
   // Host-managed configuration, KV and secrets keep their host ownership rules.
   auditOwnership: defineGcsAuditOwnership([
     {
-      table: 'extensions.gcs_gcforms_credentials',
+      table: 'extensions.gcs_gcforms_integration_credentials',
       owner: {
         kind: 'owner',
         owner: 'agency',
@@ -12,7 +12,7 @@ export default defineGcsExtension({
       }
     },
     {
-      table: 'extensions.gcs_gcforms_connections',
+      table: 'extensions.gcs_gcforms_integration_connections',
       owner: {
         kind: 'owner',
         owner: 'stream',
@@ -20,7 +20,7 @@ export default defineGcsExtension({
       }
     },
     {
-      table: 'extensions.gcs_gcforms_integrations',
+      table: 'extensions.gcs_gcforms_integration_integrations',
       owner: {
         kind: 'owner',
         owner: 'stream',
@@ -28,58 +28,58 @@ export default defineGcsExtension({
       }
     },
     {
-      table: 'extensions.gcs_gcforms_templates',
+      table: 'extensions.gcs_gcforms_integration_templates',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_connections',
+        table: 'extensions.gcs_gcforms_integration_connections',
         column: 'connection_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_field_mappings',
+      table: 'extensions.gcs_gcforms_integration_field_mappings',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_integrations',
+        table: 'extensions.gcs_gcforms_integration_integrations',
         column: 'integration_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_submissions',
+      table: 'extensions.gcs_gcforms_integration_submissions',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_connections',
+        table: 'extensions.gcs_gcforms_integration_connections',
         column: 'connection_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_attachments',
+      table: 'extensions.gcs_gcforms_integration_attachments',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_submissions',
+        table: 'extensions.gcs_gcforms_integration_submissions',
         column: 'submission_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_import_runs',
+      table: 'extensions.gcs_gcforms_integration_import_runs',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_connections',
+        table: 'extensions.gcs_gcforms_integration_connections',
         column: 'connection_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_destination_links',
+      table: 'extensions.gcs_gcforms_integration_destination_links',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_submissions',
+        table: 'extensions.gcs_gcforms_integration_submissions',
         column: 'submission_id'
       }
     },
     {
-      table: 'extensions.gcs_gcforms_materialization_overrides',
+      table: 'extensions.gcs_gcforms_integration_materialization_overrides',
       owner: {
         kind: 'parent',
-        table: 'extensions.gcs_gcforms_submissions',
+        table: 'extensions.gcs_gcforms_integration_submissions',
         column: 'submission_id'
       }
     }

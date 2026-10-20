@@ -136,9 +136,9 @@ export const runManagedGcFormsE2e = async (
     server?.kill()
     await Promise.allSettled([
       playwright?.exited,
-      server?.exited,
-      dataPaths.cleanup()
-    ].filter((value): value is Promise<number> | Promise<void> => value !== undefined))
+      server?.exited
+    ].filter((value): value is Promise<number> => value !== undefined))
+    await dataPaths.cleanup()
   }
   const exitForSignal = (code: number): void => { void cleanup().finally(() => process.exit(code)) }
   const handleSigint = (): void => exitForSignal(130)

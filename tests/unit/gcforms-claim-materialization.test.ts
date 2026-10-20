@@ -342,7 +342,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_field_mappings (
+    CREATE TABLE extensions.gcs_gcforms_integration_field_mappings (
       id bigserial PRIMARY KEY,
       integration_id bigint NOT NULL,
       mapping_key varchar(120) NOT NULL,
@@ -358,7 +358,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -380,7 +380,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_destination_links (
+    CREATE TABLE extensions.gcs_gcforms_integration_destination_links (
       id bigserial PRIMARY KEY,
       submission_id bigint NOT NULL,
       mapping_id bigint,
@@ -393,7 +393,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_materialization_overrides (
+    CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (
       id bigserial PRIMARY KEY,
       submission_id bigint NOT NULL,
       destination_entity varchar(60) NOT NULL,
@@ -539,7 +539,7 @@ const seedBaseData = async () => {
 
 const seedSubmission = async (id: string, submissionName: string) => {
   await db
-    .insertInto('extensions.gcs_gcforms_submissions')
+    .insertInto('extensions.gcs_gcforms_integration_submissions')
     .values({
       id,
       connection_id: '801',
@@ -553,7 +553,7 @@ const seedSubmission = async (id: string, submissionName: string) => {
 
 const seedMappings = async (mappings: GcsGcFormsFieldMapping[]) => {
   await db
-    .insertInto('extensions.gcs_gcforms_field_mappings')
+    .insertInto('extensions.gcs_gcforms_integration_field_mappings')
     .values(mappings.map((mapping, index) => ({
       id: String(1000 + index),
       integration_id: '601',
@@ -726,7 +726,7 @@ describe('GC Forms claim materialization', () => {
     }))
 
     const link = await db
-      .selectFrom('extensions.gcs_gcforms_destination_links')
+      .selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .selectAll()
       .executeTakeFirstOrThrow()
     expect(link).toEqual(expect.objectContaining({
@@ -770,7 +770,7 @@ describe('GC Forms claim materialization', () => {
     expect(result).toEqual({ status: 'created', claimId: '501', lineItemIds: ['701'], issues: [] })
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
     await expect(db.selectFrom('Funding_Case_Agreement_Claim_Line_Item').selectAll().execute()).resolves.toEqual([])
-    const links = await db.selectFrom('extensions.gcs_gcforms_destination_links')
+    const links = await db.selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .select(['owner_type', 'owner_id'])
       .orderBy('id')
       .execute()
@@ -793,7 +793,7 @@ describe('GC Forms claim materialization', () => {
       '05-09-09f4',
       async () => ({ status: 'created', claimId: '501', lineItemIds, draftStatusId: '91' })
     )).rejects.toThrow('invalid line-item identity list')
-    await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toEqual([])
+    await expect(db.selectFrom('extensions.gcs_gcforms_integration_destination_links').selectAll().execute()).resolves.toEqual([])
   })
 
   it.each([
@@ -851,7 +851,7 @@ describe('GC Forms claim materialization', () => {
     )).rejects.toBe(authorizationDenied)
 
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toEqual([])
-    await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toEqual([])
+    await expect(db.selectFrom('extensions.gcs_gcforms_integration_destination_links').selectAll().execute()).resolves.toEqual([])
   })
 
   it('defaults final for year to false when no source field is mapped', async () => {
@@ -909,7 +909,7 @@ describe('GC Forms claim materialization', () => {
   it('uses a manual agreement override when GC Forms agreement number does not match the stream', async () => {
     await seedMappings(claimMappings)
     await db
-      .insertInto('extensions.gcs_gcforms_materialization_overrides')
+      .insertInto('extensions.gcs_gcforms_integration_materialization_overrides')
       .values({
         submission_id: '901',
         destination_entity: 'claim',
@@ -977,7 +977,7 @@ describe('GC Forms claim materialization', () => {
       claimId: '1'
     }))
     await expect(db.selectFrom('Funding_Case_Agreement_Claim').selectAll().execute()).resolves.toHaveLength(1)
-    await expect(db.selectFrom('extensions.gcs_gcforms_destination_links').selectAll().execute()).resolves.toHaveLength(1)
+    await expect(db.selectFrom('extensions.gcs_gcforms_integration_destination_links').selectAll().execute()).resolves.toHaveLength(1)
   })
 
   it('skips materialization when the host claim already tracks the GC Forms submission UUID', async () => {
@@ -1019,7 +1019,7 @@ describe('GC Forms claim materialization', () => {
     }))
     expect(lineItem.egcs_fc_amount).toBe('1234.56')
     const lineEvidence = await db
-      .selectFrom('extensions.gcs_gcforms_destination_links')
+      .selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .select('value')
       .where('owner_type', '=', 'fundingcaseagreementclaimlineitem')
       .executeTakeFirstOrThrow()
@@ -1199,7 +1199,7 @@ describe('GC Forms claim materialization', () => {
 
     expect(result.status).toBe('created')
     const link = await db
-      .selectFrom('extensions.gcs_gcforms_destination_links')
+      .selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .selectAll()
       .executeTakeFirstOrThrow()
     expect(link.mapping_id).toBeNull()
@@ -1315,7 +1315,7 @@ describe('GC Forms claim materialization', () => {
     expect(result.status).toBe('created')
     const claim = await db.selectFrom('Funding_Case_Agreement_Claim').select('egcs_fc_applicantrecipient').executeTakeFirstOrThrow()
     expect(String(claim.egcs_fc_applicantrecipient)).toBe('301')
-    const link = await db.selectFrom('extensions.gcs_gcforms_destination_links').select('value').where('owner_type', '=', 'fundingcaseagreementclaim').executeTakeFirstOrThrow()
+    const link = await db.selectFrom('extensions.gcs_gcforms_integration_destination_links').select('value').where('owner_type', '=', 'fundingcaseagreementclaim').executeTakeFirstOrThrow()
     expect(link.value).toMatchObject({ applicantRecipientId: '301' })
   })
 
@@ -1325,16 +1325,16 @@ describe('GC Forms claim materialization', () => {
     const createAgreementClaim = vi.fn()
     expect(await materialize(claimMappings, withoutMappedProponent, '901', 'retained-proponent-case', createAgreementClaim)).toMatchObject({ status: 'failed' })
     expect(createAgreementClaim).not.toHaveBeenCalled()
-    await db.insertInto('extensions.gcs_gcforms_destination_links').values({ submission_id: '902', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
+    await db.insertInto('extensions.gcs_gcforms_integration_destination_links').values({ submission_id: '902', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
     expect(await materialize(claimMappings, withoutMappedProponent, '901', 'retained-proponent-case', createAgreementClaim)).toMatchObject({ status: 'failed' })
-    await db.insertInto('extensions.gcs_gcforms_destination_links').values({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
+    await db.insertInto('extensions.gcs_gcforms_integration_destination_links').values({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id: '301', destination_entity: 'proponent', destination_path: 'id', value: null }).execute()
     expect((await materialize(claimMappings, withoutMappedProponent)).status).toBe('created')
     expect(String((await db.selectFrom('Funding_Case_Agreement_Claim').select('egcs_fc_applicantrecipient').executeTakeFirstOrThrow()).egcs_fc_applicantrecipient)).toBe('301')
   })
 
   it('fails closed when two retained submitting Proponent identities remain possible', async () => {
     await seedMappings(claimMappings)
-    await db.insertInto('extensions.gcs_gcforms_destination_links').values(['301', '302'].map(owner_id => ({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id, destination_entity: 'proponent', destination_path: 'id', value: null }))).execute()
+    await db.insertInto('extensions.gcs_gcforms_integration_destination_links').values(['301', '302'].map(owner_id => ({ submission_id: '901', mapping_id: null, owner_type: 'applicantrecipient', owner_id, destination_entity: 'proponent', destination_path: 'id', value: null }))).execute()
     const createAgreementClaim = vi.fn()
     expect(await materialize(claimMappings, claimValues.filter(row => row.destinationPath !== 'egcs_fc_applicantrecipient'), '901', 'ambiguous-proponent', createAgreementClaim)).toMatchObject({ status: 'failed', issues: [expect.objectContaining({ code: 'claim_proponent_unavailable' })] })
     expect(createAgreementClaim).not.toHaveBeenCalled()
@@ -1348,7 +1348,7 @@ describe('GC Forms claim materialization', () => {
       localizedMessage: { en: expect.stringContaining('active'), fr: expect.stringContaining('actif') }
     })
     expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({ applicantRecipientId: '301' }))
-    expect(await db.selectFrom('extensions.gcs_gcforms_destination_links').select('id').execute()).toEqual([])
+    expect(await db.selectFrom('extensions.gcs_gcforms_integration_destination_links').select('id').execute()).toEqual([])
   })
 
 })

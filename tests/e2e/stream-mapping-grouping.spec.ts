@@ -88,7 +88,7 @@ const login = async (page: Page): Promise<void> => {
 const createFixture = async (page: Page, fixture: Partial<Fixture>): Promise<Fixture> => {
   const token = nanoid()
   const agency = await page.request.post('/api/agency', { data: {
-    egcs_ay_gwcoa_number: '113',
+    egcs_ay_gwcoanumber: '113',
     egcs_ay_agencyfinancialsystemid: `${Date.now()}${randomInt(100_000, 1_000_000)}`,
     egcs_ay_name_en: `GC Forms grouping ${token}`,
     egcs_ay_name_fr: `Regroupement GC Forms ${token}`,
@@ -178,10 +178,12 @@ test('keeps GC Forms mapping groups controlled by the host table runtime', async
 
       const claimChild = page.getByText(cell.claimChild, { exact: true })
       const otherGroupChild = page.getByText(cell.otherGroupChild, { exact: true })
-      const collapseClaimFields = page.getByRole('button', { name: cell.collapseLabel, exact: true })
-        .filter({ hasText: cell.claimGroup })
-      const expandClaimFields = page.getByRole('button', { name: cell.expandLabel, exact: true })
-        .filter({ hasText: cell.claimGroup })
+      const collapseClaimFields = page.getByRole('button', {
+        name: `${cell.collapseLabel}: ${cell.claimGroup}`, exact: true
+      })
+      const expandClaimFields = page.getByRole('button', {
+        name: `${cell.expandLabel}: ${cell.claimGroup}`, exact: true
+      })
 
       await expect(collapseClaimFields).toHaveCount(1)
       await expect(claimChild).toBeVisible()

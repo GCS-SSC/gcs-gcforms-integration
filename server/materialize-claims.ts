@@ -496,7 +496,7 @@ const findClaimAgreementOverride = async (
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
   return await db
-    .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+    .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
     .select('owner_id')
     .where('submission_id', '=', input.submissionId)
     .where('destination_entity', '=', CLAIM_ENTITY)
@@ -555,7 +555,7 @@ const resolveClaimApplicantRecipient = async (
     if (!applicantRecipientId || applicantRecipientId.length > 19
       || (applicantRecipientId.length === 19 && applicantRecipientId > '9223372036854775807')) return null
   } else {
-    const links = await db.selectFrom('extensions.gcs_gcforms_destination_links')
+    const links = await db.selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .select('owner_id')
       .where('submission_id', '=', input.submissionId)
       .where('owner_type', '=', 'applicantrecipient')
@@ -853,7 +853,7 @@ const fieldMappingIdsByKey = async (
 ): Promise<Map<string, string>> => {
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_field_mappings')
+    .selectFrom('extensions.gcs_gcforms_integration_field_mappings')
     .select(['id', 'mapping_key'])
     .where('integration_id', '=', integrationId)
     .where('_deleted', '=', false)
@@ -868,7 +868,7 @@ const existingClaimLink = async (
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
   return await db
-    .selectFrom('extensions.gcs_gcforms_destination_links')
+    .selectFrom('extensions.gcs_gcforms_integration_destination_links')
     .select(['owner_id'])
     .where('submission_id', '=', submissionId)
     .where('owner_type', '=', CLAIM_OWNER_TYPE)
@@ -1008,7 +1008,7 @@ export const materializeGcFormsClaimSubmission = async (
     }
     const claimId = created.claimId
     await trx
-      .insertInto('extensions.gcs_gcforms_destination_links')
+      .insertInto('extensions.gcs_gcforms_integration_destination_links')
       .values({
         submission_id: input.submissionId,
         mapping_id: mappingIdsByKey.get(claimInput.agreementMappingId) ?? null,
@@ -1026,7 +1026,7 @@ export const materializeGcFormsClaimSubmission = async (
         throw new Error('Host Claim creation returned an incomplete line-item identity list.')
       }
       await trx
-        .insertInto('extensions.gcs_gcforms_destination_links')
+        .insertInto('extensions.gcs_gcforms_integration_destination_links')
         .values({
           submission_id: input.submissionId,
           mapping_id: mappingIdsByKey.get(preparedLineItem.budgetLineItemMappingId) ?? null,

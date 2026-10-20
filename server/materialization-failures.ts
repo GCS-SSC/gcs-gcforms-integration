@@ -101,7 +101,7 @@ const selectedAgreementOverrides = async (
 
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+    .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
     .select(['submission_id', 'owner_id'])
     .where('destination_entity', '=', CLAIM_ENTITY)
     .where('destination_path', '=', CLAIM_AGREEMENT_NUMBER_PATH)
@@ -122,9 +122,9 @@ export const listClaimMaterializationFailures = async (
   const rawDb = context.db
   const db = asGcFormsIntegrationDb(rawDb)
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -220,7 +220,7 @@ const saveAgreementOverride = async (
 ) => {
   const db = asGcFormsIntegrationDb(rawDb)
   const existing = await db
-    .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+    .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
     .select('id')
     .where('submission_id', '=', submissionId)
     .where('destination_entity', '=', CLAIM_ENTITY)
@@ -231,7 +231,7 @@ const saveAgreementOverride = async (
 
   if (existing) {
     await db
-      .updateTable('extensions.gcs_gcforms_materialization_overrides')
+      .updateTable('extensions.gcs_gcforms_integration_materialization_overrides')
       .set({
         owner_id: agreementId,
         updated_at: new Date()
@@ -242,7 +242,7 @@ const saveAgreementOverride = async (
   }
 
   await db
-    .insertInto('extensions.gcs_gcforms_materialization_overrides')
+    .insertInto('extensions.gcs_gcforms_integration_materialization_overrides')
     .values({
       submission_id: submissionId,
       destination_entity: CLAIM_ENTITY,
@@ -274,9 +274,9 @@ export const resolveClaimMaterializationFailure = async (
     throw createAgreementOverrideInvalidError()
   }
   const submission = await trx
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -300,7 +300,7 @@ export const resolveClaimMaterializationFailure = async (
   const integration = integrationId === null
     ? undefined
     : await trx
-        .selectFrom('extensions.gcs_gcforms_integrations')
+        .selectFrom('extensions.gcs_gcforms_integration_integrations')
         .select(['id', 'config'])
         .where('id', '=', integrationId)
         .where('connection_id', '=', String(submission.connection_id))
@@ -351,7 +351,7 @@ export const resolveClaimMaterializationFailure = async (
   const primaryIssue = result.issues[0]
 
   const updated = await trx
-    .updateTable('extensions.gcs_gcforms_submissions')
+    .updateTable('extensions.gcs_gcforms_integration_submissions')
     .set({
       integration_id: String(integration.id),
       status,

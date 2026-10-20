@@ -123,7 +123,7 @@ export const listGcFormsCredentials = async (context: GcsExtensionRouteContext) 
   authorizeGcFormsAgencyCredentials(context, agencyId, 'read')
 
   const rows = await asGcFormsIntegrationDb(context.db)
-    .selectFrom('extensions.gcs_gcforms_credentials as credential')
+    .selectFrom('extensions.gcs_gcforms_integration_credentials as credential')
     .innerJoin('Agency_Profile as agency', 'agency.id', 'credential.agency_id')
     .select([
       'credential.id',
@@ -184,7 +184,7 @@ export const createGcFormsCredential = async (context: GcsExtensionRouteContext)
 
   const item = await runAuthorizedGcFormsWrite(context, async trx => {
       const row = await trx
-        .insertInto('extensions.gcs_gcforms_credentials')
+        .insertInto('extensions.gcs_gcforms_integration_credentials')
         .values({
           agency_id: agencyId,
           name_en: body.name_en,
@@ -212,7 +212,7 @@ const getActiveCredentialRow = async (
   agencyId: string,
   credentialId: string
 ) => await db
-  .selectFrom('extensions.gcs_gcforms_credentials')
+  .selectFrom('extensions.gcs_gcforms_integration_credentials')
   .select(['id', 'name_en', 'name_fr', 'key_id', 'user_id', 'form_id', 'revision', 'updated_at', 'created_at'])
   .where('id', '=', sql<string>`${credentialId}::bigint`)
   .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
@@ -292,9 +292,9 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
       || (body.formId !== undefined && body.formId !== existing.form_id)
     if (authenticationChanged) {
       const pendingConfirmation = await trx
-        .selectFrom('extensions.gcs_gcforms_submissions as submission')
+        .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
         .innerJoin(
-          'extensions.gcs_gcforms_connections as connection',
+          'extensions.gcs_gcforms_integration_connections as connection',
           'connection.id',
           'submission.connection_id'
         )
@@ -314,7 +314,7 @@ export const patchGcFormsCredential = async (context: GcsExtensionRouteContext) 
     }
 
     const row = await trx
-      .updateTable('extensions.gcs_gcforms_credentials')
+      .updateTable('extensions.gcs_gcforms_integration_credentials')
       .set({
         ...patchValues(body),
         ...(authenticationChanged ? { revision: sql<number>`revision + 1` } : {})
@@ -346,7 +346,7 @@ export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext)
 
   await runAuthorizedGcFormsWrite(context, async trx => {
     const credential = await trx
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select('id')
       .where('id', '=', sql<string>`${credentialId}::bigint`)
       .where('agency_id', '=', sql<string>`${agencyId}::bigint`)
@@ -358,9 +358,9 @@ export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext)
     }
 
     const pendingConfirmation = await trx
-      .selectFrom('extensions.gcs_gcforms_submissions as submission')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
       .innerJoin(
-        'extensions.gcs_gcforms_connections as connection',
+        'extensions.gcs_gcforms_integration_connections as connection',
         'connection.id',
         'submission.connection_id'
       )
@@ -379,7 +379,7 @@ export const deleteGcFormsCredential = async (context: GcsExtensionRouteContext)
     }
 
     await trx
-      .updateTable('extensions.gcs_gcforms_credentials')
+      .updateTable('extensions.gcs_gcforms_integration_credentials')
       .set({
         _deleted: true,
         updated_at: new Date()

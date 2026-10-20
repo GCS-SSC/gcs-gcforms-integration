@@ -4,7 +4,7 @@ This extension connects GC Forms templates and submissions to configured GCS fie
 
 ## Credentials
 
-GC Forms private API keys are stored through the agency extension UI. Credential metadata is stored in `extensions.gcs_gcforms_credentials`; the private key is encrypted in the host-managed `extensions.secret_entry` table using the credential row id as the secret key and is never returned to the browser after saving. Stream configuration stores only the selected `credentialId`, support settings, and mappings.
+GC Forms private API keys are stored through the agency extension UI. Credential metadata is stored in `extensions.gcs_gcforms_integration_credentials`; the private key is encrypted in the host-managed `extensions.secret_entry` table using the credential row id as the secret key and is never returned to the browser after saving. Stream configuration stores only the selected `credentialId`, support settings, and mappings.
 
 Credential mutation and deletion are serialized with sync, confirmation, and manual-recovery writes through the agency extension lifecycle lock. Authentication material (`key`, key id, user id, or form id) cannot be changed, and a credential cannot be deleted, while any historical connection using it has an `imported_pending_confirm` or recoverable `materialization_failed` submission. Rejected changes preserve the credential row and encrypted secret until recovery completes, including after a stream rotates to a replacement credential. Bilingual label-only edits and edit-form payloads that repeat the current authentication values remain safe and do not advance the credential authentication revision or rewrite the encrypted secret.
 
@@ -60,7 +60,7 @@ The supported host materializer is claims-first:
 
 - `destinationEntity: "claim"` creates a draft `Funding_Case_Agreement_Claim`.
 - `destinationEntity: "claim_line_item"` can create one `Funding_Case_Agreement_Claim_Line_Item` under the created claim when all line-item fields are present.
-- Created host records are linked back to the GC Forms submission through `extensions.gcs_gcforms_destination_links`.
+- Created host records are linked back to the GC Forms submission through `extensions.gcs_gcforms_integration_destination_links`.
 - Re-running sync for the same submission is idempotent: an existing active claim link prevents another claim from being created.
 
 ## Claim Mapping Conventions

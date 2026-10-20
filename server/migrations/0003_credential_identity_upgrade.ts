@@ -5,19 +5,19 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async db => {
     await sql`
-      ALTER TABLE extensions.gcs_gcforms_credentials
+      ALTER TABLE extensions.gcs_gcforms_integration_credentials
       ADD COLUMN IF NOT EXISTS revision integer DEFAULT 1 NOT NULL
     `.execute(db)
 
     await sql`
-      ALTER TABLE extensions.gcs_gcforms_connections
+      ALTER TABLE extensions.gcs_gcforms_integration_connections
       ADD COLUMN IF NOT EXISTS credential_revision integer,
       ADD COLUMN IF NOT EXISTS secret_entry_id bigint REFERENCES extensions.secret_entry(id) ON DELETE RESTRICT,
       ADD COLUMN IF NOT EXISTS secret_updated_at timestamptz
     `.execute(db)
 
     await sql`
-      UPDATE extensions.gcs_gcforms_connections connection
+      UPDATE extensions.gcs_gcforms_integration_connections connection
       SET credential_revision = credential.revision,
           secret_entry_id = (
             SELECT secret.id
@@ -39,7 +39,7 @@ export default defineGcsExtensionMigration({
             ORDER BY secret._deleted ASC, COALESCE(secret.updated_at, secret.created_at) DESC, secret.id DESC
             LIMIT 1
           )
-      FROM extensions.gcs_gcforms_credentials credential
+      FROM extensions.gcs_gcforms_integration_credentials credential
       WHERE connection.credential_id = credential.id::text
         AND connection.agency_id = credential.agency_id
         AND (connection.credential_revision IS NULL
@@ -51,7 +51,7 @@ export default defineGcsExtensionMigration({
       DO $$
       BEGIN
         IF EXISTS (
-          SELECT 1 FROM extensions.gcs_gcforms_connections
+          SELECT 1 FROM extensions.gcs_gcforms_integration_connections
           WHERE credential_revision IS NULL OR secret_entry_id IS NULL OR secret_updated_at IS NULL
         ) THEN
           RAISE EXCEPTION 'GC Forms connection credential identity could not be backfilled';
@@ -60,7 +60,7 @@ export default defineGcsExtensionMigration({
     `.execute(db)
 
     await sql`
-      ALTER TABLE extensions.gcs_gcforms_connections
+      ALTER TABLE extensions.gcs_gcforms_integration_connections
       ALTER COLUMN credential_revision SET NOT NULL,
       ALTER COLUMN secret_entry_id SET NOT NULL,
       ALTER COLUMN secret_updated_at SET NOT NULL
@@ -69,7 +69,7 @@ export default defineGcsExtensionMigration({
     await sql`DROP INDEX IF EXISTS extensions.gcs_gcforms_connection_stream_credential`.execute(db)
     await sql`
       CREATE UNIQUE INDEX IF NOT EXISTS gcs_gcforms_connection_remote_identity
-      ON extensions.gcs_gcforms_connections (
+      ON extensions.gcs_gcforms_integration_connections (
         stream_id, credential_id, credential_revision, secret_entry_id, secret_updated_at,
         form_id, api_url, identity_provider_url, project_identifier
       )
@@ -77,22 +77,22 @@ export default defineGcsExtensionMigration({
     `.execute(db)
 
     await sql`
-      ALTER TABLE extensions.gcs_gcforms_integrations
+      ALTER TABLE extensions.gcs_gcforms_integration_integrations
       ADD COLUMN IF NOT EXISTS config_fingerprint varchar(64)
     `.execute(db)
     await sql`
-      UPDATE extensions.gcs_gcforms_integrations
+      UPDATE extensions.gcs_gcforms_integration_integrations
       SET config_fingerprint = 'legacy-' || md5(config::text)
       WHERE config_fingerprint IS NULL
     `.execute(db)
     await sql`
-      ALTER TABLE extensions.gcs_gcforms_integrations
+      ALTER TABLE extensions.gcs_gcforms_integration_integrations
       ALTER COLUMN config_fingerprint SET NOT NULL
     `.execute(db)
     await sql`DROP INDEX IF EXISTS extensions.gcs_gcforms_integration_connection`.execute(db)
     await sql`
       CREATE UNIQUE INDEX IF NOT EXISTS gcs_gcforms_integration_identity
-      ON extensions.gcs_gcforms_integrations (connection_id, config_fingerprint)
+      ON extensions.gcs_gcforms_integration_integrations (connection_id, config_fingerprint)
       WHERE _deleted = false
     `.execute(db)
   }

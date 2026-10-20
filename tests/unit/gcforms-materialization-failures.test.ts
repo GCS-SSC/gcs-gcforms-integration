@@ -19,13 +19,13 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_connections (
+    CREATE TABLE extensions.gcs_gcforms_integration_connections (
       id bigserial PRIMARY KEY,
       stream_id bigint NOT NULL
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -47,7 +47,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_materialization_overrides (
+    CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (
       id bigserial PRIMARY KEY,
       submission_id bigint NOT NULL,
       destination_entity varchar(60) NOT NULL,
@@ -74,7 +74,7 @@ afterEach(async () => {
 describe('GC Forms materialization failure queue', () => {
   it('lists unresolved failures with stream agreement options and selected overrides', async () => {
     await sql`
-      INSERT INTO extensions.gcs_gcforms_connections (id, stream_id)
+      INSERT INTO extensions.gcs_gcforms_integration_connections (id, stream_id)
       VALUES (801, 31)
     `.execute(db)
     await db
@@ -98,7 +98,7 @@ describe('GC Forms materialization failure queue', () => {
       ])
       .execute()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values([
         {
           id: '901',
@@ -194,7 +194,7 @@ describe('GC Forms materialization failure queue', () => {
       ])
       .execute()
     await db
-      .insertInto('extensions.gcs_gcforms_materialization_overrides')
+      .insertInto('extensions.gcs_gcforms_integration_materialization_overrides')
       .values([
         {
           submission_id: '901',

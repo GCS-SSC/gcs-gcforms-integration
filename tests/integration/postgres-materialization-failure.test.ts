@@ -83,7 +83,7 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
     await sql`DROP SCHEMA IF EXISTS extensions CASCADE`.execute(observerDb)
     await sql`CREATE SCHEMA extensions`.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_connections (
+      CREATE TABLE extensions.gcs_gcforms_integration_connections (
         id bigserial PRIMARY KEY,
         agency_id bigint NOT NULL,
         stream_id bigint NOT NULL,
@@ -91,7 +91,7 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
       )
     `.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_submissions (
+      CREATE TABLE extensions.gcs_gcforms_integration_submissions (
         id bigserial PRIMARY KEY,
         connection_id bigint NOT NULL,
         integration_id bigint,
@@ -107,7 +107,7 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
       )
     `.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_materialization_overrides (
+      CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (
         id bigserial PRIMARY KEY,
         submission_id bigint NOT NULL,
         destination_entity varchar(60) NOT NULL,
@@ -120,11 +120,11 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
       )
     `.execute(observerDb)
     await sql`
-      INSERT INTO extensions.gcs_gcforms_connections (id, agency_id, stream_id, _deleted)
+      INSERT INTO extensions.gcs_gcforms_integration_connections (id, agency_id, stream_id, _deleted)
       VALUES (801, 20, 30, true)
     `.execute(observerDb)
     await sql`
-      INSERT INTO extensions.gcs_gcforms_submissions (
+      INSERT INTO extensions.gcs_gcforms_integration_submissions (
         id,
         connection_id,
         integration_id,
@@ -148,7 +148,7 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
     const releaseUpdate = createLatch()
     const updating = holderDb.transaction().execute(async trx => {
       await trx
-        .updateTable('extensions.gcs_gcforms_submissions')
+        .updateTable('extensions.gcs_gcforms_integration_submissions')
         .set({ status: 'imported' })
         .where('id', '=', '901')
         .execute()
@@ -183,11 +183,11 @@ describe('GC Forms PostgreSQL materialization failure concurrency', () => {
     })
     expect(materializeMock).not.toHaveBeenCalled()
     await expect(observerDb
-      .selectFrom('extensions.gcs_gcforms_materialization_overrides')
+      .selectFrom('extensions.gcs_gcforms_integration_materialization_overrides')
       .select(observerDb.fn.countAll().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: '0' })
     await expect(observerDb
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', '901')
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })

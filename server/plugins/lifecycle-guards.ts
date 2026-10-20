@@ -18,7 +18,7 @@ import { asGcFormsIntegrationDb } from '../db.ts'
 
 /** Reports whether this installed integration has migrated its submission storage. */
 const hasSubmissionStorage = async (db: ReturnType<typeof asGcFormsIntegrationDb>): Promise<boolean> => {
-  const storage = await sql<{ submissions: string | null }>`SELECT to_regclass('extensions.gcs_gcforms_submissions')::text AS submissions`.execute(db)
+  const storage = await sql<{ submissions: string | null }>`SELECT to_regclass('extensions.gcs_gcforms_integration_submissions')::text AS submissions`.execute(db)
   return Boolean(storage.rows[0]?.submissions)
 }
 
@@ -39,9 +39,9 @@ export const guardGcFormsLifecycleChange = async (
   }
   if (!await hasSubmissionStorage(db)) return
   let query = db
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
     .innerJoin(
-      'extensions.gcs_gcforms_connections as connection',
+      'extensions.gcs_gcforms_integration_connections as connection',
       'connection.id',
       'submission.connection_id'
     )
@@ -103,9 +103,9 @@ const findRecoverableHistoricalStatusReference = async (
   if (!await hasSubmissionStorage(db)) return undefined
 
   let query = db
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
-    .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')
-    .innerJoin('extensions.gcs_gcforms_integrations as integration', 'integration.id', 'submission.integration_id')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
+    .innerJoin('extensions.gcs_gcforms_integration_connections as connection', 'connection.id', 'submission.connection_id')
+    .innerJoin('extensions.gcs_gcforms_integration_integrations as integration', 'integration.id', 'submission.integration_id')
     .select('submission.id')
     .where('connection.agency_id', '=', agencyId)
     .where('submission.status', '=', 'materialization_failed')
@@ -168,9 +168,9 @@ export const guardGcFormsConfiguration = async (
   }
   if (!await hasSubmissionStorage(db)) return
   const legacyIntegrations = await db
-    .selectFrom('extensions.gcs_gcforms_submissions as submission')
-    .innerJoin('extensions.gcs_gcforms_connections as connection', 'connection.id', 'submission.connection_id')
-    .innerJoin('extensions.gcs_gcforms_integrations as integration', 'integration.id', 'submission.integration_id')
+    .selectFrom('extensions.gcs_gcforms_integration_submissions as submission')
+    .innerJoin('extensions.gcs_gcforms_integration_connections as connection', 'connection.id', 'submission.connection_id')
+    .innerJoin('extensions.gcs_gcforms_integration_integrations as integration', 'integration.id', 'submission.integration_id')
     .select('integration.id')
     .distinct()
     .where('connection.agency_id', '=', context.agencyId)
@@ -180,7 +180,7 @@ export const guardGcFormsConfiguration = async (
     .where(sql<boolean>`integration.config ->> 'submissionStatusId' IS NULL`)
     .execute()
   if (legacyIntegrations.length > 0) {
-    await db.updateTable('extensions.gcs_gcforms_integrations')
+    await db.updateTable('extensions.gcs_gcforms_integration_integrations')
       .set({
         config: sql`jsonb_set(config, '{submissionStatusId}', to_jsonb(${config.submissionStatusId}::text), true)`
       })

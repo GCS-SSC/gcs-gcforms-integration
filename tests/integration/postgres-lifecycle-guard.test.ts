@@ -121,7 +121,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
     await sql`DROP SCHEMA IF EXISTS extensions CASCADE`.execute(observerDb)
     await sql`CREATE SCHEMA extensions`.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_connections (
+      CREATE TABLE extensions.gcs_gcforms_integration_connections (
         id bigserial PRIMARY KEY,
         agency_id bigint NOT NULL,
         stream_id bigint NOT NULL,
@@ -144,7 +144,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
     `.execute(observerDb)
     await sql`
       CREATE UNIQUE INDEX gcs_gcforms_connection_remote_identity
-      ON extensions.gcs_gcforms_connections (
+      ON extensions.gcs_gcforms_integration_connections (
         stream_id,
         credential_id,
         credential_revision,
@@ -158,7 +158,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
       WHERE _deleted = false
     `.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_submissions (
+      CREATE TABLE extensions.gcs_gcforms_integration_submissions (
         id bigserial PRIMARY KEY,
         connection_id bigint NOT NULL,
         integration_id bigint,
@@ -169,7 +169,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
       )
     `.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_integrations (
+      CREATE TABLE extensions.gcs_gcforms_integration_integrations (
         id bigserial PRIMARY KEY,
         connection_id bigint NOT NULL,
         stream_id bigint NOT NULL,
@@ -185,11 +185,11 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
     `.execute(observerDb)
     await sql`
       CREATE UNIQUE INDEX gcs_gcforms_integration_identity
-      ON extensions.gcs_gcforms_integrations (connection_id, config_fingerprint)
+      ON extensions.gcs_gcforms_integration_integrations (connection_id, config_fingerprint)
       WHERE _deleted = false
     `.execute(observerDb)
     await sql`
-      CREATE TABLE extensions.gcs_gcforms_field_mappings (
+      CREATE TABLE extensions.gcs_gcforms_integration_field_mappings (
         id bigserial PRIMARY KEY,
         integration_id bigint NOT NULL,
         mapping_key varchar(120) NOT NULL,
@@ -209,10 +209,10 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
   beforeEach(async () => {
     await sql`
       TRUNCATE TABLE
-        extensions.gcs_gcforms_field_mappings,
-        extensions.gcs_gcforms_integrations,
-        extensions.gcs_gcforms_submissions,
-        extensions.gcs_gcforms_connections
+        extensions.gcs_gcforms_integration_field_mappings,
+        extensions.gcs_gcforms_integration_integrations,
+        extensions.gcs_gcforms_integration_submissions,
+        extensions.gcs_gcforms_integration_connections
       RESTART IDENTITY CASCADE
     `.execute(observerDb)
   })
@@ -233,7 +233,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
         '30'
       )
       const connection = await trx
-        .insertInto('extensions.gcs_gcforms_connections')
+        .insertInto('extensions.gcs_gcforms_integration_connections')
         .values({
           agency_id: '20',
           stream_id: '30',
@@ -252,7 +252,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
         .returning('id')
         .executeTakeFirstOrThrow()
       await trx
-        .insertInto('extensions.gcs_gcforms_submissions')
+        .insertInto('extensions.gcs_gcforms_integration_submissions')
         .values({
           connection_id: String(connection.id),
           integration_id: null,
@@ -289,7 +289,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
 
   it('makes agency deletion or disable wait for reconciliation, then permits the resolved scope', async () => {
     const connection = await observerDb
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
@@ -308,7 +308,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     await observerDb
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: null,
@@ -328,7 +328,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
         '30'
       )
       await trx
-        .updateTable('extensions.gcs_gcforms_submissions')
+        .updateTable('extensions.gcs_gcforms_integration_submissions')
         .set({ status: 'imported' })
         .where('submission_name', '=', 'pending-reconcile')
         .execute()
@@ -372,7 +372,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
       status: 'active'
     }
     const insert = async (database: TestDb) => await database
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values(values)
       .onConflict(conflict => conflict.doNothing())
       .returning('id')
@@ -381,7 +381,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
     const results = await Promise.all([insert(holderDb), insert(waiterDb)])
     expect(results.filter(Boolean)).toHaveLength(1)
     await expect(observerDb
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(observerDb.fn.countAll().as('count'))
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: '1' })
@@ -425,7 +425,7 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
 
   it('atomically resolves concurrent creation of the same integration and mapping identity', async () => {
     const connection = await observerDb
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
@@ -463,12 +463,12 @@ describe('GC Forms PostgreSQL lifecycle guard concurrency', () => {
     ])
     expect(String(integrations[0]?.id)).toBe(String(integrations[1]?.id))
     await expect(observerDb
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select(observerDb.fn.countAll().as('count'))
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: '1' })
     await expect(observerDb
-      .selectFrom('extensions.gcs_gcforms_field_mappings')
+      .selectFrom('extensions.gcs_gcforms_integration_field_mappings')
       .select(observerDb.fn.countAll().as('count'))
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: '1' })

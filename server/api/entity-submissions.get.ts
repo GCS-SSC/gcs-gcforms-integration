@@ -18,26 +18,26 @@ export default defineGcsExtensionRouteHandler(async (context) => {
   const db = asGcFormsIntegrationDb(rawDb)
 
   const rows = await db
-    .selectFrom('extensions.gcs_gcforms_destination_links')
+    .selectFrom('extensions.gcs_gcforms_integration_destination_links')
     .innerJoin(
-      'extensions.gcs_gcforms_submissions',
-      'extensions.gcs_gcforms_submissions.id',
-      'extensions.gcs_gcforms_destination_links.submission_id'
+      'extensions.gcs_gcforms_integration_submissions',
+      'extensions.gcs_gcforms_integration_submissions.id',
+      'extensions.gcs_gcforms_integration_destination_links.submission_id'
     )
     .select([
-      'extensions.gcs_gcforms_submissions.id as id',
-      'extensions.gcs_gcforms_submissions.form_id as form_id',
-      'extensions.gcs_gcforms_submissions.submission_name as submission_name',
-      'extensions.gcs_gcforms_submissions.status as status',
-      'extensions.gcs_gcforms_submissions.gcforms_created_at as gcforms_created_at',
-      'extensions.gcs_gcforms_submissions.mapped_values as mapped_values',
-      'extensions.gcs_gcforms_submissions.mapping_issues as mapping_issues'
+      'extensions.gcs_gcforms_integration_submissions.id as id',
+      'extensions.gcs_gcforms_integration_submissions.form_id as form_id',
+      'extensions.gcs_gcforms_integration_submissions.submission_name as submission_name',
+      'extensions.gcs_gcforms_integration_submissions.status as status',
+      'extensions.gcs_gcforms_integration_submissions.gcforms_created_at as gcforms_created_at',
+      'extensions.gcs_gcforms_integration_submissions.mapped_values as mapped_values',
+      'extensions.gcs_gcforms_integration_submissions.mapping_issues as mapping_issues'
     ])
-    .where('extensions.gcs_gcforms_destination_links.owner_type', '=', String(ownerType))
-    .where('extensions.gcs_gcforms_destination_links.owner_id', '=', String(ownerId))
-    .where('extensions.gcs_gcforms_destination_links._deleted', '=', false)
-    .where('extensions.gcs_gcforms_submissions._deleted', '=', false)
-    .orderBy('extensions.gcs_gcforms_submissions.gcforms_created_at', 'desc')
+    .where('extensions.gcs_gcforms_integration_destination_links.owner_type', '=', String(ownerType))
+    .where('extensions.gcs_gcforms_integration_destination_links.owner_id', '=', String(ownerId))
+    .where('extensions.gcs_gcforms_integration_destination_links._deleted', '=', false)
+    .where('extensions.gcs_gcforms_integration_submissions._deleted', '=', false)
+    .orderBy('extensions.gcs_gcforms_integration_submissions.gcforms_created_at', 'desc')
     .execute()
   const locale = getGcFormsDiagnosticLocale(context)
   const items = rows.map(row => ({

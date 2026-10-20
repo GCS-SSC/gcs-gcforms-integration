@@ -6,7 +6,7 @@ const { verifyExtensionAuditContract } = await import(new URL(
 
 verifyExtensionAuditContract(extension, [
   {
-    'table': 'extensions.gcs_gcforms_credentials',
+    'table': 'extensions.gcs_gcforms_integration_credentials',
     'row': {
       'id': '1',
       'agency_id': '11'
@@ -16,7 +16,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_connections',
+    'table': 'extensions.gcs_gcforms_integration_connections',
     'row': {
       'id': '2',
       'agency_id': '11',
@@ -27,7 +27,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_integrations',
+    'table': 'extensions.gcs_gcforms_integration_integrations',
     'row': {
       'id': '3',
       'connection_id': '2',
@@ -38,7 +38,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_templates',
+    'table': 'extensions.gcs_gcforms_integration_templates',
     'row': {
       'id': '4',
       'connection_id': '2'
@@ -48,7 +48,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_field_mappings',
+    'table': 'extensions.gcs_gcforms_integration_field_mappings',
     'row': {
       'id': '5',
       'integration_id': '3'
@@ -58,7 +58,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_submissions',
+    'table': 'extensions.gcs_gcforms_integration_submissions',
     'row': {
       'id': '6',
       'connection_id': '2'
@@ -68,7 +68,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_attachments',
+    'table': 'extensions.gcs_gcforms_integration_attachments',
     'row': {
       'id': '7',
       'submission_id': '6'
@@ -78,7 +78,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_import_runs',
+    'table': 'extensions.gcs_gcforms_integration_import_runs',
     'row': {
       'id': '8',
       'connection_id': '2'
@@ -88,7 +88,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_destination_links',
+    'table': 'extensions.gcs_gcforms_integration_destination_links',
     'row': {
       'id': '9',
       'submission_id': '6',
@@ -100,7 +100,7 @@ verifyExtensionAuditContract(extension, [
     ]
   },
   {
-    'table': 'extensions.gcs_gcforms_materialization_overrides',
+    'table': 'extensions.gcs_gcforms_integration_materialization_overrides',
     'row': {
       'id': '10',
       'submission_id': '6',

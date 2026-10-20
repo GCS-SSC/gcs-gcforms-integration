@@ -206,7 +206,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_credentials (
+    CREATE TABLE extensions.gcs_gcforms_integration_credentials (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       name_en varchar(200) NOT NULL,
@@ -239,7 +239,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_connections (
+    CREATE TABLE extensions.gcs_gcforms_integration_connections (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -262,7 +262,7 @@ const createSchema = async () => {
   `.execute(db)
   await sql`
     CREATE UNIQUE INDEX gcs_gcforms_connection_remote_identity
-    ON extensions.gcs_gcforms_connections (
+    ON extensions.gcs_gcforms_integration_connections (
       stream_id,
       credential_id,
       credential_revision,
@@ -276,7 +276,7 @@ const createSchema = async () => {
     WHERE _deleted = false
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_templates (
+    CREATE TABLE extensions.gcs_gcforms_integration_templates (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       form_id varchar(80) NOT NULL,
@@ -289,7 +289,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_integrations (
+    CREATE TABLE extensions.gcs_gcforms_integration_integrations (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -305,11 +305,11 @@ const createSchema = async () => {
   `.execute(db)
   await sql`
     CREATE UNIQUE INDEX gcs_gcforms_integration_identity
-    ON extensions.gcs_gcforms_integrations (connection_id, config_fingerprint)
+    ON extensions.gcs_gcforms_integration_integrations (connection_id, config_fingerprint)
     WHERE _deleted = false
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_field_mappings (
+    CREATE TABLE extensions.gcs_gcforms_integration_field_mappings (
       id bigserial PRIMARY KEY,
       integration_id bigint NOT NULL,
       mapping_key varchar(120) NOT NULL,
@@ -325,7 +325,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_import_runs (
+    CREATE TABLE extensions.gcs_gcforms_integration_import_runs (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -339,7 +339,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -362,11 +362,11 @@ const createSchema = async () => {
   `.execute(db)
   await sql`
     CREATE UNIQUE INDEX gcs_gcforms_submission_unique
-    ON extensions.gcs_gcforms_submissions (connection_id, submission_name)
+    ON extensions.gcs_gcforms_integration_submissions (connection_id, submission_name)
     WHERE _deleted = false
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_attachments (
+    CREATE TABLE extensions.gcs_gcforms_integration_attachments (
       id bigserial PRIMARY KEY,
       submission_id bigint NOT NULL,
       gcforms_attachment_id varchar(120),
@@ -429,7 +429,7 @@ const seedConfig = async () => {
     })
     .execute()
   await db
-    .insertInto('extensions.gcs_gcforms_credentials')
+    .insertInto('extensions.gcs_gcforms_integration_credentials')
     .values({
       id: '1',
       agency_id: '20',
@@ -456,7 +456,7 @@ const seedConfig = async () => {
 
 const rotateCredential = async () => {
   await db
-    .insertInto('extensions.gcs_gcforms_credentials')
+    .insertInto('extensions.gcs_gcforms_integration_credentials')
     .values({
       id: '2',
       agency_id: '20',
@@ -545,8 +545,8 @@ describe('GC Forms template shape guard', () => {
       `CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL, egcs_fc_organizationcostcategory bigint NOT NULL, egcs_fc_costsubsection text NOT NULL, egcs_fc_description text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_applicantrecipient bigint NOT NULL, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
-      `CREATE TABLE extensions.gcs_gcforms_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`,
-      `CREATE TABLE extensions.gcs_gcforms_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`
+      `CREATE TABLE extensions.gcs_gcforms_integration_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`
     ]
     for (const statement of tables) await sql.raw(statement).execute(db)
     await sql`INSERT INTO "Applicant_Recipient_Profile"(id,egcs_ar_legalname_en,egcs_ar_legalname_fr) VALUES(901,'Submitting Organization','Organisme soumissionnaire')`.execute(db)
@@ -632,14 +632,14 @@ describe('GC Forms template shape guard', () => {
     expect(claims.rows).toEqual([{ id: '1', agreement_id: '101', uuid: 'submission-sync-1' }])
     const lines = await sql<{ claim_id: string, budget_id: string, amount: string }>`SELECT egcs_fc_fundingagreementclaim::text AS claim_id, egcs_fc_fundingagreementbudgetlineitem::text AS budget_id, egcs_fc_amount::text AS amount FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)
     expect(lines.rows).toEqual([{ claim_id: '1', budget_id: '701', amount: '1234.56' }])
-    const submission = await db.selectFrom('extensions.gcs_gcforms_submissions')
+    const submission = await db.selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'diagnostic_code', 'mapped_values']).executeTakeFirstOrThrow()
     expect(submission).toMatchObject({ status: 'imported', diagnostic_code: null })
     expect(submission.mapped_values).toEqual(expect.arrayContaining([
       expect.objectContaining({ destinationEntity: 'claim', destinationPath: 'egcs_fc_fundingagreement', value: 'AGR-SYNC' }),
       expect.objectContaining({ destinationEntity: 'claim_line_item', destinationPath: 'egcs_fc_amount', value: ['1234.56'] })
     ]))
-    const links = await sql<{ destination_entity: string, owner_id: string }>`SELECT destination_entity, owner_id::text FROM extensions.gcs_gcforms_destination_links ORDER BY id`.execute(db)
+    const links = await sql<{ destination_entity: string, owner_id: string }>`SELECT destination_entity, owner_id::text FROM extensions.gcs_gcforms_integration_destination_links ORDER BY id`.execute(db)
     expect(links.rows).toEqual([
       { destination_entity: 'claim', owner_id: '1' },
       { destination_entity: 'claim_line_item', owner_id: '1' }
@@ -793,9 +793,9 @@ describe('GC Forms template shape guard', () => {
   it('keeps repeated submission reads empty and strictly free of setup mutations', async () => {
     const submissionsRoute = (await import('../../server/api/submissions.get')).default as any
     const before = await Promise.all([
-      db.selectFrom('extensions.gcs_gcforms_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
-      db.selectFrom('extensions.gcs_gcforms_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
-      db.selectFrom('extensions.gcs_gcforms_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
+      db.selectFrom('extensions.gcs_gcforms_integration_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integration_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integration_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
     ])
 
     await expect(submissionsRoute(createRouteSyncEvent())).resolves.toMatchObject({
@@ -810,16 +810,16 @@ describe('GC Forms template shape guard', () => {
       total: 0
     })
     const after = await Promise.all([
-      db.selectFrom('extensions.gcs_gcforms_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
-      db.selectFrom('extensions.gcs_gcforms_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
-      db.selectFrom('extensions.gcs_gcforms_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
+      db.selectFrom('extensions.gcs_gcforms_integration_connections').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integration_integrations').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow(),
+      db.selectFrom('extensions.gcs_gcforms_integration_field_mappings').select(db.fn.countAll().as('count')).executeTakeFirstOrThrow()
     ])
     expect(after).toEqual(before)
   })
 
   it('creates an immutable connection version when the remote identity changes', async () => {
     await db
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '20',
         stream_id: '30',
@@ -852,14 +852,14 @@ describe('GC Forms template shape guard', () => {
     })
 
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(db.fn.countAll().as('count'))
       .where('stream_id', '=', '30')
       .where('form_id', '=', 'form-1')
       .where('_deleted', '=', false)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 2 })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['api_url', 'identity_provider_url', 'project_identifier'])
       .where('api_url', '=', 'https://old.example.test/v1')
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -885,7 +885,7 @@ describe('GC Forms template shape guard', () => {
 
     expect(String(connections[0]?.id)).toBe(String(connections[1]?.id))
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(db.fn.countAll().as('count'))
       .where('stream_id', '=', '30')
       .where('api_url', '=', config.apiUrl)
@@ -895,7 +895,7 @@ describe('GC Forms template shape guard', () => {
 
   it('records selected credential id and selected credential form id', async () => {
     await db
-      .insertInto('extensions.gcs_gcforms_credentials')
+      .insertInto('extensions.gcs_gcforms_integration_credentials')
       .values({
         id: '2',
         agency_id: '20',
@@ -969,7 +969,7 @@ describe('GC Forms template shape guard', () => {
     })
 
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_field_mappings')
+      .selectFrom('extensions.gcs_gcforms_integration_field_mappings')
       .select([
         'source_question_id',
         'default_value',
@@ -997,7 +997,7 @@ describe('GC Forms template shape guard', () => {
     ])
 
     const storedIntegrations = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select(['id', 'config'])
       .where('id', 'in', [String(first.id), String(second.id)])
       .orderBy('id')
@@ -1066,7 +1066,7 @@ describe('GC Forms template shape guard', () => {
       expect.anything()
     )
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .selectFrom('extensions.gcs_gcforms_integration_import_runs')
       .select(db.fn.countAll().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
 
@@ -1186,11 +1186,11 @@ describe('GC Forms template shape guard', () => {
     })
     expect(decryptSpy).toHaveBeenCalledWith('prepared-before-patch')
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .selectFrom('extensions.gcs_gcforms_integration_import_runs')
       .select(db.fn.countAll<number>().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(db.fn.countAll<number>().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
     await expect(getGcFormsCredential(db, '20', '1')).resolves.toMatchObject({ key: replacementKey })
@@ -1207,7 +1207,7 @@ describe('GC Forms template shape guard', () => {
     vi.spyOn(GcFormsApiClient.prototype, 'getDecryptedSubmission')
       .mockImplementation(async submissionName => {
         const persisted = await db
-          .selectFrom('extensions.gcs_gcforms_submissions')
+          .selectFrom('extensions.gcs_gcforms_integration_submissions')
           .select(db.fn.countAll<number>().as('count'))
           .executeTakeFirstOrThrow()
         observedPersistedCounts.push(Number(persisted.count))
@@ -1229,7 +1229,7 @@ describe('GC Forms template shape guard', () => {
     })
     expect(observedPersistedCounts).toEqual([0, 1])
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('submission_name')
       .orderBy('id', 'asc')
       .execute()).resolves.toEqual([
@@ -1265,13 +1265,13 @@ describe('GC Forms template shape guard', () => {
       code: 'GCS_GCFORMS_CONFIG_CHANGED'
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['submission_name', 'status'])
       .execute()).resolves.toEqual([
       { submission_name: 'submission-1', status: 'mapping_failed' }
     ])
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .selectFrom('extensions.gcs_gcforms_integration_import_runs')
       .select(['status', 'discovered_count', 'imported_count'])
       .executeTakeFirstOrThrow()).resolves.toEqual({
       status: 'failed',
@@ -1320,11 +1320,11 @@ describe('GC Forms template shape guard', () => {
       code: 'GCS_GCFORMS_RESPONSE_TOO_LARGE'
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_import_runs')
+      .selectFrom('extensions.gcs_gcforms_integration_import_runs')
       .select(db.fn.countAll<number>().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(db.fn.countAll<number>().as('count'))
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ count: 0 })
   })
@@ -1371,17 +1371,17 @@ describe('GC Forms template shape guard', () => {
     }) as unknown as typeof fetch)
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -1419,7 +1419,7 @@ describe('GC Forms template shape guard', () => {
     }
     expect(decryptSpy).not.toHaveBeenCalled()
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'confirmation_code'])
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -1438,7 +1438,7 @@ describe('GC Forms template shape guard', () => {
     await reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)
     expect(confirmationAttempts).toBe(1)
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'confirmation_code'])
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -1510,12 +1510,12 @@ describe('GC Forms template shape guard', () => {
     const originalRefresh = await refreshTemplate(db, '30')
     const originalConnectionId = String(originalRefresh.connection.id)
     const originalIntegration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('connection_id', '=', originalConnectionId)
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: originalConnectionId,
         integration_id: String(originalIntegration.id),
@@ -1551,7 +1551,7 @@ describe('GC Forms template shape guard', () => {
       .where('stream_id', '=', '30')
       .execute()
     await db
-      .updateTable('extensions.gcs_gcforms_credentials')
+      .updateTable('extensions.gcs_gcforms_integration_credentials')
       .set({ form_id: 'form-2' })
       .where('id', '=', '1')
       .execute()
@@ -1560,7 +1560,7 @@ describe('GC Forms template shape guard', () => {
     const replacementConnectionId = String(replacementRefresh.connection.id)
     expect(replacementConnectionId).not.toBe(originalConnectionId)
     const originalConnection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select([
         'form_id',
         'api_url',
@@ -1635,17 +1635,17 @@ describe('GC Forms template shape guard', () => {
 
     await refreshTemplate(db, '30')
     const currentConnection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .selectAll()
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('connection_id', '=', String(currentConnection.id))
       .executeTakeFirstOrThrow()
     const historicalConnections = await db
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values(Array.from({ length: GCFORMS_SYNC_BATCH_LIMIT + 1 }, (_, index) => ({
         agency_id: currentConnection.agency_id,
         stream_id: currentConnection.stream_id,
@@ -1665,7 +1665,7 @@ describe('GC Forms template shape guard', () => {
       .returning('id')
       .execute()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values(historicalConnections.map((connection, index) => ({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -1693,7 +1693,7 @@ describe('GC Forms template shape guard', () => {
     expect(second.continuationRequired).toBe(false)
     expect(getNewSubmissionsSpy).toHaveBeenCalledTimes(2)
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('submission_name')
       .where('status', '=', 'imported_pending_confirm')
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -1706,17 +1706,17 @@ describe('GC Forms template shape guard', () => {
     const remoteListSpy = vi.spyOn(GcFormsApiClient.prototype, 'getNewSubmissions')
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('connection_id', '=', String(connection.id))
       .executeTakeFirstOrThrow()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values(Array.from({ length: GCFORMS_SYNC_BATCH_LIMIT + 1 }, (_, index) => ({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -1732,7 +1732,7 @@ describe('GC Forms template shape guard', () => {
       hasMore: true
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('submission_name')
       .where('status', '=', 'imported_pending_confirm')
       .executeTakeFirstOrThrow()).resolves.toEqual({
@@ -1764,12 +1764,12 @@ describe('GC Forms template shape guard', () => {
     vi.stubGlobal('fetch', fetchMock)
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: null,
@@ -1818,7 +1818,7 @@ describe('GC Forms template shape guard', () => {
     })
     expect(fetchMock).not.toHaveBeenCalled()
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
@@ -1860,17 +1860,17 @@ describe('GC Forms template shape guard', () => {
     }) as unknown as typeof fetch)
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -1923,7 +1923,7 @@ describe('GC Forms template shape guard', () => {
     })
     await reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
@@ -1984,17 +1984,17 @@ describe('GC Forms template shape guard', () => {
     }) as unknown as typeof fetch)
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -2018,7 +2018,7 @@ describe('GC Forms template shape guard', () => {
     await expect(reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation))
       .rejects.toThrow('status 503')
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported_pending_confirm' })
@@ -2026,7 +2026,7 @@ describe('GC Forms template shape guard', () => {
     await expect(reconcileGcFormsSubmissionConfirmation(context, '30', reconciliation)).resolves.toBeUndefined()
     expect(confirmationAttempts).toBe(2)
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })
@@ -2051,17 +2051,17 @@ describe('GC Forms template shape guard', () => {
     vi.stubGlobal('fetch', fetchMock)
     await refreshTemplate(db, '30')
     const connection = await db
-      .selectFrom('extensions.gcs_gcforms_connections')
+      .selectFrom('extensions.gcs_gcforms_integration_connections')
       .select(['id', 'form_id'])
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const integration = await db
-      .selectFrom('extensions.gcs_gcforms_integrations')
+      .selectFrom('extensions.gcs_gcforms_integration_integrations')
       .select('id')
       .where('stream_id', '=', '30')
       .executeTakeFirstOrThrow()
     const pending = await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: String(integration.id),
@@ -2082,7 +2082,7 @@ describe('GC Forms template shape guard', () => {
       expect.anything()
     )
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_submissions')
+      .selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select('status')
       .where('id', '=', String(pending.id))
       .executeTakeFirstOrThrow()).resolves.toEqual({ status: 'imported' })

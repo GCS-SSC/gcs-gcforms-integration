@@ -14,7 +14,7 @@ export default defineGcsExtensionRouteHandler(async (context) => {
   const connection = await findCurrentGcFormsConnection(db, streamId, config)
   const rows = connection
     ? await db
-        .selectFrom('extensions.gcs_gcforms_submissions')
+        .selectFrom('extensions.gcs_gcforms_integration_submissions')
         .select([
           'id',
           'form_id',

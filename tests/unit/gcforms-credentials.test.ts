@@ -52,7 +52,7 @@ const createSchema = async () => {
   `.execute(db)
   await sql`INSERT INTO "Agency_Profile" (id) VALUES (10), (20)`.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_credentials (
+    CREATE TABLE extensions.gcs_gcforms_integration_credentials (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       name_en varchar(200) NOT NULL,
@@ -85,7 +85,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_connections (
+    CREATE TABLE extensions.gcs_gcforms_integration_connections (
       id bigserial PRIMARY KEY,
       agency_id bigint NOT NULL,
       stream_id bigint NOT NULL,
@@ -107,7 +107,7 @@ const createSchema = async () => {
     )
   `.execute(db)
   await sql`
-    CREATE TABLE extensions.gcs_gcforms_submissions (
+    CREATE TABLE extensions.gcs_gcforms_integration_submissions (
       id bigserial PRIMARY KEY,
       connection_id bigint NOT NULL,
       integration_id bigint,
@@ -167,7 +167,7 @@ const contextFor = (
 
 const seedCredential = async (agencyId = '10', name = 'Local claims') => {
   const row = await db
-    .insertInto('extensions.gcs_gcforms_credentials')
+    .insertInto('extensions.gcs_gcforms_integration_credentials')
     .values({
       agency_id: agencyId,
       name_en: name,
@@ -290,7 +290,7 @@ describe('GC Forms encrypted credentials', () => {
     expect(writePhaseOrder).toEqual(['auth-state', 'lifecycle', 'authorize-current'])
 
     const row = await db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .selectAll()
       .executeTakeFirstOrThrow()
     await expect(getGcFormsCredential(db, '10', String(row.id))).resolves.toMatchObject({
@@ -347,7 +347,7 @@ describe('GC Forms encrypted credentials', () => {
       formId: credential.formId
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select('revision')
       .where('id', '=', credential.id)
       .executeTakeFirstOrThrow()).resolves.toEqual({ revision: 1 })
@@ -367,7 +367,7 @@ describe('GC Forms encrypted credentials', () => {
       secretKey: credential.id
     })).resolves.toEqual({ key: nextKey })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select('revision')
       .where('id', '=', credential.id)
       .executeTakeFirstOrThrow()).resolves.toEqual({ revision: 2 })
@@ -381,7 +381,7 @@ describe('GC Forms encrypted credentials', () => {
       code: 'GCS_GCFORMS_CREDENTIAL_MISSING'
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select('_deleted')
       .where('id', '=', credential.id)
       .executeTakeFirstOrThrow()).resolves.toMatchObject({ _deleted: true })
@@ -400,7 +400,7 @@ describe('GC Forms encrypted credentials', () => {
       .where('secret_key', '=', credential.id)
       .executeTakeFirstOrThrow()
     const connection = await db
-      .insertInto('extensions.gcs_gcforms_connections')
+      .insertInto('extensions.gcs_gcforms_integration_connections')
       .values({
         agency_id: '10',
         stream_id: '30',
@@ -419,7 +419,7 @@ describe('GC Forms encrypted credentials', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     await db
-      .insertInto('extensions.gcs_gcforms_submissions')
+      .insertInto('extensions.gcs_gcforms_integration_submissions')
       .values({
         connection_id: String(connection.id),
         integration_id: null,
@@ -429,7 +429,7 @@ describe('GC Forms encrypted credentials', () => {
       })
       .execute()
     await db
-      .updateTable('extensions.gcs_gcforms_connections')
+      .updateTable('extensions.gcs_gcforms_integration_connections')
       .set({ _deleted: true })
       .where('id', '=', connection.id)
       .execute()
@@ -477,7 +477,7 @@ describe('GC Forms encrypted credentials', () => {
       formId: credential.formId
     })
     await expect(db
-      .selectFrom('extensions.gcs_gcforms_credentials')
+      .selectFrom('extensions.gcs_gcforms_integration_credentials')
       .select(['_deleted', 'revision'])
       .where('id', '=', credential.id)
       .executeTakeFirstOrThrow()).resolves.toEqual({ _deleted: false, revision: 1 })
