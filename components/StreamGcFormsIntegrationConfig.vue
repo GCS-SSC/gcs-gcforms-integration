@@ -862,9 +862,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ExtensionEntityEditorWorkspace :content-test-id="hostLayout ? 'gcforms-config-page-content' : undefined">
+  <ExtensionEntityEditorWorkspace :content-test-id="hostLayout ? 'gcforms-config-page-content' : undefined" data-field-scope="extension.gcs-gcforms-integration.stream-gc-forms-integration-config">
     <template #sidebar>
-      <ExtensionRouteTabs
+      <ExtensionRouteTabs data-field-container="Page navigation state, not a business input field."
         v-model="selectedTab"
         :items="entityTabs"
         orientation="vertical"
@@ -989,7 +989,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <ExtensionFormField :label="tLocal('credential')" :help="tLocal('credentialRequired')" class="max-w-xl">
+      <ExtensionFormField :label="tLocal('credential')" :help="tLocal('credentialRequired')" class="max-w-xl" data-ui-target="extension.gcs-gcforms-integration.stream-gc-forms-integration-config.local-config.credential-id">
         <ExtensionSelectMenu
           v-model="localConfig.credentialId"
           :items="credentialOptions"
@@ -1092,13 +1092,13 @@ onMounted(async () => {
               v-else-if="rowIsRepeatedClaimMappingField(row.original)"
               :model-value="mappingRowSourceValue(row.original)"
               :aria-label="`${tLocal('sourceField')}: ${getMappingFieldRowLabel(row.original)}`"
-              :items="repeatedSourceOptions"
+              :items="repeatedSourceOptions" data-ui-target="extension.gcs-gcforms-integration.stream-gc-forms-integration-config.mapping-row-source-value-row.original"
               @update:model-value="(value: unknown) => upsertMappingRow(row.original, value)" />
             <ExtensionSelect
               v-else-if="rowIsClaimMappingField(row.original)"
               :model-value="mappingRowSelectValue(row.original)"
               :aria-label="`${tLocal('sourceField')}: ${getMappingFieldRowLabel(row.original)}`"
-              :items="sourceOptionsForMappingRow(row.original)"
+              :items="sourceOptionsForMappingRow(row.original)" data-ui-target="extension.gcs-gcforms-integration.stream-gc-forms-integration-config.mapping-row-select-value-row.original"
               @update:model-value="(value: unknown) => upsertMappingRow(row.original, value)" />
           </template>
 
@@ -1146,7 +1146,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <ExtensionFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')" required>
+          <ExtensionFormField v-if="selectedFailureHasAgreementMatcher" :label="tLocal('possibleAgreement')" required data-ui-target="extension.gcs-gcforms-integration.stream-gc-forms-integration-config.match-search-term">
             <ExtensionSelectMenu
               v-model:search-term="matchSearchTerm"
               v-model="selectedMatchId"
