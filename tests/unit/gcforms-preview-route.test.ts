@@ -1,17 +1,31 @@
+import { IncomingMessage, ServerResponse } from 'node:http'
+import { Socket } from 'node:net'
+import type { GcsExtensionRouteEvent } from '@gcs-ssc/extensions/server'
+import { createEvent } from 'h3'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const readBodyMock = vi.fn()
 const authorizeGcFormsStreamMock = vi.fn()
-
-vi.mock('h3', () => ({
-  isEvent: () => true,
-  getHeader: (_event: unknown, name: string) => name === 'accept-language' ? 'fr-CA' : undefined,
-  readBody: (...args: unknown[]) => readBodyMock(...args)
-}))
 
 vi.mock('../../server/runtime', () => ({
   authorizeGcFormsStream: (...args: unknown[]) => authorizeGcFormsStreamMock(...args)
 }))
+
+const createPreviewEvent = (body: unknown): GcsExtensionRouteEvent => {
+  const request = new IncomingMessage(new Socket())
+  const json = JSON.stringify(body)
+  request.method = 'POST'
+  request.headers = {
+    'content-type': 'application/json',
+    'content-length': String(Buffer.byteLength(json)),
+    'accept-language': 'fr-CA'
+  }
+  request.push(json)
+  request.push(null)
+  const event = createEvent(request, new ServerResponse(request))
+  event.context.$db = {}
+  event.context.params = { streamId: 'stream-1' }
+  return event
+}
 
 describe('GC Forms preview route', () => {
   beforeEach(() => {
@@ -21,7 +35,7 @@ describe('GC Forms preview route', () => {
   })
 
   it('authorizes stream updates and previews string answers against configured mappings', async () => {
-    readBodyMock.mockResolvedValueOnce({
+    const event = createPreviewEvent({
       answers: JSON.stringify({ amount: '1,234.56' }),
       config: {
         mappings: [{
@@ -37,8 +51,6 @@ describe('GC Forms preview route', () => {
       }
     })
     const handler = (await import('../../server/api/preview.post')).default
-    const event = { node: { req: { headers: {} } }, context: { $db: {}, params: { streamId: 'stream-1' } } } as never
-
     const result = await handler(event)
 
     expect(authorizeGcFormsStreamMock).toHaveBeenCalledWith(
@@ -60,7 +72,7 @@ describe('GC Forms preview route', () => {
   })
 
   it('normalizes object answers and reports missing required preview values', async () => {
-    readBodyMock.mockResolvedValueOnce({
+    const event = createPreviewEvent({
       answers: {},
       config: {
         mappings: [{
@@ -77,7 +89,7 @@ describe('GC Forms preview route', () => {
     })
     const handler = (await import('../../server/api/preview.post')).default
 
-    const result = await handler({ node: { req: { headers: {} } }, context: { $db: {}, params: { streamId: 'stream-1' } } } as never)
+    const result = await handler(event)
 
     expect(result).toEqual(expect.objectContaining({
       ok: true,

@@ -181,8 +181,11 @@ const updateElementForQuestion = (
     properties: element.properties ? { ...element.properties } : undefined
   }
 
-  if (questionId && Object.hasOwn(replacements, questionId) && nextElement.properties) {
-    nextElement.properties.choices = choicesWithBlank(replacements[questionId])
+  const replacementChoices = questionId && Object.hasOwn(replacements, questionId)
+    ? replacements[questionId]
+    : undefined
+  if (replacementChoices !== undefined && nextElement.properties) {
+    nextElement.properties.choices = choicesWithBlank(replacementChoices)
   }
 
   if (questionId === 'submitted_cost_subsection' && nextElement.properties) {

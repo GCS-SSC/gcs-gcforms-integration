@@ -225,4 +225,14 @@ describe('GC Forms claim template generator', () => {
     expect(subsection.properties?.choices).toEqual([{ en: '', fr: '' }])
     expect(subsection.properties?.validation?.required).toBe(true)
   })
+
+  it('keeps the blank option when a stream has no replacement choices', async () => {
+    const template = await generateGcFormsClaimTemplate(db, '999')
+
+    for (const questionId of ['submitting_proponent', 'fiscal_year', 'submitted_cost_category', 'submitted_line_item']) {
+      expect(findElement(template.elements, questionId).properties?.choices).toEqual([{ en: '', fr: '' }])
+    }
+    expect(findElement(template.elements, 'claim_notes').type).toBe('textArea')
+    expect(findElement(template.elements, 'claim_notes').properties?.validation?.required).toBe(false)
+  })
 })
