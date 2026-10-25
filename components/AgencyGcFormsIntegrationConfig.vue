@@ -157,7 +157,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="space-y-4">
+  <section class="space-y-4" data-field-scope="extension.gcs-gcforms-integration.agency-gc-forms-integration-config">
     <div>
       <h3 class="text-base font-semibold text-highlighted">
         {{ tLocal('connection') }}
@@ -168,17 +168,17 @@ onMounted(async () => {
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
-      <ExtensionFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')">
+      <ExtensionFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.api-url">
         <ExtensionInput v-model="localConfig.apiUrl" :placeholder="DEFAULT_GCFORMS_API_URL" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')">
+      <ExtensionFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.identity-provider-url">
         <ExtensionInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
       </ExtensionFormField>
       <div class="md:col-span-2">
         <ExtensionFormField
           required
           :label="tLocal('submissionStatus')"
-          :description="tLocal('submissionStatusHelp')">
+          :description="tLocal('submissionStatusHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.submission-status-id">
           <ExtensionStatusSelect
             v-model="localConfig.submissionStatusId"
             :agency-id="agencyId"
@@ -188,7 +188,7 @@ onMounted(async () => {
       <div class="md:col-span-2">
         <ExtensionCheckbox
           v-model="localConfig.confirmSubmissions"
-          :label="tLocal('confirmSubmissions')" />
+          :label="tLocal('confirmSubmissions')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.confirm-submissions" />
       </div>
     </div>
 
@@ -197,7 +197,7 @@ onMounted(async () => {
     </p>
   </section>
 
-  <section class="mt-8 space-y-4">
+  <section class="mt-8 space-y-4" data-field-scope="extension.gcs-gcforms-integration.agency-gc-forms-integration-config">
     <div>
       <h3 class="text-base font-semibold text-highlighted">
         {{ tLocal('credentials') }}
@@ -284,26 +284,26 @@ onMounted(async () => {
     </div>
 
     <div v-if="credentialForm" class="grid gap-4 md:grid-cols-2">
-      <ExtensionFormField :label="tLocal('nameEn')" required>
+      <ExtensionFormField :label="tLocal('nameEn')" required data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.name_en">
         <ExtensionInput v-model="credentialForm.name_en" lang="en" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('nameFr')" required>
+      <ExtensionFormField :label="tLocal('nameFr')" required data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.name_fr">
         <ExtensionInput v-model="credentialForm.name_fr" lang="fr" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('keyId')" required>
+      <ExtensionFormField :label="tLocal('keyId')" required data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.key-id">
         <ExtensionInput v-model="credentialForm.keyId" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('userId')" required>
+      <ExtensionFormField :label="tLocal('userId')" required data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.user-id">
         <ExtensionInput v-model="credentialForm.userId" />
       </ExtensionFormField>
-      <ExtensionFormField :label="tLocal('formId')" required>
+      <ExtensionFormField :label="tLocal('formId')" required data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.form-id">
         <ExtensionInput v-model="credentialForm.formId" />
       </ExtensionFormField>
       <ExtensionFormField
         :label="tLocal('privateKey')"
         :required="!credentialForm.id"
         :description="credentialForm.id ? tLocal('privateKeyEditHelp') : undefined"
-        class="md:col-span-2">
+        class="md:col-span-2" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.credential-form.key">
         <ExtensionRawTextarea v-model="credentialForm.key" :rows="8" />
       </ExtensionFormField>
     </div>
