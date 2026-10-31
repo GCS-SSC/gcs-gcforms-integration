@@ -418,7 +418,7 @@ describe('AgencyGcFormsIntegrationConfig', () => {
 describe('StreamGcFormsIntegrationConfig', () => {
   it('emits normalized JSON while replacing one mapping in place', async () => {
     const runtime = installExtensionTestUiRuntime()
-    runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
+    runtime.components.CommonResourceLayout = InteractiveResourceLayout
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input)
       return url.includes('/materialization-failures')
@@ -538,7 +538,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
     const runtime = installExtensionTestUiRuntime()
     const toastAdd = vi.fn()
     runtime.composables.useToast = () => ({ add: toastAdd })
-    runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
+    runtime.components.CommonResourceLayout = InteractiveResourceLayout
     runtime.components.UModal = ReactiveModal
     runtime.components.UAlert = VisibleAlert
     const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -676,7 +676,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
       n: (value: number) => String(value)
     }))
     const runtime = installExtensionTestUiRuntime()
-    runtime.components.CommonResourceLayoutCard = InteractiveResourceLayout
+    runtime.components.CommonResourceLayout = InteractiveResourceLayout
     runtime.components.UModal = ReactiveModal
     runtime.components.UAlert = VisibleAlert
     const rawDetail = 'SQLSTATE 23505 secret@example.test'
@@ -862,7 +862,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
       n: (value: number) => String(value)
     }))
     const runtime = installExtensionTestUiRuntime()
-    runtime.components.CommonResourceLayoutCard = ExhaustiveResourceLayout
+    runtime.components.CommonResourceLayout = ExhaustiveResourceLayout
     runtime.components.UModal = ReactiveModal
     runtime.components.UAlert = VisibleAlert
 

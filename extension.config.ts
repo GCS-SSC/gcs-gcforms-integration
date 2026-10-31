@@ -85,7 +85,7 @@ export default defineGcsExtension({
     }
   ]),
   key: 'gcs-gcforms-integration',
-  sdkVersion: '^0.3.2',
+  sdkVersion: '^0.4.0',
   requiredHostCapabilities: [
     'audit-ownership',
     'agency-config',

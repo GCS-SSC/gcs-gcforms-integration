@@ -17,8 +17,8 @@ import {
   ExtensionIcon,
   ExtensionModal,
   ExtensionProgress,
-  ExtensionResourceLayoutCard,
-  ExtensionRouteTabs,
+  ExtensionResourceLayout,
+  ExtensionTranslatedTabs,
   ExtensionSaveButton,
   ExtensionSelect,
   ExtensionSelectMenu,
@@ -864,7 +864,7 @@ onMounted(async () => {
 <template>
   <ExtensionEntityEditorWorkspace :content-test-id="hostLayout ? 'gcforms-config-page-content' : undefined" data-field-scope="extension.gcs-gcforms-integration.stream-gc-forms-integration-config">
     <template #sidebar>
-      <ExtensionRouteTabs data-field-container="Page navigation state, not a business input field."
+      <ExtensionTranslatedTabs ordering="localized" data-field-container="Page navigation state, not a business input field."
         v-model="selectedTab"
         :items="entityTabs"
         orientation="vertical"
@@ -889,7 +889,7 @@ onMounted(async () => {
           :loading="isLoadingMaterializationFailures"
           @click="refreshMaterializationFailures" />
       </div>
-      <ExtensionResourceLayoutCard
+      <ExtensionResourceLayout
         v-model:search="failedMaterializationSearch"
         v-model:status-filter="failedMaterializationStatusFilter"
         v-model:pagination="failedMaterializationPagination"
@@ -939,7 +939,7 @@ onMounted(async () => {
             :aria-label="tLocal('match')"
             @click="openMatchModal(row.original)" />
         </template>
-      </ExtensionResourceLayoutCard>
+      </ExtensionResourceLayout>
     </section>
 
     <section v-else-if="selectedTab === 'fundingclaimreconcile'" class="space-y-6">
@@ -1025,7 +1025,7 @@ onMounted(async () => {
         :description="tLocal('refreshBeforeMapping')" />
 
       <div class="space-y-4">
-        <ExtensionResourceLayoutCard
+        <ExtensionResourceLayout
           v-model:search="mappingFieldSearch"
           v-model:pagination="mappingFieldPagination"
           :data="mappingFieldRows"
@@ -1107,7 +1107,7 @@ onMounted(async () => {
               {{ mappingFieldRows.length }} {{ tLocal('mappings') }}
             </span>
           </template>
-        </ExtensionResourceLayoutCard>
+        </ExtensionResourceLayout>
 
       </div>
     </section>
