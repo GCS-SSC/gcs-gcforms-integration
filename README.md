@@ -122,3 +122,7 @@ These reduced-schema ownership fixtures complement the extension’s normal test
 Set `AUDIT_EXTENSION_POSTGRES_URL` to a disposable PostgreSQL database URL ending
 in `_test` to run the same suite on PostgreSQL; the adapter creates and removes an
 isolated database. Without that variable, the suite uses in-memory PGlite.
+
+## Currency money cutover
+
+GC Forms money answers must be decimal text. The mapping transform normalizes the text without binary floating-point conversion; Claim materialization resolves the Agreement currency before converting it to the SDK's `{ amount, currency }` money object. `amount` is canonical integer minor-unit text and `currency` is the uppercase code. An omitted mapped currency inherits the Agreement denomination; an explicit mismatch or fractional minor unit blocks materialization before the host write hook. JPY whole units, KWD thousandths, CLF ten-thousandths and MGA fifths retain their actual subdivisions. There is no numeric-answer or fixed-two-decimal compatibility reader.

@@ -31,7 +31,8 @@ const createSchema = async () => {
       id bigserial PRIMARY KEY,
       egcs_fc_agreementnumber varchar(120) NOT NULL,
       egcs_fc_transferpaymentstream bigint NOT NULL,
-      _deleted boolean DEFAULT false NOT NULL
+      _deleted boolean DEFAULT false NOT NULL,
+      egcs_fc_currency varchar(3) NOT NULL DEFAULT 'cad'
     )
   `.execute(db)
   await sql`

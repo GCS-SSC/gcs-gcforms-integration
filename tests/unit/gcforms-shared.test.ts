@@ -387,16 +387,16 @@ describe('GC Forms shared mapping utilities', () => {
       }),
       expect.objectContaining({
         mappingId: 'submitted-amount',
-        value: ['30.00', '75.00']
+        value: ['30', '75']
       })
     ])
   })
 
   it.each([
     ['exponent notation', '1e2'],
-    ['excess scale', '1.234'],
+    ['numeric input', 1.234],
     ['non-finite numeric input', Number.POSITIVE_INFINITY],
-    ['out-of-range text', '100000000000000000.00'],
+    ['malformed decimal text', '1.2.3'],
     ['unsafe historic numeric input', 90_071_992_547_409.92]
   ])('rejects %s money without rounding', (_label, amount) => {
     const config = parseGcFormsStreamConfig({

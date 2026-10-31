@@ -39,6 +39,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     _deleted: Generated<boolean>
   }
   'Funding_Case_Agreement_Profile': {
+    egcs_fc_currency: string
     id: Generated<string>
     egcs_fc_agreementnumber: string
     egcs_fc_transferpaymentstream: string

@@ -1,3 +1,4 @@
+import { isPersistableMoney, parseCurrencyMoney, type Money } from '@gcs-ssc/extensions/money'
 import { gcFormsUserMessage } from '../i18n/server'
 import { sql } from 'kysely'
 import type { JsonValue } from '@gcs-ssc/extensions'
@@ -43,6 +44,7 @@ interface ClaimMaterializationInput {
 }
 
 interface PreparedClaim {
+  currency: string
   agreementId: string
   applicantRecipientId: string
   agreementNumber: string
@@ -61,7 +63,7 @@ interface PreparedClaimLineItem {
   submittedCostSubsection: string | null
   submittedLineItem: string | null
   description: string
-  amount: string
+  amount: Money
   currency: string
 }
 
@@ -75,6 +77,7 @@ interface NormalizedClaimInputValues {
 }
 
 interface ResolvedClaimAgreement {
+  currency: string
   agreementId: string
   agreementNumber: string
   hasOverride: boolean
@@ -323,13 +326,14 @@ const requiredNumber = (value: JsonValue | undefined): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const requiredMoney = (value: JsonValue | undefined): string | null => {
+const requiredMoney = (value: JsonValue | undefined, currency: string): Money | null => {
   if (!hasPresentValue(value)) {
     return null
   }
 
   try {
-    return coerceGcFormsMoney(value)
+    const amount = parseCurrencyMoney(coerceGcFormsMoney(value), currency)
+    return isPersistableMoney(amount) ? amount : null
   } catch {
     return null
   }
@@ -517,14 +521,14 @@ const resolveClaimAgreement = async (
   const agreement = agreementOverride
     ? await db
         .selectFrom('Funding_Case_Agreement_Profile')
-        .select(['id', 'egcs_fc_agreementnumber'])
+        .select(['id', 'egcs_fc_agreementnumber', 'egcs_fc_currency'])
         .where('id', '=', String(agreementOverride.owner_id))
         .where('egcs_fc_transferpaymentstream', '=', input.streamId)
         .where('_deleted', '=', false)
         .executeTakeFirst()
     : await db
         .selectFrom('Funding_Case_Agreement_Profile')
-        .select(['id', 'egcs_fc_agreementnumber'])
+        .select(['id', 'egcs_fc_agreementnumber', 'egcs_fc_currency'])
         .where('egcs_fc_transferpaymentstream', '=', input.streamId)
         .where('egcs_fc_agreementnumber', '=', agreementNumber)
         .where('_deleted', '=', false)
@@ -532,6 +536,7 @@ const resolveClaimAgreement = async (
 
   return agreement
     ? {
+        currency: agreement.egcs_fc_currency,
         agreementId: String(agreement.id),
         agreementNumber: String(agreement.egcs_fc_agreementnumber),
         hasOverride: Boolean(agreementOverride)
@@ -648,6 +653,7 @@ const prepareClaimInput = async (
 
   return {
     claim: {
+      currency: agreement.currency,
       agreementId: agreement.agreementId,
       applicantRecipientId,
       agreementNumber: agreement.agreementNumber,
@@ -690,15 +696,21 @@ const collectMissingClaimLineItemIssues = (
     { row: index + 1 }
   ))
 
-const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number) => ({
-  budgetLineItemId: requiredString(claimLineItemFieldValue(values, 'egcs_fc_fundingagreementbudgetlineitem', index)),
-  submittedCostCategory: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostcategory', index)),
-  submittedCostSubsection: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostsubsection', index)),
-  submittedLineItem: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedlineitem', index)),
-  description: requiredString(claimLineItemFieldValue(values, 'egcs_fc_description', index)),
-  amount: requiredMoney(claimLineItemFieldValue(values, 'egcs_fc_amount', index)),
-  currency: requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency', index))
-})
+const readClaimLineItemValues = (values: NormalizedMappedValue[], index: number, ownerCurrency: string) => {
+  const submittedCurrency = requiredString(claimLineItemFieldValue(values, 'egcs_fc_currency', index))
+  const currency = normalizedText(submittedCurrency ?? ownerCurrency)
+  return {
+    budgetLineItemId: requiredString(claimLineItemFieldValue(values, 'egcs_fc_fundingagreementbudgetlineitem', index)),
+    submittedCostCategory: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostcategory', index)),
+    submittedCostSubsection: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedcostsubsection', index)),
+    submittedLineItem: requiredString(claimLineItemFieldValue(values, 'egcs_fc_submittedlineitem', index)),
+    description: requiredString(claimLineItemFieldValue(values, 'egcs_fc_description', index)),
+    amount: currency === normalizedText(ownerCurrency)
+      ? requiredMoney(claimLineItemFieldValue(values, 'egcs_fc_amount', index), ownerCurrency)
+      : null,
+    currency
+  }
+}
 
 const invalidClaimLineItemValuesIssue = (
   input: ClaimMaterializationInput,
@@ -811,7 +823,7 @@ const prepareClaimLineItemInputs = async (
       description,
       amount,
       currency
-    } = readClaimLineItemValues(values, index)
+    } = readClaimLineItemValues(values, index, claim.currency)
 
     if (!submittedCostCategory || !submittedCostSubsection || !submittedLineItem || amount === null) {
       issues.push(invalidClaimLineItemValuesIssue(input, index))
@@ -837,7 +849,7 @@ const prepareClaimLineItemInputs = async (
       submittedLineItem,
       description: lineItemDescription(description, submittedCostCategory, submittedCostSubsection, submittedLineItem),
       amount,
-      currency: normalizedText(currency || 'cad')
+      currency
     })
   }
 

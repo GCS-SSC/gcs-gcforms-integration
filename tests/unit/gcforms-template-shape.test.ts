@@ -536,7 +536,9 @@ describe('GC Forms template shape guard', () => {
       `CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY, egcs_ar_legalname_en text, egcs_ar_legalname_fr text, egcs_ar_operatingname_en text, egcs_ar_operatingname_fr text, egcs_ar_active boolean NOT NULL DEFAULT true, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_applicantrecipient bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Common_Status" (id bigserial PRIMARY KEY, egcs_cn_agency bigint NOT NULL, egcs_cn_isdraft boolean NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
-      `CREATE TABLE "Funding_Case_Agreement_Profile" (id bigserial PRIMARY KEY, egcs_fc_agreementnumber varchar(30) NOT NULL, egcs_fc_transferpaymentstream bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Profile" (id bigserial PRIMARY KEY, egcs_fc_agreementnumber varchar(30) NOT NULL, egcs_fc_transferpaymentstream bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false,
+      egcs_fc_currency varchar(3) NOT NULL DEFAULT 'cad'
+    )`,
       `CREATE TABLE "Agency_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_ay_fiscalyeardisplay varchar(20) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (id bigserial PRIMARY KEY, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Agency_Cost_Category" (id bigserial PRIMARY KEY, egcs_ay_name_en text NOT NULL, egcs_ay_name_fr text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
@@ -544,7 +546,7 @@ describe('GC Forms template shape guard', () => {
       `CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigserial PRIMARY KEY, egcs_tp_transferpaymentstream bigint NOT NULL, egcs_tp_organizationcostcategory bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL, egcs_fc_organizationcostcategory bigint NOT NULL, egcs_fc_costsubsection text NOT NULL, egcs_fc_description text NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE "Funding_Case_Agreement_Claim" (id bigserial PRIMARY KEY, egcs_fc_applicantrecipient bigint NOT NULL, egcs_fc_fundingagreement bigint NOT NULL, egcs_fc_fiscalyear bigint NOT NULL, egcs_fc_isfinalforyear boolean NOT NULL, egcs_fc_periodstart smallint NOT NULL, egcs_fc_periodend smallint NOT NULL, egcs_fc_receiveddate timestamptz NOT NULL, egcs_fc_gcformssubmissionuuid varchar(80), egcs_fc_status bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
-      `CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric(19,2) NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
+      `CREATE TABLE "Funding_Case_Agreement_Claim_Line_Item" (id bigserial PRIMARY KEY, egcs_fc_fundingagreementclaim bigint NOT NULL, egcs_fc_fundingagreementbudgetlineitem bigint, egcs_fc_submittedcostcategory text, egcs_fc_submittedcostsubsection text, egcs_fc_submittedlineitem text, egcs_fc_description text NOT NULL, egcs_fc_amount numeric NOT NULL, egcs_fc_currency varchar(3) NOT NULL, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE extensions.gcs_gcforms_integration_destination_links (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, mapping_id bigint, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, value jsonb, _deleted boolean NOT NULL DEFAULT false)`,
       `CREATE TABLE extensions.gcs_gcforms_integration_materialization_overrides (id bigserial PRIMARY KEY, submission_id bigint NOT NULL, destination_entity varchar(60) NOT NULL, destination_path varchar(240) NOT NULL, owner_type varchar(80) NOT NULL, owner_id bigint NOT NULL, _deleted boolean NOT NULL DEFAULT false)`
     ]
@@ -615,7 +617,7 @@ describe('GC Forms template shape guard', () => {
           egcs_fc_fundingagreementclaim: String(claim.id), egcs_fc_fundingagreementbudgetlineitem: line.budgetLineItemId,
           egcs_fc_submittedcostcategory: line.submittedCostCategory, egcs_fc_submittedcostsubsection: line.submittedCostSubsection,
           egcs_fc_submittedlineitem: line.submittedLineItem, egcs_fc_description: line.description,
-          egcs_fc_amount: line.amount, egcs_fc_currency: line.currency
+          egcs_fc_amount: line.amount.amount, egcs_fc_currency: line.currency
         }).returning('id').executeTakeFirstOrThrow()
         lineItemIds.push(String(item.id))
       }
@@ -631,7 +633,7 @@ describe('GC Forms template shape guard', () => {
     const claims = await sql<{ id: string, agreement_id: string, uuid: string }>`SELECT id::text, egcs_fc_fundingagreement::text AS agreement_id, egcs_fc_gcformssubmissionuuid AS uuid FROM "Funding_Case_Agreement_Claim"`.execute(db)
     expect(claims.rows).toEqual([{ id: '1', agreement_id: '101', uuid: 'submission-sync-1' }])
     const lines = await sql<{ claim_id: string, budget_id: string, amount: string }>`SELECT egcs_fc_fundingagreementclaim::text AS claim_id, egcs_fc_fundingagreementbudgetlineitem::text AS budget_id, egcs_fc_amount::text AS amount FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)
-    expect(lines.rows).toEqual([{ claim_id: '1', budget_id: '701', amount: '1234.56' }])
+    expect(lines.rows).toEqual([{ claim_id: '1', budget_id: '701', amount: '123456' }])
     const submission = await db.selectFrom('extensions.gcs_gcforms_integration_submissions')
       .select(['status', 'diagnostic_code', 'mapped_values']).executeTakeFirstOrThrow()
     expect(submission).toMatchObject({ status: 'imported', diagnostic_code: null })

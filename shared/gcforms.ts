@@ -1,3 +1,4 @@
+import { parseDecimalText } from '@gcs-ssc/extensions/money'
 import { translateGcsExtensionMessage } from '@gcs-ssc/extensions'
 import { GCFORMS_DIAGNOSTIC_MESSAGES, UNKNOWN_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics.ts'
 export { GCFORMS_DIAGNOSTIC_MESSAGES } from '../i18n/diagnostics.ts'
@@ -723,38 +724,10 @@ const coerceMappedNumber = (value: unknown): number => {
   return numberValue
 }
 
-const GCFORMS_MONEY_PATTERN = /^(-?)(\d+)(?:\.(\d{1,2}))?$/
-const GCFORMS_MONEY_MAX_CENTS = BigInt('9999999999999999999')
-const GCFORMS_MONEY_MAX_SAFE_NUMBER_CENTS = BigInt(Number.MAX_SAFE_INTEGER)
-
-/** Canonicalizes a GC Forms money answer without rounding or binary-float arithmetic. */
+/** Normalizes a textual GC Forms amount; its owning currency is checked before materialization. */
 export const coerceGcFormsMoney = (value: unknown): string => {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    throw new Error('invalid money')
-  }
-  if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new Error('invalid money')
-  }
-
-  const normalized = (typeof value === 'string' ? value.trim().replace(/,/g, '') : String(value))
-  const match = GCFORMS_MONEY_PATTERN.exec(normalized)
-  if (!match) {
-    throw new Error('invalid money')
-  }
-
-  const units = match[2]
-  if (units === undefined) {
-    throw new Error('invalid money')
-  }
-  const fraction = (match[3] ?? '').padEnd(2, '0')
-  const unsignedCents = BigInt(units) * BigInt(100) + BigInt(fraction)
-  if (unsignedCents > GCFORMS_MONEY_MAX_CENTS
-    || (typeof value === 'number' && unsignedCents > GCFORMS_MONEY_MAX_SAFE_NUMBER_CENTS)) {
-    throw new Error('invalid money')
-  }
-
-  const sign = match[1] === '-' && unsignedCents !== BigInt(0) ? '-' : ''
-  return `${sign}${unsignedCents / BigInt(100)}.${String(unsignedCents % BigInt(100)).padStart(2, '0')}`
+  if (typeof value !== 'string') throw new Error('invalid money')
+  return parseDecimalText(value.trim().replace(/,/g, ''))
 }
 
 const coerceMappedBoolean = (value: unknown): boolean => {

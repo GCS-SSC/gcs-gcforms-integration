@@ -29,7 +29,8 @@ const createSchema = async () => {
       id bigserial PRIMARY KEY,
       egcs_fc_agreementnumber varchar(15) NOT NULL,
       egcs_fc_transferpaymentstream bigint NOT NULL,
-      _deleted boolean DEFAULT false NOT NULL
+      _deleted boolean DEFAULT false NOT NULL,
+      egcs_fc_currency varchar(3) NOT NULL DEFAULT 'cad'
     )
   `.execute(db)
   await sql`
@@ -524,6 +525,7 @@ describe('GC Forms materialization failure resolution', () => {
       .values({
         id: '101',
         egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_currency: 'cad',
         egcs_fc_transferpaymentstream: '30'
       })
       .execute()
@@ -574,6 +576,7 @@ describe('GC Forms materialization failure resolution', () => {
       .values({
         id: '101',
         egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_currency: 'cad',
         egcs_fc_transferpaymentstream: '30'
       })
       .execute()
@@ -657,6 +660,7 @@ describe('GC Forms materialization failure resolution', () => {
       .values({
         id: '101',
         egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_currency: 'cad',
         egcs_fc_transferpaymentstream: '30'
       })
       .execute()

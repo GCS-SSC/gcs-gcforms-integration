@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
+import { normalizeGcFormsAnswers } from '../../shared/gcforms'
+import { prepareGcFormsSubmissionMaterialization } from '../../server/submission-materialization'
 import type { GcsGcFormsFieldMapping, GcsGcFormsMappedValue } from '../../shared/gcforms'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
 import { materializeGcFormsClaimSubmission } from '../../server/materialize-claims'
@@ -206,7 +208,7 @@ const lineItemValues: GcsGcFormsMappedValue[] = [
     sourceQuestionId: 'submitted_amount',
     destinationEntity: 'claim_line_item',
     destinationPath: 'egcs_fc_amount',
-    value: 1234.56
+    value: '1234.56'
   }
 ]
 
@@ -259,7 +261,8 @@ const createSchema = async () => {
       id bigserial PRIMARY KEY,
       egcs_fc_agreementnumber varchar(15) NOT NULL,
       egcs_fc_transferpaymentstream bigint NOT NULL,
-      _deleted boolean DEFAULT false NOT NULL
+      _deleted boolean DEFAULT false NOT NULL,
+      egcs_fc_currency varchar(3) NOT NULL DEFAULT 'cad'
     )
   `.execute(db)
   await sql`
@@ -336,7 +339,7 @@ const createSchema = async () => {
       egcs_fc_submittedcostsubsection text,
       egcs_fc_submittedlineitem text,
       egcs_fc_description text NOT NULL,
-      egcs_fc_amount numeric(19, 2) NOT NULL,
+      egcs_fc_amount numeric NOT NULL,
       egcs_fc_currency varchar(3) NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
@@ -438,11 +441,13 @@ const seedBaseData = async () => {
       {
         id: '101',
         egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_currency: 'cad',
         egcs_fc_transferpaymentstream: '31'
       },
       {
         id: '102',
         egcs_fc_agreementnumber: 'AGR-001',
+        egcs_fc_currency: 'cad',
         egcs_fc_transferpaymentstream: '32'
       }
     ])
@@ -604,7 +609,7 @@ const materialize = async (
         egcs_fc_submittedcostsubsection: lineItem.submittedCostSubsection,
         egcs_fc_submittedlineitem: lineItem.submittedLineItem,
         egcs_fc_description: lineItem.description,
-        egcs_fc_amount: lineItem.amount,
+        egcs_fc_amount: lineItem.amount.amount,
         egcs_fc_currency: lineItem.currency
       }).returning('id').executeTakeFirstOrThrow()
       lineItemIds.push(String(created.id))
@@ -763,7 +768,7 @@ describe('GC Forms claim materialization', () => {
       submissionUuid: '05-09-09f4',
       lineItems: [expect.objectContaining({
         budgetLineItemId: '701',
-        amount: '1234.56',
+        amount: { amount: '123456', currency: 'CAD' },
         currency: 'cad'
       })]
     }))
@@ -1017,13 +1022,13 @@ describe('GC Forms claim materialization', () => {
       egcs_fc_description: 'Operating Costs / Delivery / Travel',
       egcs_fc_currency: 'cad'
     }))
-    expect(lineItem.egcs_fc_amount).toBe('1234.56')
+    expect(lineItem.egcs_fc_amount).toBe('123456')
     const lineEvidence = await db
       .selectFrom('extensions.gcs_gcforms_integration_destination_links')
       .select('value')
       .where('owner_type', '=', 'fundingcaseagreementclaimlineitem')
       .executeTakeFirstOrThrow()
-    expect(lineEvidence.value).toEqual(expect.objectContaining({ amount: '1234.56' }))
+    expect(lineEvidence.value).toEqual(expect.objectContaining({ amount: { amount: '123456', currency: 'CAD' } }))
   })
 
   it('emits full-range canonical money to the host hook', async () => {
@@ -1047,11 +1052,56 @@ describe('GC Forms claim materialization', () => {
     )
 
     expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({
-      lineItems: [expect.objectContaining({ amount: '99999999999999999.99' })]
+      lineItems: [expect.objectContaining({ amount: { amount: '9999999999999999999', currency: 'CAD' } })]
     }))
   })
 
-  it.each(['1e2', '1.234', '100000000000000000.00'])(
+  it('maps repeated human KWD answers into exact minor-unit host rows and retained evidence', async () => {
+    const mappings = [...claimMappings, ...lineItemMappings]
+    await seedMappings(mappings)
+    await db.updateTable('Funding_Case_Agreement_Profile').set({ egcs_fc_currency: 'kwd' }).where('id', '=', '101').execute()
+    const answers = normalizeGcFormsAnswers({
+      ...Object.fromEntries(claimValues.map(value => [value.sourceQuestionId, value.value])),
+      submitted_line_items: [{ submitted_cost_category: 'Operating Costs', submitted_cost_subsection: 'Delivery',
+        submitted_line_item: 'Travel', submitted_amount: '9007199254740993.001' }]
+    })
+    const prepared = prepareGcFormsSubmissionMaterialization(answers, mappings)
+    expect(prepared.previewIssues).toEqual([])
+    expect(prepared.materializationIssues).toEqual([])
+    expect(prepared.values.find(value => value.destinationPath === 'egcs_fc_amount')?.value).toEqual(['9007199254740993.001'])
+    await expect(materialize(mappings, prepared.values)).resolves.toMatchObject({ status: 'created', lineItemIds: ['1'] })
+    const row = await sql<{ amount: string; currency: string }>`SELECT egcs_fc_amount::text AS amount, egcs_fc_currency AS currency FROM "Funding_Case_Agreement_Claim_Line_Item"`.execute(db)
+    expect(row.rows).toEqual([{ amount: '9007199254740993001', currency: 'kwd' }])
+    const evidence = await db.selectFrom('extensions.gcs_gcforms_integration_destination_links').select('value')
+      .where('owner_type', '=', 'fundingcaseagreementclaimlineitem').executeTakeFirstOrThrow()
+    expect(evidence.value).toMatchObject({ amount: { amount: '9007199254740993001', currency: 'KWD' }, currency: 'kwd' })
+  })
+
+  it.each([
+    ['jpy', '1', '1'], ['kwd', '0.001', '1'], ['clf', '0.0001', '1'], ['mga', '0.2', '1']
+  ])('uses owning %s minor units when no currency answer is mapped', async (currency, amount, minorUnits) => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+    await db.updateTable('Funding_Case_Agreement_Profile').set({ egcs_fc_currency: currency }).where('id', '=', '101').execute()
+    const createAgreementClaim = vi.fn(async () => ({ status: 'created' as const, claimId: '501', lineItemIds: ['701'], draftStatusId: '91' }))
+    const values = lineItemValues.map(value => value.destinationPath === 'egcs_fc_amount' ? { ...value, value: amount } : value)
+    const result = await materialize([...claimMappings, ...lineItemMappings], [...claimValues, ...values], '901', '05-09-09f4', createAgreementClaim)
+    expect(result.status).toBe('created')
+    expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({
+      lineItems: [expect.objectContaining({ amount: { amount: minorUnits, currency: currency.toUpperCase() }, currency })]
+    }))
+  })
+
+  it.each([['jpy', '0.1'], ['kwd', '0.0001'], ['mga', '0.1']])('rejects fractional %s minor units before host creation', async (currency, amount) => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+    await db.updateTable('Funding_Case_Agreement_Profile').set({ egcs_fc_currency: currency }).where('id', '=', '101').execute()
+    const createAgreementClaim = vi.fn()
+    const values = lineItemValues.map(value => value.destinationPath === 'egcs_fc_amount' ? { ...value, value: amount } : value)
+    const result = await materialize([...claimMappings, ...lineItemMappings], [...claimValues, ...values], '901', '05-09-09f4', createAgreementClaim)
+    expect(result.status).toBe('failed')
+    expect(createAgreementClaim).not.toHaveBeenCalled()
+  })
+
+  it.each(['1e2', '1.234', '1000000000000000000000000000000000000.00', 1.23])(
     'rejects invalid exact money %s before calling the host hook',
     async amount => {
       await seedMappings([...claimMappings, ...lineItemMappings])
@@ -1107,7 +1157,7 @@ describe('GC Forms claim materialization', () => {
         sourceQuestionId: 'submitted_amount',
         destinationEntity: 'claim_line_item',
         destinationPath: 'egcs_fc_amount',
-        value: [75, 30]
+        value: ['75', '30']
       }
     ])
 
@@ -1138,7 +1188,7 @@ describe('GC Forms claim materialization', () => {
         lineItem: 'Equipment'
       })
     ])
-    expect(lineItems.map(item => Number(item.amount))).toEqual([75, 30])
+    expect(lineItems.map(item => item.amount)).toEqual(['7500', '3000'])
   })
 
   it('preserves raw submitted claim line hierarchy and leaves invalid budget links unallocated', async () => {
