@@ -595,7 +595,10 @@ describe('StreamGcFormsIntegrationConfig', () => {
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:gcforms-template')
     const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-    const linkClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const downloads: Array<{ filename: string; href: string }> = []
+    const linkClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ filename: this.download, href: this.href })
+    })
 
     const parentModel: Ref<GcsExtensionJsonConfig> = ref({
       credentialId: 'credential-1',
@@ -664,6 +667,7 @@ describe('StreamGcFormsIntegrationConfig', () => {
       '/api/extensions/gcs-gcforms-integration/streams/stream-1/materialization-failures/submission-1/agreement'
     ]))
     expect(linkClick).toHaveBeenCalledOnce()
+    expect(downloads).toEqual([{ filename: 'gcs-claim-form-stream-stream-1.json', href: 'blob:gcforms-template' }])
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:gcforms-template')
 
     wrapper.unmount()
@@ -1034,8 +1038,6 @@ describe('StreamGcFormsIntegrationConfig', () => {
     await setupState.refreshTemplate()
     await setupState.syncSubmissions()
     expect(wrapper.text()).toContain('Sélectionnez')
-    setupState.isSaving = true
-    setupState.isDownloadingClaimTemplate = true
     await setupState.saveConfiguration()
     await setupState.downloadClaimTemplate()
 

@@ -31,6 +31,9 @@ export const AgencyGcFormsIntegrationConfigMessages = defineGcsExtensionMessages
     "deleted": "Credential deleted.",
     "failed": "Credential action failed.",
     "noCredentials": "No credentials have been saved yet.",
+    "credentialsLoadFailed": "Credentials could not be loaded.",
+    "retryCredentials": "Retry loading credentials",
+    "loadingCredentials": "Loading credentials…",
     "remove": "Remove"
   },
   "fr": {
@@ -63,6 +66,9 @@ export const AgencyGcFormsIntegrationConfigMessages = defineGcsExtensionMessages
     "deleted": "Identifiant d’authentification supprimé.",
     "failed": "Échec de l’action sur l’identifiant d’authentification.",
     "noCredentials": "Aucun identifiant d’authentification n’a encore été enregistré.",
+    "credentialsLoadFailed": "Impossible de charger les identifiants d’authentification.",
+    "retryCredentials": "Réessayer de charger les identifiants d’authentification",
+    "loadingCredentials": "Chargement des identifiants d’authentification…",
     "remove": "Supprimer"
   }
 })

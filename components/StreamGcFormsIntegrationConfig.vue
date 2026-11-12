@@ -2,6 +2,7 @@
 import { StreamGcFormsIntegrationConfigMessages } from '../i18n/StreamGcFormsIntegrationConfig'
 
 import { computed, h, onMounted, ref, watch } from 'vue'
+import { useGcFormsRequest } from './useGcFormsRequest'
 import type { Ref } from 'vue'
 import {
   FetchResponseError,
@@ -62,7 +63,7 @@ const {
 const config = defineModel<GcsExtensionJsonConfig>({ required: true })
 const { locale, t: tLocal } = useExtensionI18n(StreamGcFormsIntegrationConfigMessages)
 const toast = useExtensionToast()
-const api = useExtensionApi(extension.key)
+const api = computed(() => useExtensionApi(extension.key))
 const hostApi = useHostApi()
 
 const isFrench = computed(() => locale.value === 'fr')
@@ -78,26 +79,57 @@ const withoutSyntheticFinalMapping = (value: GcsGcFormsStreamConfig): GcsGcForms
 const localConfig: Ref<GcsGcFormsStreamConfig> = ref(withoutSyntheticFinalMapping(parseGcFormsStreamConfig(config.value)))
 const fieldCatalog: Ref<GcFormsFieldCatalogItem[]> = ref([])
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
-const isLoadingCredentials: Ref<boolean> = ref(false)
-const isRefreshingTemplate: Ref<boolean> = ref(false)
-const isDownloadingClaimTemplate: Ref<boolean> = ref(false)
-const isSyncing: Ref<boolean> = ref(false)
-const isSaving: Ref<boolean> = ref(false)
+const credentialRequest = useGcFormsRequest()
+const templateRequest = useGcFormsRequest()
+const downloadRequest = useGcFormsRequest()
+const saveRequest = useGcFormsRequest()
+const syncRequest = useGcFormsRequest<GcFormsSyncResult>()
+const failureRequest = useGcFormsRequest()
+const matchRequest = useGcFormsRequest()
+const isLoadingCredentials = credentialRequest.isPending
+const isRefreshingTemplate = templateRequest.isPending
+const isDownloadingClaimTemplate = downloadRequest.isPending
+const isSyncing = syncRequest.isPending
+const isSaving = saveRequest.isPending
+const isLoadingMaterializationFailures = failureRequest.isPending
 const isSyncModalOpen: Ref<boolean> = ref(false)
-const isLoadingMaterializationFailures: Ref<boolean> = ref(false)
-const resolvingSubmissionId: Ref<string | null> = ref(null)
-const matchSearchTerm: Ref<string> = ref('')
 const failedMaterializations: Ref<GcFormsMaterializationFailureItem[]> = ref([])
 const agreementOptions: Ref<GcFormsAgreementOption[]> = ref([])
-const selectedMaterializationFailure: Ref<GcFormsMaterializationFailureItem | null> = ref(null)
-const selectedMatchId: Ref<string> = ref('')
-const isMatchModalOpen: Ref<boolean> = ref(false)
+type MatchSession = { submission: GcFormsMaterializationFailureItem; selectedId: string; search: string }
+type MatchState = { kind: 'closed' } | { kind: 'editing'; session: MatchSession } | { kind: 'resolving'; session: MatchSession; request: AbortController }
+const matchState: Ref<MatchState> = ref({ kind: 'closed' })
+const selectedMaterializationFailure = computed(() => matchState.value.kind === 'closed' ? null : matchState.value.session.submission)
+const selectedMatchId = computed({
+  get: () => matchState.value.kind === 'closed' ? '' : matchState.value.session.selectedId,
+  set: (value: string) => {
+    if (matchState.value.kind !== 'editing') return
+    matchState.value.session.selectedId = value
+    matchRequest.reset()
+  }
+})
+const matchSearchTerm = computed({
+  get: () => matchState.value.kind === 'closed' ? '' : matchState.value.session.search,
+  set: (value: string) => { if (matchState.value.kind === 'editing') matchState.value.session.search = value }
+})
+const isMatchModalOpen = computed({
+  get: () => matchState.value.kind !== 'closed',
+  set: (value: boolean) => {
+    if (value || matchState.value.kind !== 'editing') return
+    matchState.value = { kind: 'closed' }
+    matchRequest.reset()
+  }
+})
+const resolvingSubmissionId = computed(() => matchState.value.kind === 'resolving' ? matchState.value.session.submission.submissionId : null)
 const selectedTab: Ref<string> = ref('fundingclaimreconcile')
-const syncResult: Ref<GcFormsSyncResult | null> = ref(null)
-const syncErrorState: Ref<{ key: 'credentialRequired' | 'failed' } | { message: string } | null> = ref(null)
+const syncResult = computed(() => syncRequest.state.value.kind === 'success' ? syncRequest.state.value.value : null)
+type SyncError = { key: 'credentialRequired' | 'failed' } | { message: string }
+const prerequisiteError: Ref<SyncError | null> = ref(null)
 const syncError = computed(() => {
-  const error = syncErrorState.value
-  return error === null ? '' : 'key' in error ? tLocal(error.key) : error.message
+  const state = syncRequest.state.value
+  const error = prerequisiteError.value ?? (state.kind === 'error' ? state.error : null)
+  if (error === null || typeof error !== 'object') return ''
+  if ('key' in error && (error.key === 'credentialRequired' || error.key === 'failed')) return tLocal(error.key)
+  return 'message' in error && typeof error.message === 'string' ? error.message : ''
 })
 const templateShapeChanged: Ref<boolean> = ref(localConfig.value.templateShapeChanged)
 
@@ -568,10 +600,8 @@ const firstFailureIssueMessage = (submission: GcFormsMaterializationFailureItem)
 }
 
 const openMatchModal = (submission: GcFormsMaterializationFailureItem) => {
-  selectedMaterializationFailure.value = submission
-  selectedMatchId.value = submission.selectedAgreementId ?? ''
-  matchSearchTerm.value = ''
-  isMatchModalOpen.value = true
+  matchRequest.reset()
+  matchState.value = { kind: 'editing', session: { submission, selectedId: submission.selectedAgreementId ?? '', search: '' } }
 }
 
 /** Updates, creates, or removes the configured source mapping for a claim field. */
@@ -645,107 +675,85 @@ const apiErrorMessage = (error: unknown): string | null => {
 }
 
 const errorDescription = (error: unknown) => apiErrorMessage(error) ?? (() => h('span', tLocal('failed')))
+const matchError = computed(() => matchState.value.kind !== 'closed' && matchRequest.state.value.kind === 'error'
+  ? apiErrorMessage(matchRequest.state.value.error) ?? tLocal('matchFailed') : null)
 
-const postJson = async (path: string, body?: JsonValue | Record<string, unknown>): Promise<unknown> => {
-  const requestOptions = { headers: { 'accept-language': activeDiagnosticLocale() } }
-  return body === undefined
-    ? await api.post(path, undefined, requestOptions)
-    : await api.post(path, body, requestOptions)
+const postJson = async (path: string, body?: JsonValue | Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
+  const requestOptions = { headers: { 'accept-language': activeDiagnosticLocale() }, signal }
+  return await api.value.post(path, body, requestOptions)
 }
 
-const getJson = async (path: string): Promise<unknown> => {
-  return await api.get(path, { headers: { 'accept-language': activeDiagnosticLocale() } })
-}
+const getJson = async (path: string, signal?: AbortSignal): Promise<unknown> =>
+  await api.value.get(path, { headers: { 'accept-language': activeDiagnosticLocale() }, signal })
 
 const loadCredentials = async () => {
-  if (!agencyId) {
-    credentials.value = []
-    return
-  }
-
+  if (!agencyId) { credentialRequest.reset(); credentials.value = []; return }
+  const owner = credentialRequest.begin()
+  if (!owner) return
+  const contextAgency = agencyId
   try {
-    isLoadingCredentials.value = true
-    const response = await getJson(`/agencies/${agencyId}/credentials`) as { items?: GcFormsCredentialSummary[] }
+    const response = await getJson(`/agencies/${contextAgency}/credentials`, owner.signal) as { items?: GcFormsCredentialSummary[] }
+    if (!credentialRequest.owns(owner)) return
     credentials.value = response.items ?? []
-  } catch {
+    credentialRequest.succeed(owner, undefined)
+  } catch (error) {
+    if (!credentialRequest.owns(owner)) return
     credentials.value = []
-  } finally {
-    isLoadingCredentials.value = false
+    credentialRequest.fail(owner, error)
   }
 }
 
 /** Refreshes the stored template catalog through the selected credential and reports any failure. */
 const refreshTemplate = async () => {
-  if (selectedCredentialMissing.value) {
-    return
-  }
-
+  if (selectedCredentialMissing.value || templateRequest.isPending.value) return
+  const owner = templateRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
   try {
-    isRefreshingTemplate.value = true
-    const response = await postJson(`/streams/${streamId}/template`) as { fieldCatalog?: unknown }
+    const response = await postJson(`/streams/${contextStream}/template`, undefined, owner.signal) as { fieldCatalog?: unknown }
+    if (!templateRequest.owns(owner)) return
     fieldCatalog.value = parseFieldCatalog(response.fieldCatalog)
     templateShapeChanged.value = false
+    templateRequest.succeed(owner, undefined)
   } catch (error: unknown) {
-    toast.add({
-      title: () => h('span', tLocal('refreshTemplateFailed')),
-      description: errorDescription(error),
-      color: 'error'
-    })
-  } finally {
-    isRefreshingTemplate.value = false
+    if (!templateRequest.fail(owner, error)) return
+    toast.add({ title: () => h('span', tLocal('refreshTemplateFailed')), description: errorDescription(error), color: 'error' })
   }
 }
 
-/** Persists the current stream extension configuration with a bounded request timeout. */
+/** Persists the captured stream configuration with a bounded request timeout. */
 const saveConfiguration = async () => {
-  if (isSaving.value) {
-    return
-  }
-
-  const controller = new AbortController()
-  const timeout = globalThis.setTimeout(() => controller.abort(), 15000)
-
+  if (isSaving.value) return
+  const owner = saveRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
+  const timeout = globalThis.setTimeout(() => owner.abort(), 15000)
   try {
-    isSaving.value = true
-    await hostApi.patch(`/api/extensions/streams/${streamId}`, {
-      extensionKey: extension.key,
-      enabled: streamEnabled,
-      config: config.value
-    }, {
-      signal: controller.signal
-    })
-
-    toast.add({
-      title: () => h('span', tLocal('saved')),
-      description: () => h('span', tLocal('savedDescription')),
-      color: 'success'
-    })
+    await hostApi.patch(`/api/extensions/streams/${contextStream}`, {
+      extensionKey: extension.key, enabled: streamEnabled, config: config.value
+    }, { signal: owner.signal })
+    if (!saveRequest.succeed(owner, undefined)) return
+    toast.add({ title: () => h('span', tLocal('saved')), description: () => h('span', tLocal('savedDescription')), color: 'success' })
   } catch (error: unknown) {
+    if (!saveRequest.fail(owner, error)) return
     const description = error instanceof DOMException && error.name === 'AbortError'
-      ? () => h('span', tLocal('saveTimedOut'))
-      : errorDescription(error)
-    toast.add({
-      title: () => h('span', tLocal('saveFailed')),
-      description,
-      color: 'error'
-    })
-  } finally {
-    globalThis.clearTimeout(timeout)
-    isSaving.value = false
-  }
+      ? () => h('span', tLocal('saveTimedOut')) : errorDescription(error)
+    toast.add({ title: () => h('span', tLocal('saveFailed')), description, color: 'error' })
+  } finally { globalThis.clearTimeout(timeout) }
 }
 
 const loadStoredTemplate = async () => {
+  const owner = templateRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
   try {
-    const response = await getJson(`/streams/${streamId}/template`) as {
-      fieldCatalog?: GcFormsFieldCatalogItem[]
-      templateShapeChanged?: boolean
-    }
+    const response = await getJson(`/streams/${contextStream}/template`, owner.signal) as { fieldCatalog?: unknown; templateShapeChanged?: boolean }
+    if (!templateRequest.owns(owner)) return
     fieldCatalog.value = parseFieldCatalog(response.fieldCatalog)
     templateShapeChanged.value = response.templateShapeChanged === true
+    templateRequest.succeed(owner, undefined)
   } catch (error: unknown) {
-    fieldCatalog.value = []
-    templateShapeChanged.value = false
+    templateRequest.fail(owner, error)
   }
 }
 
@@ -760,97 +768,108 @@ const downloadJsonFile = (fileName: string, value: unknown) => {
 }
 
 const downloadClaimTemplate = async () => {
-  if (isDownloadingClaimTemplate.value) {
-    return
-  }
-
+  if (isDownloadingClaimTemplate.value) return
+  const owner = downloadRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
   try {
-    isDownloadingClaimTemplate.value = true
-    const template = await getJson(`/streams/${streamId}/claim-template`)
-    downloadJsonFile(`gcs-claim-form-stream-${streamId}.json`, template)
+    const template = await getJson(`/streams/${contextStream}/claim-template`, owner.signal)
+    if (!downloadRequest.owns(owner)) return
+    downloadJsonFile(`gcs-claim-form-stream-${contextStream}.json`, template)
+    downloadRequest.succeed(owner, undefined)
   } catch (error: unknown) {
-    toast.add({
-      title: () => h('span', tLocal('downloadClaimFormFailed')),
-      description: errorDescription(error),
-      color: 'error'
-    })
-  } finally {
-    isDownloadingClaimTemplate.value = false
+    if (!downloadRequest.fail(owner, error)) return
+    toast.add({ title: () => h('span', tLocal('downloadClaimFormFailed')), description: errorDescription(error), color: 'error' })
   }
 }
 
-/** Synchronizes configured GC Forms submissions and refreshes outstanding materialization failures. */
+/** Synchronizes captured stream submissions and refreshes its failure queue. */
 const syncSubmissions = async () => {
-  if (selectedCredentialMissing.value) {
-    syncErrorState.value = { key: 'credentialRequired' }
-    return
-  }
-
+  if (isSyncing.value) return
+  if (selectedCredentialMissing.value) { prerequisiteError.value = { key: 'credentialRequired' }; return }
+  const owner = syncRequest.begin()
+  if (!owner) return
+  prerequisiteError.value = null
+  const contextStream = streamId
   try {
-    isSyncing.value = true
-    syncErrorState.value = null
-    syncResult.value = null
-    syncResult.value = await postJson(`/streams/${streamId}/sync`) as GcFormsSyncResult
+    const result = await postJson(`/streams/${contextStream}/sync`, undefined, owner.signal) as GcFormsSyncResult
+    if (!syncRequest.owns(owner)) return
     await refreshMaterializationFailures()
+    syncRequest.succeed(owner, result)
   } catch (error: unknown) {
+    if (!syncRequest.owns(owner)) return
     const message = apiErrorMessage(error)
-    syncErrorState.value = message === null ? { key: 'failed' } : { message }
-    try {
-      await loadStoredTemplate()
-    } catch {
-      // Keep the original sync error visible in the modal.
-    }
-  } finally {
-    isSyncing.value = false
+    syncRequest.fail(owner, message === null ? { key: 'failed' } : { message })
+    await loadStoredTemplate()
   }
 }
 
-const openSyncModal = async () => {
-  isSyncModalOpen.value = true
-  await syncSubmissions()
-}
-
-const reviewFailedMaterializations = () => {
-  selectedTab.value = 'failed-materializations'
-  isSyncModalOpen.value = false
-}
+const openSyncModal = async () => { isSyncModalOpen.value = true; await syncSubmissions() }
+const reviewFailedMaterializations = () => { selectedTab.value = 'failed-materializations'; isSyncModalOpen.value = false }
 
 const refreshMaterializationFailures = async () => {
+  const owner = failureRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
   try {
-    isLoadingMaterializationFailures.value = true
-    const response = await getJson(`/streams/${streamId}/materialization-failures`) as {
-      items?: GcFormsMaterializationFailureItem[]
-      agreements?: GcFormsAgreementOption[]
+    const response = await getJson(`/streams/${contextStream}/materialization-failures`, owner.signal) as {
+      items?: GcFormsMaterializationFailureItem[]; agreements?: GcFormsAgreementOption[]
     }
+    if (!failureRequest.owns(owner)) return
     failedMaterializations.value = response.items ?? []
     agreementOptions.value = response.agreements ?? []
-  } catch {
+    failureRequest.succeed(owner, undefined)
+  } catch (error) {
+    if (!failureRequest.owns(owner)) return
     failedMaterializations.value = []
     agreementOptions.value = []
-  } finally {
-    isLoadingMaterializationFailures.value = false
+    failureRequest.fail(owner, error)
   }
 }
 
-/** Assigns the selected agreement to a failed submission and refreshes the failure queue. */
+/** Assigns the captured agreement without settling a replacement match session. */
 const resolveMaterializationFailure = async () => {
-  const submission = selectedMaterializationFailure.value
-  if (!submission || !selectedMatchId.value) {
-    return
-  }
-
+  if (matchState.value.kind !== 'editing' || !matchState.value.session.selectedId) return
+  const session = matchState.value.session
+  const owner = matchRequest.begin()
+  if (!owner) return
+  const contextStream = streamId
+  matchState.value = { kind: 'resolving', session, request: owner }
   try {
-    resolvingSubmissionId.value = submission.submissionId
-    await postJson(`/streams/${streamId}/materialization-failures/${submission.submissionId}/agreement`, { agreementId: selectedMatchId.value })
+    await postJson(`/streams/${contextStream}/materialization-failures/${session.submission.submissionId}/agreement`, { agreementId: session.selectedId }, owner.signal)
+    if (!matchRequest.owns(owner)) return
     await refreshMaterializationFailures()
-    isMatchModalOpen.value = false
-    selectedMaterializationFailure.value = null
-    selectedMatchId.value = ''
+    if (!matchRequest.succeed(owner, undefined)) return
+    matchState.value = { kind: 'closed' }
   } catch (error: unknown) {
-  } finally {
-    resolvingSubmissionId.value = null
+    if (!matchRequest.fail(owner, error)) return
+    matchState.value = { kind: 'editing', session }
   }
 }
+
+watch(() => [extension.key, streamId, agencyId], () => {
+  for (const request of [credentialRequest, templateRequest, downloadRequest, saveRequest, syncRequest, failureRequest, matchRequest]) request.reset()
+  credentials.value = []
+  fieldCatalog.value = []
+  templateShapeChanged.value = false
+  failedMaterializations.value = []
+  agreementOptions.value = []
+  prerequisiteError.value = null
+  matchState.value = { kind: 'closed' }
+  isSyncModalOpen.value = false
+  void Promise.allSettled([loadCredentials(), loadStoredTemplate(), refreshMaterializationFailures()])
+}, { flush: 'sync' })
+
+// Endpoints use saved Stream configuration; a draft credential change must not accept earlier feedback.
+watch(() => localConfig.value.credentialId, () => {
+  templateRequest.reset()
+  fieldCatalog.value = []
+  templateShapeChanged.value = false
+  syncRequest.reset()
+  downloadRequest.reset()
+  prerequisiteError.value = null
+  isSyncModalOpen.value = false
+}, { flush: 'sync' })
 
 onMounted(async () => {
   await Promise.allSettled([
@@ -889,6 +908,11 @@ onMounted(async () => {
           :loading="isLoadingMaterializationFailures"
           @click="refreshMaterializationFailures" />
       </div>
+      <ExtensionAlert
+        v-if="failureRequest.state.value.kind === 'error'"
+        role="alert"
+        color="error"
+        :title="tLocal('failuresLoadFailed')" />
       <ExtensionResourceLayout
         v-model:search="failedMaterializationSearch"
         v-model:status-filter="failedMaterializationStatusFilter"
@@ -897,10 +921,12 @@ onMounted(async () => {
         :columns="failedMaterializationColumns"
         :total-records="filteredFailedMaterializations.length"
         :loading="isLoadingMaterializationFailures"
+        @retry="refreshMaterializationFailures"
+        :request-status="failureRequest.state.value.kind === 'error' ? 'error' : isLoadingMaterializationFailures ? 'pending' : 'success'"
         :show-button="false"
         :show-column-toggle="false">
         <template #empty>
-          <div class="p-4 text-sm text-muted">
+          <div v-if="failureRequest.state.value.kind === 'success'" class="p-4 text-sm text-muted">
             {{ tLocal('noFailedMaterializations') }}
           </div>
         </template>
@@ -988,6 +1014,17 @@ onMounted(async () => {
           </p>
         </div>
       </div>
+
+      <ExtensionAlert v-if="credentialRequest.state.value.kind === 'error'" role="alert" color="error" :title="tLocal('credentialsLoadFailed')">
+        <template #actions>
+          <ExtensionButton :label="tLocal('retryCredentials')" @click="loadCredentials" />
+        </template>
+      </ExtensionAlert>
+      <ExtensionAlert v-if="templateRequest.state.value.kind === 'error'" role="alert" color="error" :title="tLocal('templateLoadFailed')">
+        <template #actions>
+          <ExtensionButton :label="tLocal('retryTemplate')" @click="loadStoredTemplate" />
+        </template>
+      </ExtensionAlert>
 
       <ExtensionFormField :label="tLocal('credential')" :help="tLocal('credentialRequired')" class="max-w-xl" data-ui-target="extension.gcs-gcforms-integration.stream-gc-forms-integration-config.local-config.credential-id">
         <ExtensionSelectMenu
@@ -1127,6 +1164,7 @@ onMounted(async () => {
       :dismissible="resolvingSubmissionId === null">
       <template #body>
         <div v-if="selectedMaterializationFailure" class="space-y-4">
+          <ExtensionAlert v-if="matchError" role="alert" color="error" :title="tLocal('matchFailed')" :description="matchError" />
           <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <div class="text-xs font-medium text-muted">

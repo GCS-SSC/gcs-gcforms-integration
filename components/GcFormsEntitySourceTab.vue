@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { GcFormsEntitySourceTabStatusMessages, GcFormsEntitySourceTabMessages } from '../i18n/GcFormsEntitySourceTab'
 
-import { computed, ref, watch } from 'vue'
-import type { Ref } from 'vue'
+import { computed, watch } from 'vue'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import type { GcsExtensionJsonConfig, GcsExtensionRbacRequirement } from '@gcs-ssc/extensions'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
@@ -13,6 +12,7 @@ import {
   useExtensionI18n
 } from '@gcs-ssc/extensions/ui'
 import { buildGcFormsEntitySourceEndpoint } from './gcforms-entity-source-tab'
+import { useGcFormsRequest } from './useGcFormsRequest'
 
 const {
   extensionKey,
@@ -38,20 +38,20 @@ interface LinkedSubmission {
   mapped_values?: unknown
 }
 
-interface LoadError {
-  statusCode: number | null
-}
-
 interface MappedDisplayRow {
   id: string
   label: string
   value: string
 }
 
-const items: Ref<LinkedSubmission[]> = ref([])
-const isLoading: Ref<boolean> = ref(true)
-const loadError: Ref<LoadError | null> = ref(null)
-let activeRequestVersion = 0
+const request = useGcFormsRequest<LinkedSubmission[]>()
+const items = computed(() => request.state.value.kind === 'success' ? request.state.value.value : [])
+const isLoading = request.isPending
+const loadError = computed(() => {
+  if (request.state.value.kind !== 'error') return null
+  const error = request.state.value.error
+  return { statusCode: error instanceof FetchResponseError ? error.response.status : null }
+})
 
 const endpoint = computed(() => buildGcFormsEntitySourceEndpoint(context))
 const localeCode = computed(() => locale.value === 'fr' ? 'fr-CA' : 'en-CA')
@@ -158,31 +158,20 @@ const errorDescription = computed(() => loadError.value?.statusCode === 403
   : tLocal('errorDefault'))
 
 const refresh = async () => {
-  const requestVersion = ++activeRequestVersion
   const requestedEndpoint = endpoint.value
+  const pending = request.begin()
+  if (!pending) return
   try {
-    isLoading.value = true
-    loadError.value = null
-    if (!requestedEndpoint) {
-      items.value = []
-      return
-    }
-
-    const payload = await api.get<{ items?: LinkedSubmission[] }>(requestedEndpoint)
-    if (requestVersion !== activeRequestVersion) return
-    items.value = payload.items ?? []
+    const payload = requestedEndpoint
+      ? await api.get<{ items?: LinkedSubmission[] }>(requestedEndpoint, { signal: pending.signal })
+      : { items: [] }
+    request.succeed(pending, payload.items ?? [])
   } catch (error: unknown) {
-    if (requestVersion !== activeRequestVersion) return
-    items.value = []
-    loadError.value = {
-      statusCode: error instanceof FetchResponseError ? error.response.status : null
-    }
-  } finally {
-    if (requestVersion === activeRequestVersion) isLoading.value = false
+    request.fail(pending, error)
   }
 }
 
-watch(endpoint, () => { void refresh() }, { immediate: true })
+watch(endpoint, () => { void refresh() }, { immediate: true, flush: 'sync' })
 
 const hasItems = computed(() => items.value.length > 0)
 </script>

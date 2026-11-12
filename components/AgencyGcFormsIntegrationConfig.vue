@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { AgencyGcFormsIntegrationConfigMessages } from '../i18n/AgencyGcFormsIntegrationConfig'
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useGcFormsRequest } from './useGcFormsRequest'
 import type { Ref } from 'vue'
 import {
   type GcsExtensionJsonConfig,
@@ -26,9 +27,12 @@ import {
   type GcsGcFormsAgencyConfig
 } from '../shared/gcforms'
 
-const { agencyId, extension } = defineProps<{
+const { agencyId, extension, enabled = true, disabled = false, readOnly = false } = defineProps<{
   extension: GcsResolvedExtension
   agencyId: string
+  enabled?: boolean
+  disabled?: boolean
+  readOnly?: boolean
 }>()
 
 const config = defineModel<GcsExtensionJsonConfig>({ required: true })
@@ -36,17 +40,26 @@ const { locale, t: tLocal } = useExtensionI18n(AgencyGcFormsIntegrationConfigMes
 
 const localConfig: Ref<GcsGcFormsAgencyConfig> = ref(parseGcFormsAgencyConfig(config.value))
 const credentials: Ref<GcFormsCredentialSummary[]> = ref([])
-const credentialForm: Ref<Partial<{
-  id: string
+const isReadOnly = computed(() => disabled || readOnly)
+const credentialActionsDisabled = computed(() => isReadOnly.value || !enabled)
+type CredentialDraft = Partial<{
   name_en: string
   name_fr: string
   keyId: string
   userId: string
   formId: string
   key: string
-}> | null> = ref(null)
-const isLoadingCredentials: Ref<boolean> = ref(false)
-const isSavingCredential: Ref<boolean> = ref(false)
+}>
+type CredentialEditorState =
+  | { kind: 'closed' }
+  | { kind: 'create'; form: CredentialDraft & { id?: undefined } }
+  | { kind: 'edit'; form: CredentialDraft & { id: string } }
+const credentialEditor: Ref<CredentialEditorState> = ref({ kind: 'closed' })
+const credentialForm = computed(() => credentialEditor.value.kind === 'closed' ? null : credentialEditor.value.form)
+const credentialRead = useGcFormsRequest()
+const credentialWrite = useGcFormsRequest()
+const isLoadingCredentials = credentialRead.isPending
+const isSavingCredential = credentialWrite.isPending
 const statusMessageKey: Ref<'saved' | 'failed' | 'deleted' | null> = ref(null)
 const statusMessage = computed(() => statusMessageKey.value ? tLocal(statusMessageKey.value) : '')
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value === 'fr' ? 'fr-CA' : 'en-CA', { dateStyle: 'medium', timeStyle: 'short' }))
@@ -81,79 +94,118 @@ watch(config, value => {
 })
 
 const api = useExtensionApi(extension.key)
-const credentialEndpoint = `/agencies/${agencyId}/credentials`
+const credentialEndpoint = computed(() => `/agencies/${agencyId}/credentials`)
 
 const refreshCredentials = async () => {
+  const request = credentialRead.begin()
+  if (!request) return
+  const endpoint = credentialEndpoint.value
   try {
-    isLoadingCredentials.value = true
-    const payload = await api.get<{ items?: GcFormsCredentialSummary[] }>(credentialEndpoint)
+    const payload = await api.get<{ items?: GcFormsCredentialSummary[] }>(endpoint, { signal: request.signal })
+    if (!credentialRead.owns(request)) return
     credentials.value = payload.items ?? []
-  } catch {
+    credentialRead.succeed(request, undefined)
+  } catch (error) {
+    if (!credentialRead.fail(request, error)) return
     credentials.value = []
-  } finally {
-    isLoadingCredentials.value = false
   }
 }
 
 const newCredential = () => {
-  credentialForm.value = {}
+  if (credentialActionsDisabled.value) return
+  credentialEditor.value = { kind: 'create', form: {} }
 }
 
 const editCredential = (credential: GcFormsCredentialSummary) => {
-  credentialForm.value = {
-    id: credential.id,
-    name_en: credential.name_en,
-    name_fr: credential.name_fr,
-    keyId: credential.keyId,
-    userId: credential.userId,
-    formId: credential.formId,
-    key: ''
+  if (credentialActionsDisabled.value) return
+  credentialEditor.value = {
+    kind: 'edit',
+    form: {
+      id: credential.id,
+      name_en: credential.name_en,
+      name_fr: credential.name_fr,
+      keyId: credential.keyId,
+      userId: credential.userId,
+      formId: credential.formId,
+      key: ''
+    }
   }
 }
 
 /** Creates or updates the credential being edited, then refreshes the agency credential list. */
 const saveCredential = async () => {
   const form = credentialForm.value
-  if (!form) {
-    return
-  }
-
+  if (!form || credentialActionsDisabled.value || credentialWrite.isPending.value) return
+  const request = credentialWrite.begin()
+  if (!request) return
+  const endpoint = credentialEndpoint.value
+  const submittedDraft = JSON.stringify(form)
+  const submittedKey = form.key
+  credentialRead.reset()
+  statusMessageKey.value = null
   try {
-    isSavingCredential.value = true
-    statusMessageKey.value = null
     const body = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== ''))
+    let savedId: string
     if (form.id) {
-      await api.patch(`${credentialEndpoint}/${encodeURIComponent(form.id)}`, body)
+      savedId = form.id
+      await api.patch(`${endpoint}/${encodeURIComponent(savedId)}`, body, { signal: request.signal })
     } else {
-      await api.post(credentialEndpoint, form)
+      const response = await api.post<{ item: GcFormsCredentialSummary }>(endpoint, { ...form }, { signal: request.signal })
+      savedId = response.item.id
     }
-    credentialForm.value = null
-    statusMessageKey.value = 'saved'
+    if (!credentialWrite.owns(request)) return
+    if (credentialForm.value === form && JSON.stringify(form) === submittedDraft) {
+      credentialEditor.value = { kind: 'closed' }
+      statusMessageKey.value = 'saved'
+    } else if (credentialForm.value === form) {
+      credentialEditor.value = {
+        kind: 'edit',
+        form: { ...form, id: savedId, key: form.key === submittedKey ? '' : form.key }
+      }
+    }
     await refreshCredentials()
-  } catch {
-    statusMessageKey.value = 'failed'
-  } finally {
-    isSavingCredential.value = false
+    credentialWrite.succeed(request, undefined)
+  } catch (error) {
+    if (!credentialWrite.fail(request, error)) return
+    if (credentialForm.value === form) statusMessageKey.value = 'failed'
   }
 }
 
 const deleteCredential = async (credentialId: string) => {
+  if (credentialActionsDisabled.value || credentialWrite.isPending.value) return
+  const request = credentialWrite.begin()
+  if (!request) return
+  const endpoint = credentialEndpoint.value
+  credentialRead.reset()
+  statusMessageKey.value = null
   try {
-    statusMessageKey.value = null
-    await api.delete(`${credentialEndpoint}/${encodeURIComponent(credentialId)}`)
+    await api.delete(`${endpoint}/${encodeURIComponent(credentialId)}`, { signal: request.signal })
+    if (!credentialWrite.owns(request)) return
     statusMessageKey.value = 'deleted'
     await refreshCredentials()
-  } catch {
-    statusMessageKey.value = 'failed'
+    credentialWrite.succeed(request, undefined)
+  } catch (error) {
+    if (credentialWrite.fail(request, error)) statusMessageKey.value = 'failed'
   }
 }
 
 const displayName = (credential: GcFormsCredentialSummary): string =>
   locale.value === 'fr' ? credential.name_fr : credential.name_en
 
-onMounted(async () => {
-  await refreshCredentials()
-})
+watch(credentialActionsDisabled, () => {
+  credentialWrite.reset()
+  credentialEditor.value = { kind: 'closed' }
+  statusMessageKey.value = null
+}, { flush: 'sync' })
+
+watch(() => agencyId, () => {
+  credentialRead.reset()
+  credentialWrite.reset()
+  credentials.value = []
+  credentialEditor.value = { kind: 'closed' }
+  statusMessageKey.value = null
+  void refreshCredentials()
+}, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
@@ -169,10 +221,10 @@ onMounted(async () => {
 
     <div class="grid gap-4 md:grid-cols-2">
       <ExtensionFormField :label="tLocal('apiUrl')" :description="tLocal('apiUrlHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.api-url">
-        <ExtensionInput v-model="localConfig.apiUrl" :placeholder="DEFAULT_GCFORMS_API_URL" />
+        <ExtensionInput v-model="localConfig.apiUrl" :disabled="isReadOnly" :placeholder="DEFAULT_GCFORMS_API_URL" />
       </ExtensionFormField>
       <ExtensionFormField :label="tLocal('identityProviderUrl')" :description="tLocal('identityProviderUrlHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.identity-provider-url">
-        <ExtensionInput v-model="localConfig.identityProviderUrl" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
+        <ExtensionInput v-model="localConfig.identityProviderUrl" :disabled="isReadOnly" :placeholder="DEFAULT_GCFORMS_IDP_URL" />
       </ExtensionFormField>
       <div class="md:col-span-2">
         <ExtensionFormField
@@ -181,6 +233,7 @@ onMounted(async () => {
           :description="tLocal('submissionStatusHelp')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.submission-status-id">
           <ExtensionStatusSelect
             v-model="localConfig.submissionStatusId"
+            :disabled="isReadOnly"
             :agency-id="agencyId"
             :draft-only="true" />
         </ExtensionFormField>
@@ -188,6 +241,7 @@ onMounted(async () => {
       <div class="md:col-span-2">
         <ExtensionCheckbox
           v-model="localConfig.confirmSubmissions"
+          :disabled="isReadOnly"
           :label="tLocal('confirmSubmissions')" data-ui-target="extension.gcs-gcforms-integration.agency-gc-forms-integration-config.local-config.confirm-submissions" />
       </div>
     </div>
@@ -207,6 +261,8 @@ onMounted(async () => {
       </p>
     </div>
     <ExtensionButton
+      v-if="!isReadOnly"
+      :disabled="credentialActionsDisabled"
       icon="i-lucide-plus"
       color="primary"
       variant="outline"
@@ -214,10 +270,17 @@ onMounted(async () => {
       :label="tLocal('newCredential')"
       @click="newCredential" />
 
-    <div v-if="credentials.length === 0 && !isLoadingCredentials" class="text-sm text-muted">
+    <div v-if="credentialRead.state.value.kind === 'error'" role="alert" class="space-y-2">
+      <p>{{ tLocal('credentialsLoadFailed') }}</p>
+      <ExtensionButton :label="tLocal('retryCredentials')" @click="refreshCredentials" />
+    </div>
+    <div v-else-if="isLoadingCredentials" role="status" class="text-sm text-muted">
+      {{ tLocal('loadingCredentials') }}
+    </div>
+    <div v-else-if="credentialRead.state.value.kind === 'success' && credentials.length === 0" class="text-sm text-muted">
       {{ tLocal('noCredentials') }}
     </div>
-    <div v-else class="overflow-hidden border-y border-default">
+    <div v-else-if="credentials.length > 0" class="overflow-hidden border-y border-default">
       <table class="w-full text-left text-sm">
         <thead class="bg-muted/40 text-muted">
           <tr>
@@ -261,6 +324,8 @@ onMounted(async () => {
             <td class="px-3 py-2">
               <div class="flex items-center gap-1">
                 <ExtensionButton
+                  v-if="!isReadOnly"
+                  :disabled="credentialActionsDisabled"
                   icon="i-lucide-pencil"
                   color="neutral"
                   variant="ghost"
@@ -269,6 +334,8 @@ onMounted(async () => {
                   :aria-label="tLocal('edit')"
                   @click="editCredential(credential)" />
                 <ExtensionButton
+                  v-if="!isReadOnly"
+                  :disabled="credentialActionsDisabled"
                   icon="i-lucide-trash-2"
                   color="error"
                   variant="ghost"
@@ -312,11 +379,11 @@ onMounted(async () => {
       <ExtensionSaveButton
         :label="tLocal('saveCredential')"
         :loading="isSavingCredential"
-        :disabled="isSavingCredential"
+        :disabled="credentialActionsDisabled || isSavingCredential"
         @click="saveCredential" />
-      <p v-if="statusMessage" class="text-sm text-muted">
-        {{ statusMessage }}
-      </p>
     </div>
+    <p v-if="statusMessage" role="status" class="text-sm text-muted">
+      {{ statusMessage }}
+    </p>
   </section>
 </template>

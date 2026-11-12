@@ -82,6 +82,51 @@ describe('GcFormsEntitySourceTab', () => {
     wrapper.unmount()
   })
 
+  it('aborts requests on context replacement and disposal without accepting stale failures', async () => {
+    const requests: { signal: AbortSignal | null | undefined; resolve: (response: Response) => void }[] = []
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
+      await new Promise<Response>(resolve => { requests.push({ signal: init?.signal, resolve }) }))
+    const wrapper = await mountTab('en', fetchMock)
+
+    await wrapper.setProps({
+      context: { target: 'proponent', applicantRecipientId: '43', agencies: [] }
+    } as never)
+    await flushPromises()
+    expect(requests[0]?.signal?.aborted).toBe(true)
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
+
+    requests[1]?.resolve(jsonResponse({ items: [{ id: 'current', submission_name: 'current-submission', status: 'imported' }] }))
+    await flushPromises()
+    requests[0]?.resolve(jsonResponse({ message: 'Old forbidden' }, 403))
+    await flushPromises()
+    expect(wrapper.text()).toContain('current-submission')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      context: { target: 'proponent', applicantRecipientId: '44', agencies: [] }
+    } as never)
+    await flushPromises()
+    wrapper.unmount()
+    expect(requests[2]?.signal?.aborted).toBe(true)
+    requests[2]?.resolve(jsonResponse({ items: [] }))
+    await flushPromises()
+  })
+
+  it('clears previous evidence without a request when the entity no longer has a supported endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
+      items: [{ id: 'old', submission_name: 'previous-entity-submission', status: 'imported' }]
+    }))
+    const wrapper = await mountTab('en', fetchMock)
+    expect(wrapper.text()).toContain('previous-entity-submission')
+
+    await wrapper.setProps({ context: { target: 'proponent', agencies: [] } } as never)
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('previous-entity-submission')
+    expect(wrapper.find('[data-testid="gcforms-empty-state"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it.each([
     {
       localeId: 'en' as const,

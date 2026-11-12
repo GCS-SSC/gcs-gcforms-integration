@@ -73,16 +73,9 @@ describe('GC Forms extension manifest and entity tab contract', () => {
     expect(helperSource).not.toContain('/entities/')
   })
 
-  it('adds a Claims tab action for downloading the generated claim template', async () => {
-    const source = await readFile(
-      resolve(testDirectory, '../../components/StreamGcFormsIntegrationConfig.vue'),
-      'utf8'
-    )
-
+  it('provides bilingual labels for downloading the generated claim template', () => {
     expect(StreamGcFormsIntegrationConfigMessages.en.downloadClaimForm).toBe('Download claim form')
     expect(StreamGcFormsIntegrationConfigMessages.fr.downloadClaimForm).toBe('Télécharger le formulaire de demande de remboursement')
-    expect(source).toContain('getJson(`/streams/${streamId}/claim-template`)')
-    expect(source).toContain('gcs-claim-form-stream-${streamId}.json')
   })
 
   it('keeps raw decrypted answers and confirmation credentials out of stream list responses', async () => {
