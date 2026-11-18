@@ -81,6 +81,7 @@ const createSchema = async () => {
       egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL,
       egcs_fc_organizationcostcategory bigint NOT NULL,
       egcs_fc_costsubsection varchar(255) NOT NULL,
+      egcs_fc_costsubsection_fr varchar(255) NOT NULL DEFAULT '',
       egcs_fc_description text DEFAULT '' NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )

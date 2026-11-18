@@ -743,7 +743,7 @@ const fetchMatchingClaimLineItemBudgetLineItem = async (
   const costSubsection = normalizedText(submittedCostSubsection)
   const lineItem = normalizedText(submittedLineItem)
 
-  return await db
+  const candidates = db
     .selectFrom('Funding_Case_Agreement_Budget_Line_Item')
     .innerJoin(
       'Funding_Case_Agreement_Budget_Fiscal_Year',
@@ -773,7 +773,6 @@ const fetchMatchingClaimLineItemBudgetLineItem = async (
     .where('Transfer_Payment_Stream_Cost_Category_Line_Item._deleted', '=', false)
     .where('Agency_Cost_Category_Line_Item._deleted', '=', false)
     .where('Agency_Cost_Category._deleted', '=', false)
-    .where(sql<boolean>`lower("Funding_Case_Agreement_Budget_Line_Item"."egcs_fc_costsubsection") = ${costSubsection}`)
     .where(sql<boolean>`(
       lower("Agency_Cost_Category"."egcs_ay_name_en") = ${costCategory}
       OR lower("Agency_Cost_Category"."egcs_ay_name_fr") = ${costCategory}
@@ -782,7 +781,17 @@ const fetchMatchingClaimLineItemBudgetLineItem = async (
       lower("Agency_Cost_Category_Line_Item"."egcs_ay_name_en") = ${lineItem}
       OR lower("Agency_Cost_Category_Line_Item"."egcs_ay_name_fr") = ${lineItem}
     )`)
+
+  const englishMatch = await candidates
+    .where(sql<boolean>`lower("Funding_Case_Agreement_Budget_Line_Item"."egcs_fc_costsubsection") = ${costSubsection}`)
     .executeTakeFirst()
+  if (englishMatch) return englishMatch
+
+  const frenchMatches = await candidates
+    .where(sql<boolean>`lower("Funding_Case_Agreement_Budget_Line_Item"."egcs_fc_costsubsection_fr") = ${costSubsection}`)
+    .limit(2)
+    .execute()
+  return frenchMatches.length === 1 ? frenchMatches[0] : undefined
 }
 
 /** Validates repeated line-item values and optionally associates each valid item with a matching budget line, leaving unmatched associations null. */

@@ -311,6 +311,7 @@ const createSchema = async () => {
       egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL,
       egcs_fc_organizationcostcategory bigint NOT NULL,
       egcs_fc_costsubsection varchar(255) NOT NULL,
+      egcs_fc_costsubsection_fr varchar(255) NOT NULL DEFAULT '',
       egcs_fc_description text NOT NULL,
       _deleted boolean DEFAULT false NOT NULL
     )
@@ -1029,6 +1030,34 @@ describe('GC Forms claim materialization', () => {
       .where('owner_type', '=', 'fundingcaseagreementclaimlineitem')
       .executeTakeFirstOrThrow()
     expect(lineEvidence.value).toEqual(expect.objectContaining({ amount: { amount: '123456', currency: 'CAD' } }))
+  })
+
+  it.each([
+    { scenario: 'links the only French match', english: '', duplicate: false, expected: 701 },
+    { scenario: 'leaves duplicate French matches unallocated', english: '', duplicate: true, expected: null },
+    { scenario: 'prefers an existing English match', english: 'Livraison', duplicate: true, expected: 701 }
+  ])('$scenario for a submitted cost subsection', async ({ english, duplicate, expected }) => {
+    await seedMappings([...claimMappings, ...lineItemMappings])
+    const line = await db.updateTable('Funding_Case_Agreement_Budget_Line_Item')
+      .where('id', '=', '701')
+      .set({ egcs_fc_costsubsection: english, egcs_fc_costsubsection_fr: 'Livraison' })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    if (duplicate) {
+      await db.insertInto('Funding_Case_Agreement_Budget_Line_Item')
+        .values({ ...line, id: '703', egcs_fc_costsubsection: '' })
+        .execute()
+    }
+
+    const submittedLines = lineItemValues.map(value => value.sourceQuestionId === 'submitted_cost_subsection'
+      ? { ...value, value: 'Livraison' }
+      : value)
+    const result = await materialize([...claimMappings, ...lineItemMappings], [...claimValues, ...submittedLines])
+
+    expect(result.status).toBe('created')
+    await expect(db.selectFrom('Funding_Case_Agreement_Claim_Line_Item')
+      .select('egcs_fc_fundingagreementbudgetlineitem')
+      .executeTakeFirstOrThrow()).resolves.toEqual({ egcs_fc_fundingagreementbudgetlineitem: expected })
   })
 
   it('emits full-range canonical money to the host hook', async () => {
