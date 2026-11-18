@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
-import { normalizeGcFormsAnswers } from '../../shared/gcforms'
+import { normalizeGcFormsAnswers, renderGcFormsMappingIssue } from '../../shared/gcforms'
 import { prepareGcFormsSubmissionMaterialization } from '../../server/submission-materialization'
 import type { GcsGcFormsFieldMapping, GcsGcFormsMappedValue } from '../../shared/gcforms'
 import type { GcFormsIntegrationHostDatabase } from '../../server/db'
@@ -1399,6 +1399,24 @@ describe('GC Forms claim materialization', () => {
     })
     expect(createAgreementClaim).toHaveBeenCalledWith(expect.objectContaining({ applicantRecipientId: '301' }))
     expect(await db.selectFrom('extensions.gcs_gcforms_integration_destination_links').select('id').execute()).toEqual([])
+  })
+
+  it('retains a localized approval prerequisite and allows the same submission to be retried', async () => {
+    await seedMappings(claimMappings)
+    const createAgreementClaim = vi.fn(async () => ({ status: 'initial_approval_required' as const }))
+    const result = await materialize(claimMappings, claimValues, '901', 'approval-required', createAgreementClaim)
+
+    expect(result).toMatchObject({ status: 'failed', lineItemIds: [], issues: [
+      expect.objectContaining({ code: 'claim_agreement_initial_approval_required', destinationPath: 'claim.egcs_fc_fundingagreement' })
+    ] })
+    const [issue] = result.issues
+    assert(issue)
+    expect(renderGcFormsMappingIssue(issue, 'en').message).toContain('initial approval workflow')
+    expect(renderGcFormsMappingIssue(issue, 'fr').message).toContain('approbation initiale')
+    expect(await db.selectFrom('extensions.gcs_gcforms_integration_destination_links').select('id').execute()).toEqual([])
+
+    await expect(materialize(claimMappings, claimValues, '901', 'approval-required'))
+      .resolves.toMatchObject({ status: 'created', issues: [] })
   })
 
 })

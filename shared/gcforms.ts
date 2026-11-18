@@ -297,6 +297,7 @@ export const GCFORMS_DIAGNOSTIC_CODES = [
   'claim_period_invalid',
   'agreement_not_found',
   'agreement_override_unavailable',
+  'claim_agreement_initial_approval_required',
   'claim_fiscal_year_invalid',
   'claim_proponent_unavailable',
   'claim_line_item_required_value_missing',

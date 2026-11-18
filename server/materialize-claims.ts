@@ -994,7 +994,7 @@ export const materializeGcFormsClaimSubmission = async (
   const mappingIdsByKey = await fieldMappingIdsByKey(rawDb, input.integrationId)
 
   return await executeGcFormsTransaction(db, async trx => {
-    const created = requireCreatedAgreementClaim(await input.createAgreementClaim({
+    const result = await input.createAgreementClaim({
       agreementId: claimInput.agreementId,
       applicantRecipientId: claimInput.applicantRecipientId,
       streamId: input.streamId,
@@ -1014,7 +1014,15 @@ export const materializeGcFormsClaimSubmission = async (
         amount: lineItem.amount,
         currency: lineItem.currency
       }))
-    }))
+    })
+    if (result.status === 'initial_approval_required') {
+      return {
+        status: 'failed',
+        lineItemIds: [],
+        issues: [createIssue(input.mappings, CLAIM_ENTITY, CLAIM_AGREEMENT_NUMBER_PATH, 'claim_agreement_initial_approval_required')]
+      }
+    }
+    const created = requireCreatedAgreementClaim(result)
     if (created.lineItemIds.length !== preparedLineItems.lineItems.length) {
       throw new Error('Host Claim creation returned an invalid line-item identity list.')
     }
