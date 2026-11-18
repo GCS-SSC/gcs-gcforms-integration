@@ -149,6 +149,7 @@ const fetchBudgetLineItemChoices = async (rawDb: unknown, streamId: string) => {
     .where('Funding_Case_Agreement_Profile.egcs_fc_transferpaymentstream', '=', streamId)
     .where('Funding_Case_Agreement_Profile._deleted', '=', false)
     .where('Funding_Case_Agreement_Budget_Fiscal_Year._deleted', '=', false)
+    .where('Funding_Case_Agreement_Budget_Line_Item.egcs_fc_pendingfunding', '=', false)
     .where('Funding_Case_Agreement_Budget_Line_Item._deleted', '=', false)
     .where('Transfer_Payment_Stream_Cost_Category_Line_Item.egcs_tp_transferpaymentstream', '=', streamId)
     .where('Transfer_Payment_Stream_Cost_Category_Line_Item._deleted', '=', false)

@@ -768,6 +768,7 @@ const fetchMatchingClaimLineItemBudgetLineItem = async (
     .select('Funding_Case_Agreement_Budget_Line_Item.id as id')
     .where('Funding_Case_Agreement_Budget_Line_Item.egcs_fc_fundingagreementbudgetfiscalyear', '=', claim.fiscalYearId)
     .where('Funding_Case_Agreement_Budget_Fiscal_Year.egcs_fc_fundingagreement', '=', claim.agreementId)
+    .where('Funding_Case_Agreement_Budget_Line_Item.egcs_fc_pendingfunding', '=', false)
     .where('Funding_Case_Agreement_Budget_Line_Item._deleted', '=', false)
     .where('Funding_Case_Agreement_Budget_Fiscal_Year._deleted', '=', false)
     .where('Transfer_Payment_Stream_Cost_Category_Line_Item._deleted', '=', false)

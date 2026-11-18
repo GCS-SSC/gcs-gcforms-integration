@@ -77,6 +77,7 @@ export interface GcFormsIntegrationHostDatabase extends ExtensionSecretDatabase 
     egcs_fc_organizationcostcategory: string
     egcs_fc_costsubsection: string
     egcs_fc_costsubsection_fr: Generated<string>
+    egcs_fc_pendingfunding: Generated<boolean>
     egcs_fc_description: string
     _deleted: Generated<boolean>
   }

@@ -77,6 +77,7 @@ const createSchema = async () => {
   `.execute(db)
   await sql`
     CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (
+      egcs_fc_pendingfunding boolean NOT NULL DEFAULT false,
       id bigserial PRIMARY KEY,
       egcs_fc_fundingagreementbudgetfiscalyear bigint NOT NULL,
       egcs_fc_organizationcostcategory bigint NOT NULL,
