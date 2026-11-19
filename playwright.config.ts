@@ -3,6 +3,8 @@ import { defineConfig } from '@playwright/test'
 
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH
   || ['/usr/bin/chromium', '/usr/bin/chromium-browser'].find(path => existsSync(path))
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000'
+
 export default defineConfig({
   reporter: 'list',
   testDir: './tests/e2e',
@@ -10,7 +12,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    baseURL,
+    extraHTTPHeaders: { Origin: new URL(baseURL).origin },
     browserName: 'chromium',
     executablePath: chromiumExecutablePath,
     channel: chromiumExecutablePath ? undefined : process.env.PLAYWRIGHT_CHANNEL || 'chrome',
